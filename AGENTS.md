@@ -44,6 +44,8 @@ Keep work direct, scoped, and concise. Inspect existing code before changing it;
 
 ## Product Language and UI
 
+- Build buyer functions as native Flutter flows. Never redirect buyers to the website or embed web pages as a substitute for native product, Bag, checkout, shop, or messaging screens. Existing HTTP redirects may be followed internally by the backend adapter; their results must be rendered natively.
+
 - Primary accent: `#E00D42`. Use Plus Jakarta Sans as the shared product typeface when implementing the app theme; declare required font assets or dependencies explicitly.
 - No emojis in code, UI copy, comments, commit messages, or repository documentation.
 - Follow buyer-specific designs and existing app components. Do not copy rider-only navigation, radius, or layout rules into the buyer experience without a buyer requirement.
