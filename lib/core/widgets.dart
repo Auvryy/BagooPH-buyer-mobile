@@ -10,36 +10,40 @@ class Brand extends StatelessWidget {
     label: 'BagooPH',
     image: true,
     child: ExcludeSemantics(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Image.asset(
-              'assets/branding/bagoo-mark.png',
-              width: size,
-              height: size,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.asset(
+                'assets/branding/bagoo-mark.png',
+                width: size,
+                height: size,
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          const Text(
-            'Bagoo',
-            style: TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -.8,
+            const SizedBox(width: 10),
+            const Text(
+              'Bagoo',
+              style: TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -.8,
+              ),
             ),
-          ),
-          const Text(
-            'PH',
-            style: TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w900,
-              color: BagooTheme.crimson,
-              letterSpacing: -.8,
+            const Text(
+              'PH',
+              style: TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w900,
+                color: BagooTheme.crimson,
+                letterSpacing: -.8,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
