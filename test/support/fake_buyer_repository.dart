@@ -11,6 +11,7 @@ const buyer = {
 };
 Map<String, dynamic> product(int id) => {
   'id': id,
+  'slug': 'everyday-bag-$id',
   'name': 'Everyday bag $id',
   'price': '1200.00',
   'stock': 4,
@@ -39,7 +40,7 @@ WebPage homePage({
 });
 
 class FakeBuyerRepository extends BuyerRepository {
-  FakeBuyerRepository() : super(WebSession(Uri.parse('http://backend.test')));
+  FakeBuyerRepository() : super(FakeSession());
   bool signedIn = false;
   int loginCalls = 0;
   int registerCalls = 0;
@@ -49,6 +50,80 @@ class FakeBuyerRepository extends BuyerRepository {
   BackendException? loginError;
   final homeRequests = <Map<String, dynamic>>[];
   Future<WebPage> Function(String search, int page)? homeHandler;
+  int productCalls = 0;
+  int bagCalls = 0;
+  int saveCalls = 0;
+  int orderCalls = 0;
+  Map<String, dynamic>? submittedOrder;
+  Future<WebPage> Function(Map<String, dynamic>)? orderHandler;
+  Future<Map<String, dynamic>> Function(Map<String, dynamic>)? quoteHandler;
+  BackendException? productError;
+  WebPage? productResponse;
+  final savedIds = <int>{};
+  @override
+  Future<WebPage> product(String slug) async {
+    productCalls++;
+    if (productError != null) {
+      throw productError!;
+    }
+    return productResponse ?? productPage(signedIn: signedIn);
+  }
+
+  @override
+  Future<bool> saveProduct(int id, bool saved) async {
+    saveCalls++;
+    saved ? savedIds.add(id) : savedIds.remove(id);
+    return saved;
+  }
+
+  @override
+  Future<WebPage> bag() async {
+    bagCalls++;
+    return WebPage('Cart/Index', {
+      'auth': {'user': signedIn ? buyer : null},
+      'items': [],
+    });
+  }
+
+  @override
+  Future<WebPage> addToBag(
+    Map<String, dynamic> product,
+    int quantity, {
+    String? color,
+    String? size,
+    bool buyNow = false,
+    int previousQuantity = 0,
+  }) async {
+    if (buyNow) {
+      return checkoutPage();
+    }
+    final page = productPage(signedIn: signedIn);
+    page.props['cartQuantities'] = [
+      {'color': color, 'size': size, 'quantity': previousQuantity + quantity},
+    ];
+    return page;
+  }
+
+  @override
+  Future<Map<String, dynamic>> quote(Map<String, dynamic> values) async =>
+      quoteHandler != null
+      ? quoteHandler!(values)
+      : {
+          'success': true,
+          'quote': checkoutPage().props['quote'],
+          'availableVouchers': [],
+        };
+  @override
+  Future<WebPage> placeOrder(Map<String, dynamic> values) async {
+    orderCalls++;
+    submittedOrder = values;
+    if (orderHandler != null) return orderHandler!(values);
+    return const WebPage('Buyer/Profile', {
+      'flash': {'success': 'Order #TEST-1 successfully placed.'},
+      'orders': {'data': []},
+    });
+  }
+
   @override
   Future<WebPage> login(String email, String password) async {
     loginCalls++;
@@ -133,5 +208,122 @@ class FakeBuyerRepository extends BuyerRepository {
     String confirmation,
   ) async {
     resetCalls++;
+  }
+}
+
+WebPage productPage({bool signedIn = false, Map<String, dynamic>? override}) =>
+    WebPage('Buyer/ProductDetail', {
+      'auth': {'user': signedIn ? buyer : null},
+      'product': {
+        ...product(1),
+        'sku': 'BAG-001',
+        'compare_at_price': '1500.00',
+        'description': 'Everyday essentials with a durable finish.',
+        'category': {'name': 'Travel and Accessories'},
+        'brand': 'Bagoo',
+        'condition': 'new',
+        'weight_kg': '1.1',
+        'images': [],
+        'reviews': [],
+        'shop': {
+          'id': 2,
+          'user_id': 3,
+          'name': 'Test store',
+          'slug': 'test-store',
+          'city': 'Test city',
+          'status': 'active',
+        },
+        ...?override,
+      },
+      'variations': {'colors': [], 'sizes': []},
+      'cartQuantities': [],
+      'savedProductIds': [],
+      'shopStats': {
+        'rating': 4.5,
+        'products_count': 5,
+        'response_rate': '50%',
+        'joined': '2026-10-01',
+      },
+      'relatedProducts': [],
+      'shopOffers': [],
+    });
+WebPage checkoutPage() => const WebPage('Checkout/Index', {
+  'checkoutToken': 'test-checkout-token',
+  'auth': {'user': buyer},
+  'user': buyer,
+  'items': [
+    {
+      'id': 1,
+      'quantity': 1,
+      'unit_price': '1200.00',
+      'product': {'name': 'Everyday bag 1'},
+    },
+  ],
+  'itemQuantities': {},
+  'quote': {
+    'subtotal': 1200.0,
+    'shipping_fee': 50.0,
+    'doorstep_shipping_fee': 50.0,
+    'discount': 0.0,
+    'shipping_discount': 0.0,
+    'total': 1250.0,
+    'shops': [
+      {'shop_id': 2, 'shop_name': 'Test store', 'total': 1250.0},
+    ],
+    'items': [
+      {
+        'id': 1,
+        'price_segments': [
+          {'quantity': 1, 'unit_price': 1200.0, 'subtotal': 1200.0},
+        ],
+      },
+    ],
+  },
+  'availableVouchers': [],
+  'addresses': [
+    {
+      'id': 1,
+      'recipient_name': 'Test Buyer',
+      'phone': '09171234567',
+      'street': '123 Test Street',
+      'province': 'Laguna',
+      'city': 'San Pablo City',
+      'barangay': 'San Rafael',
+      'postal_code': '4000',
+      'region': '0400000000',
+      'is_default': true,
+    },
+  ],
+  'defaultAddressId': 1,
+  'pickupHubs': [],
+  'walletBalanceCents': 200000,
+});
+
+class FakeSession extends WebSession {
+  FakeSession() : super(Uri.parse('http://backend.test'));
+  @override
+  Future<Map<String, dynamic>> jsonGet(String path) async {
+    if (path.startsWith('/address-locations')) {
+      return {
+        'regions': [
+          {'value': '0400000000', 'label': 'CALABARZON'},
+        ],
+        'provinces': [
+          {'value': 'Laguna', 'label': 'Laguna'},
+        ],
+        'cities': [
+          {'value': 'San Pablo City', 'label': 'San Pablo City'},
+        ],
+        'barangays': [
+          {'value': 'San Rafael', 'label': 'San Rafael'},
+        ],
+        'resolved': {
+          'region': '0400000000',
+          'province': 'Laguna',
+          'city': 'San Pablo City',
+        },
+      };
+    }
+    return {};
   }
 }

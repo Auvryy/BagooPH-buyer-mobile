@@ -36,6 +36,28 @@ class WebSession {
     return target;
   }
 
+  /// Private media uses the same session, and must stay on the buyer origin.
+  Map<String, String> imageHeaders(String path) {
+    final target = resolve(path);
+    final now = DateTime.now();
+    final cookies = _cookies.values.where((stored) {
+      final cookie = stored.cookie;
+      final prefix = cookie.path ?? '/';
+      return (stored.expires == null || stored.expires!.isAfter(now)) &&
+          (!cookie.secure || target.scheme == 'https') &&
+          (target.path == prefix ||
+              target.path.startsWith(
+                prefix.endsWith('/') ? prefix : '$prefix/',
+              ));
+    });
+    return {
+      if (cookies.isNotEmpty)
+        HttpHeaders.cookieHeader: cookies
+            .map((c) => '${c.cookie.name}=${c.cookie.value}')
+            .join('; '),
+    };
+  }
+
   Future<WebPage> page(String path, {bool bootstrap = false}) async {
     final target = resolve(path);
     final response = await _request(
@@ -52,15 +74,22 @@ class WebSession {
   }
 
   Future<Map<String, dynamic>> jsonGet(String path) async {
-    final response = await _request('GET', resolve(path));
+    final response = await _request('GET', resolve(path), acceptJson: true);
     return _json(response.body);
   }
 
   Future<Map<String, dynamic>> jsonPost(
     String path,
-    Map<String, dynamic> values,
-  ) async {
-    final response = await _post(path, values);
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+  }) async {
+    final response = await _post(
+      path,
+      values,
+      method: method,
+      referer: referer,
+    );
     final data = _json(response.body);
     if (data['success'] == false) {
       throw BackendException(
@@ -70,17 +99,32 @@ class WebSession {
     return data;
   }
 
-  Future<WebPage> submit(String path, Map<String, dynamic> values) async {
-    final response = await _post(path, values);
+  Future<WebPage> submit(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+  }) async {
+    final response = await _post(
+      path,
+      values,
+      method: method,
+      referer: referer,
+    );
     return _readPage(response);
   }
 
-  Future<_Reply> _post(String path, Map<String, dynamic> values) async {
+  Future<_Reply> _post(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+  }) async {
     if (_csrf == null &&
         !_cookies.values.any((c) => c.cookie.name == 'XSRF-TOKEN')) {
       await page('/login', bootstrap: true);
     }
-    return _request('POST', resolve(path), values: values);
+    return _request(method, resolve(path), values: values, referer: referer);
   }
 
   Future<_Reply> _request(
@@ -88,6 +132,8 @@ class WebSession {
     Uri uri, {
     Map<String, dynamic>? values,
     bool inertia = false,
+    bool acceptJson = false,
+    String? referer,
     int redirects = 0,
   }) async {
     if (redirects > 5) {
@@ -102,11 +148,17 @@ class WebSession {
       request.followRedirects = false;
       request.headers.set(
         HttpHeaders.acceptHeader,
-        method == 'POST'
+        values != null || acceptJson
             ? 'application/json'
             : 'text/html, application/xhtml+xml',
       );
       request.headers.set('X-Requested-With', 'XMLHttpRequest');
+      if (referer != null) {
+        request.headers.set(
+          HttpHeaders.refererHeader,
+          resolve(referer).toString(),
+        );
+      }
       final now = DateTime.now();
       _cookies.removeWhere(
         (_, c) => c.expires != null && !c.expires!.isAfter(now),
@@ -170,7 +222,8 @@ class WebSession {
         return await _request('GET', target, redirects: redirects + 1);
       }
       final reply = _Reply(response.statusCode, body);
-      if (response.statusCode >= 400 && response.statusCode != 409) {
+      if (response.statusCode >= 400 &&
+          !(response.statusCode == 409 && inertia && method == 'GET')) {
         final data = _json(body, optional: true);
         final fields = <String, String>{};
         final errors = data['errors'];
@@ -252,6 +305,7 @@ class WebSession {
     return WebPage(
       data['component'] as String,
       Map<String, dynamic>.from(data['props'] as Map),
+      url: data['url']?.toString(),
     );
   }
 
@@ -285,7 +339,8 @@ class WebSession {
 }
 
 class WebPage {
-  const WebPage(this.component, this.props);
+  const WebPage(this.component, this.props, {this.url});
+  final String? url;
   final String component;
   final Map<String, dynamic> props;
   Map<String, dynamic>? get user {
