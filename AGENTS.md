@@ -5,7 +5,8 @@ Keep work direct, scoped, and concise. Inspect existing code before changing it;
 ## Safety and Git
 
 - Work only inside this repository unless the user authorizes work elsewhere. The related backend/web repository is `../bagoo`; inspect it as needed to verify shared contracts, but do not change it without authorization.
-- Local `git add` and `git commit` are allowed. Never run `git push`; only the user publishes commits.
+- Never implement changes or create commits on `main`. If starting on `main`, or the previous working branch has already been pushed, first switch to `main` and run `git pull origin main` to get the latest GitHub changes. Then create a new descriptive working branch before editing. Preserve local changes and stop dependent work if the pull fails or conflicts; never reset or discard work to force synchronization.
+- Continue related work on its unpushed working branch. Keep commits local until the user explicitly says to push. Local `git add` and `git commit` are allowed; `git push` requires the user's explicit instruction. After publishing a branch, start the next task from freshly pulled `main` on a new branch.
 - For coding tasks, split work into small logical commits by feature or concern instead of one large commit. Keep each commit coherent; avoid mixing unrelated UI, API, configuration, and cleanup work. A small documentation-only task may use one commit.
 - Give every commit a clear subject and a concise description in the message body. Explain the concrete problem, what changes for the user, and why the change matters in plain language. Include relevant verification and remaining limitations; never invent checks or rely on filenames alone to explain the work.
 - Prepare a readable pull request title and description for the final branch handoff, covering the combined outcome and validation. Individual commit descriptions explain their own logical changes; the branch description must reflect the final scope.
