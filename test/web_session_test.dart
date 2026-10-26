@@ -248,4 +248,54 @@ void main() {
       );
     },
   );
+  test('missing confirmation cannot report email delivery, validation, or reset success', () async {
+    server.listen((request) async {
+      request.response.write(
+        request.method == 'GET' ? markup('Auth/Login') : '{}',
+      );
+      await request.response.close();
+    });
+    await expectLater(
+      repository.sendCode('buyer@example.test', 'registration'),
+      throwsA(isA<BackendException>()),
+    );
+    await expectLater(
+      repository.validateRegistration({}),
+      throwsA(isA<BackendException>()),
+    );
+    await expectLater(
+      repository.resetPassword(
+        'buyer@example.test',
+        'token',
+        'Password!123',
+        'Password!123',
+      ),
+      throwsA(isA<BackendException>()),
+    );
+  });
+
+  test(
+    'a bare login redirect cannot report successful account creation',
+    () async {
+      server.listen((request) async {
+        if (request.method == 'POST') {
+          request.response.statusCode = 302;
+          request.response.headers.set('Location', '/login');
+        } else {
+          request.response.write(markup('Auth/Login'));
+        }
+        await request.response.close();
+      });
+      await expectLater(
+        repository.register({}, 'test-token'),
+        throwsA(
+          isA<BackendException>().having(
+            (e) => e.message,
+            'creation feedback',
+            contains('could not confirm account creation'),
+          ),
+        ),
+      );
+    },
+  );
 }

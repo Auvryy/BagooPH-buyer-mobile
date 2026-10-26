@@ -21,7 +21,13 @@ class BuyerRepository {
   }
 
   Future<void> logout() async {
-    await session.submit('/logout', {});
+    final page = await session.submit('/logout', {});
+    requireNoErrors(page);
+    if (page.user != null) {
+      throw const BackendException(
+        'We could not confirm logout. Please try again.',
+      );
+    }
     session.clear();
   }
 
@@ -30,11 +36,12 @@ class BuyerRepository {
     Map<String, dynamic> values, {
     int? step,
   }) async {
-    await session.jsonPost('/register/validate', {
+    final data = await session.jsonPost('/register/validate', {
       ...values,
       'role': 'buyer',
       'step': ?step,
     });
+    _requireConfirmation(data, 'valid');
   }
 
   Future<WebPage> register(Map<String, dynamic> values, String token) async {
@@ -44,6 +51,12 @@ class BuyerRepository {
       'otp_token': token,
     });
     requireNoErrors(page);
+    final status = page.props['status'];
+    if (page.user == null && (status is! String || status.isEmpty)) {
+      throw const BackendException(
+        'We could not confirm account creation. Try logging in before submitting again.',
+      );
+    }
     return page;
   }
 
@@ -51,11 +64,16 @@ class BuyerRepository {
     String email,
     String purpose, {
     bool resend = false,
-  }) => session.jsonPost(resend ? '/otp/resend' : '/otp/send', {
-    'email': email.trim().toLowerCase(),
-    'purpose': purpose,
-    'role': 'buyer',
-  });
+  }) async {
+    final data = await session.jsonPost(resend ? '/otp/resend' : '/otp/send', {
+      'email': email.trim().toLowerCase(),
+      'purpose': purpose,
+      'role': 'buyer',
+    });
+    _requireConfirmation(data, 'success');
+    return data;
+  }
+
   Future<String> verifyCode(String email, String purpose, String code) async {
     final data = await session.jsonPost('/otp/verify', {
       'email': email.trim().toLowerCase(),
@@ -64,7 +82,7 @@ class BuyerRepository {
       'role': 'buyer',
     });
     final token = data['token'];
-    if (token is! String || token.isEmpty) {
+    if (data['success'] != true || token is! String || token.isEmpty) {
       throw const BackendException(
         'Verification did not finish. Please request a new code.',
       );
@@ -78,13 +96,22 @@ class BuyerRepository {
     String password,
     String confirmation,
   ) async {
-    await session.jsonPost('/password/reset-otp', {
+    final data = await session.jsonPost('/password/reset-otp', {
       'email': email.trim().toLowerCase(),
       'role': 'buyer',
       'token': token,
       'password': password,
       'password_confirmation': confirmation,
     });
+    _requireConfirmation(data, 'success');
+  }
+
+  void _requireConfirmation(Map<String, dynamic> data, String field) {
+    if (data[field] != true) {
+      throw const BackendException(
+        'BagooPH did not confirm this request. Please try again.',
+      );
+    }
   }
 
   Future<WebPage> home({
