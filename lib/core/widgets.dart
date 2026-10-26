@@ -116,9 +116,15 @@ class SubmitButton extends StatelessWidget {
 }
 
 class RemoteImage extends StatelessWidget {
-  const RemoteImage({super.key, required this.uri, this.fit = BoxFit.cover});
+  const RemoteImage({
+    super.key,
+    required this.uri,
+    this.fit = BoxFit.cover,
+    this.headers,
+  });
   final Uri? uri;
   final BoxFit fit;
+  final Map<String, String>? headers;
   @override
   Widget build(BuildContext context) {
     const fallback = ColoredBox(
@@ -135,6 +141,7 @@ class RemoteImage extends StatelessWidget {
         ? fallback
         : Image.network(
             uri.toString(),
+            headers: headers,
             fit: fit,
             errorBuilder: (_, _, _) => fallback,
             loadingBuilder: (_, child, progress) => progress == null
