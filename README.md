@@ -1,6 +1,6 @@
 # BagooPH Buyer Mobile
 
-Native Flutter buyer authentication and marketplace home, using the existing BagooPH Laravel backend. Android and iOS targets are included.
+Native Flutter buyer authentication and marketplace home, using the existing BagooPH Laravel backend. Android and iOS targets are included, with a Linux desktop runner for local preview.
 
 ## Included
 
@@ -36,6 +36,22 @@ flutter run -d <DEVICE_ID> --dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'
 
 Use the buyer origin with no path, query, credentials, or `/api` suffix. Backend cookie domain and secure-cookie settings must match that origin. iOS development should use a trusted HTTPS origin. Release builds require an explicitly configured HTTPS origin; the app shows a configuration error if it is missing or invalid.
 
+## Run on Linux
+
+Keep the Bagoo backend running on this computer at `http://localhost:8000`, then run:
+
+```sh
+flutter run -d linux
+```
+
+The Linux preview opens in a resizable 430 × 860 window. Widen it to inspect the tablet layout. Linux uses the same native authentication and catalogue code as the mobile targets. To select a different backend:
+
+```sh
+flutter run -d linux --dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'
+```
+
+Linux builds require Clang, CMake, Ninja, pkg-config, and GTK 3 development libraries. Build without opening a window with `flutter build linux --debug`.
+
 ## Backend integration
 
 The current backend has native rider endpoints, while buyer auth/home are Laravel web-session and Inertia routes. This app uses those existing buyer contracts without backend changes:
@@ -51,7 +67,7 @@ The current backend has native rider endpoints, while buyer auth/home are Larave
 
 The adapter bootstraps CSRF and session cookies from the web page, reads Inertia props, refreshes the asset version after deployments, handles JSON validation errors, and follows redirects only within the configured origin. It never replays a failed mutation automatically. No credentials, cookies, or tokens are logged or written to disk. Sessions last only while the app process remains alive; reopening the app requires login.
 
-This is a native Android/iOS client; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
+This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
 
 ## Verification
 

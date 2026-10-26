@@ -53,3 +53,9 @@ Before this work, the app showed only a placeholder label. It now provides nativ
 - The backend controls adult eligibility, policies, OTP delivery, account access, prices, and catalogue results. Restricted sign-in responses remain on the account status view.
 - Optional delivery addresses and identity-document submission, Google OAuth, Shopping Bag, checkout, and full order/account management remain in the web buyer portal.
 - A separate PR title/body is saved locally in `.git/PR_BUYER_AUTH_HOME.md`; no GitHub PR or push is part of this handoff.
+
+## Linux local preview
+
+A native Linux runner is included so local development can use `flutter run -d linux`. It uses the existing Dart app and defaults to `http://localhost:8000` in debug mode. The initial window is 430 × 860 and remains resizable for larger layouts. The platform addition and build workflow are documented in the README.
+
+Verification: `flutter build linux --debug` passed, and the read-only backend contract probe still passed. No backend source changes or authentication behavior changes were required. The Linux desktop window was not launched during the build check.

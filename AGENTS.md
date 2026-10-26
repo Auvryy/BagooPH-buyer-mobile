@@ -23,7 +23,7 @@ Keep work direct, scoped, and concise. Inspect existing code before changing it;
 
 ## Stack and Architecture
 
-- This is a Flutter application written in Dart, targeting Android and iOS. Use `pubspec.yaml` and `pubspec.lock` as the authority for SDK constraints and dependencies; inspect platform build files for native requirements.
+- This is a Flutter application written in Dart, targeting Android and iOS, with a Linux desktop runner for local preview. Use `pubspec.yaml` and `pubspec.lock` as the authority for SDK constraints and dependencies; inspect platform build files for native requirements.
 - Reuse existing widgets, themes, patterns, and dependencies. Do not add a state-management framework, networking library, or external or paid service without a concrete requirement and an explanation of the choice.
 - Keep widgets focused on presentation and interaction. Keep networking, persistence, and domain logic outside widget build methods; follow the repository's established structure as it develops.
 - Verify backend routes, authentication, request/response fields, pagination, and error formats against actual contracts before implementing integrations. If a contract is missing, identify the gap rather than inventing a working endpoint.
