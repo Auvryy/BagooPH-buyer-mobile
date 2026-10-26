@@ -1,6 +1,6 @@
 # BagooPH Buyer Mobile
 
-Native Flutter buyer authentication and marketplace home, using the existing BagooPH Laravel backend. Android and iOS targets are included, with a Linux desktop runner for local preview.
+Native Flutter buyer shopping and authentication, using the existing BagooPH Laravel backend. Android and iOS targets are included, with a Linux desktop runner for local preview.
 
 ## Included
 
@@ -8,10 +8,17 @@ Native Flutter buyer authentication and marketplace home, using the existing Bag
 - Two-step registration, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
 - Password recovery with email-code verification and a new password.
 - Guest browsing and signed-in home with real products, departments, campaigns when configured, search, sorting, pagination, refresh, empty states, and retry.
-- Product summary sheets and account status. Pending buyers can browse; approval and checkout permissions remain server-owned.
+- Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
+- Full native product pages with gallery/zoom, options, variant prices and stock limits, Add to Bag, Buy Now, shop information, offers, specifications, descriptions, verified reviews/photos, and seller replies.
+- Native shop search/pagination/following and product chat with a text composer and private photo viewing.
+- Native Shopping Bag selection, quantity changes, removal, and approved-buyer checkout with saved/new canonical Philippine addresses, delivery options, vouchers, COD or wallet, and explicit order review.
+- Server-confirmed order results, recent orders/pagination, and wallet payment review, confirmation, cancellation, and status refresh.
+- Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Delivery addresses, identity-document submission, full product/variant purchasing, Shopping Bag, checkout, order management, and Google OAuth remain in the buyer web app. Registration may omit the optional address and document fields. This app never creates a local account or accepts a locally generated verification code.
+Shopping stays in Flutter: no browser or WebView handoff. Identity-document submission, Google OAuth, chat photo uploads, full address-book editing, and order tracking/cancellation/receipt-confirmation actions are not implemented in this pass. Registration may omit optional address and document fields. The app never creates a local account or accepts a locally generated verification code.
+
+The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
 ## Requirements
 
@@ -54,7 +61,7 @@ Linux builds require Clang, CMake, Ninja, pkg-config, and GTK 3 development libr
 
 ## Backend integration
 
-The current backend has native rider endpoints, while buyer auth/home are Laravel web-session and Inertia routes. This app uses those existing buyer contracts without backend changes:
+Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page data. This app renders the existing contracts natively without backend changes:
 
 | Purpose | Existing routes |
 | --- | --- |
@@ -63,9 +70,18 @@ The current backend has native rider endpoints, while buyer auth/home are Larave
 | Send / resend / verify email codes | `POST /otp/send`, `POST /otp/resend`, `POST /otp/verify` |
 | Set recovered password | `POST /password/reset-otp` |
 | Marketplace | `GET /` with search, category, sort, and page parameters |
+| Full product / saved products | `GET /buyer/product/{slug}`, `POST/DELETE /buyer/saved-products/{id}` |
+| Shop / following / sale reminders | `GET /shop/{slug}`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
+| Product conversation | `GET /chat/messages/{receiver}`, `POST /chat/send`, private `GET /chat/attachments/{message}` |
+| Shopping Bag | `GET/POST /cart`, `PATCH/DELETE /cart/{item}` |
+| Checkout / quotes / locations | `GET/POST /checkout`, `POST /buyer/vouchers/apply`, `GET /address-locations` |
+| Saved vouchers | `POST /buyer/saved-vouchers/{revision}`, `DELETE /buyer/saved-vouchers/{saved}` |
+| Orders / wallet | `GET /buyer/orders`, `GET /wallet/payments/{id}`, `POST /wallet/payments/{id}/pay` or `/cancel` |
 | Account policies | Versioned URLs supplied by `GET /register` |
 
 The adapter bootstraps CSRF and session cookies from the web page, reads Inertia props, refreshes the asset version after deployments, handles JSON validation errors, and follows redirects only within the configured origin. It never replays a failed mutation automatically. No credentials, cookies, or tokens are logged or written to disk. Sessions last only while the app process remains alive; reopening the app requires login.
+
+Checkout fetches server quotes and ignores stale responses. Order placement requires a separate review and confirmation. An uncertain response retains the exact payload and server submission token for an explicit retry; buyers can check recorded orders first. The server revalidates prices, stock, account eligibility, delivery, and vouchers. Wallet payment is a separate confirmed action using the server request token.
 
 This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
 
@@ -76,6 +92,7 @@ dart format --output=none --set-exit-if-changed lib test tool
 flutter analyze
 flutter test
 flutter build apk --debug
+flutter build linux --debug
 ```
 
 Run the optional read-only backend contract check against your running buyer origin:
@@ -84,6 +101,6 @@ Run the optional read-only backend contract check against your running buyer ori
 dart run tool/check_backend.dart '<BACKEND_ORIGIN>'
 ```
 
-The check reads home, registration requirements, policies, and filtered catalogue data. It never signs in, registers users, sends emails, or resets passwords. Automated auth/session tests use isolated fake responses and a temporary local HTTP server. Widget tests cover auth transitions, guest search, pagination state, phone/tablet layouts, landscape, and enlarged text. No live email or account mutations are performed by these checks.
+The check needs at least one published product and reads home, registration requirements, policies, filtered catalogue, full product details, shop catalogue, guest Bag, and checkout location choices. It never signs in, registers users, sends emails, places orders, or accesses private conversations. Automated tests use isolated fixtures and a temporary local HTTP server. They cover auth/session boundaries, shopping confirmations, option pricing and stock, explicit checkout review, stale quotes, exact retry payloads, and phone/tablet/large-text layouts. No live order, payment, email, or chat mutations are performed by these checks.
 
-For iOS on macOS, run `flutter build ios --no-codesign`. Review [the implementation plan](docs/plans/buyer-auth-home.md) for scope and verification evidence.
+For iOS on macOS, run `flutter build ios --no-codesign`. Review the [authentication plan](docs/plans/buyer-auth-home.md) and [native product journey plan](docs/plans/buyer-products.md) for scope and verification evidence.
