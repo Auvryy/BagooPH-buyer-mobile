@@ -7,6 +7,9 @@ import '../../core/widgets.dart';
 import 'campaigns.dart';
 import 'home_controller.dart';
 import 'product_card.dart';
+import '../products/product_page.dart';
+import '../checkout/bag_page.dart';
+import '../checkout/order_result_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -15,11 +18,15 @@ class HomePage extends StatefulWidget {
     required this.onLogin,
     required this.onLogout,
     this.initial,
+    this.initialProductSlug,
+    this.onProductRestored,
   });
   final BuyerRepository repository;
   final VoidCallback onLogin;
   final Future<void> Function() onLogout;
   final WebPage? initial;
+  final String? initialProductSlug;
+  final VoidCallback? onProductRestored;
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -30,10 +37,49 @@ class _HomePageState extends State<HomePage> {
   int _tab = 0;
   bool _signingOut = false;
   String? _logoutError;
+  bool _openingOrders = false;
+
+  Future<void> _orders() async {
+    setState(() => _openingOrders = true);
+    try {
+      final page = await widget.repository.document('/buyer/orders');
+      widget.repository.requireNoErrors(page);
+      if (page.props['orders'] is! Map) {
+        throw const BackendException(
+          'Your orders are unavailable for this account.',
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              OrderResultPage(repository: widget.repository, initial: page),
+        ),
+      );
+    } on BackendException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _openingOrders = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _home = HomeController(widget.repository, initial: widget.initial);
+    if (widget.initialProductSlug != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onProductRestored?.call();
+          _openProduct({'slug': widget.initialProductSlug});
+        }
+      });
+    }
     if (widget.initial != null && widget.initial!.component != 'Buyer/Home') {
       _tab = 2;
     } else {
@@ -86,6 +132,20 @@ class _HomePageState extends State<HomePage> {
           child: Brand(size: 32),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Shopping Bag',
+            icon: const Icon(Icons.shopping_bag_outlined),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BagPage(repository: widget.repository),
+                ),
+              );
+              if (mounted) {
+                _home.load();
+              }
+            },
+          ),
           if (_home.user == null)
             Padding(
               padding: const EdgeInsets.only(right: 12),
@@ -154,10 +214,8 @@ class _HomePageState extends State<HomePage> {
     child: LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 700;
-        final scaled = MediaQuery.textScalerOf(context).scale(16) / 16;
-        final count = (constraints.maxWidth / (scaled > 1.4 ? 280 : 185))
-            .floor()
-            .clamp(1, 5);
+        final scaled = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final count = productColumns(constraints.maxWidth, scaled);
         final horizontal = wide ? 32.0 : 16.0;
         return CustomScrollView(
           key: const PageStorageKey('marketplace'),
@@ -207,7 +265,7 @@ class _HomePageState extends State<HomePage> {
                         mapOf(
                               _home.data!.props['status'],
                             )['message']?.toString() ??
-                            'Your account needs attention. Review its status on the BagooPH website.',
+                            'Your account needs attention. Open Account to review its recorded status.',
                         error: true,
                       ),
                       TextButton(
@@ -408,37 +466,26 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             if (!_home.loading && _home.error == null && _home.isMarketplace)
-              // Rows size themselves to their content, including large system text.
-              // SliverList lazily builds only visible rows of the responsive grid.
               SliverPadding(
                 padding: EdgeInsets.symmetric(horizontal: horizontal),
-                sliver: SliverList.builder(
-                  itemCount: (_home.products.length / count).ceil(),
-                  itemBuilder: (context, row) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (int column = 0; column < count; column++) ...[
-                          if (column > 0) const SizedBox(width: 12),
-                          Expanded(
-                            child: row * count + column < _home.products.length
-                                ? ProductCard(
-                                    product:
-                                        _home.products[row * count + column],
-                                    session: widget.repository.session,
-                                    onTap: () => showProduct(
-                                      context,
-                                      _home.products[row * count + column],
-                                      widget.repository.session,
-                                    ),
-                                  )
-                                : const SizedBox.shrink(),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    final cardWidth =
+                        (constraints.crossAxisExtent - (count - 1) * 14) /
+                        count;
+                    return SliverGrid.builder(
+                      itemCount: _home.products.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: count,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        mainAxisExtent:
+                            cardWidth + productCardBodyHeight * scaled,
+                      ),
+                      itemBuilder: (context, index) =>
+                          _card(_home.products[index]),
+                    );
+                  },
                 ),
               ),
             SliverPadding(
@@ -479,6 +526,89 @@ class _HomePageState extends State<HomePage> {
       },
     ),
   );
+
+  final _saving = <int>{};
+  final _saveErrors = <int, String>{};
+  bool get _canSave =>
+      _home.user?['role'] == 'buyer' &&
+      _home.user?['status'] == 'active' &&
+      ['approved', 'verified'].contains(_home.user?['kyc_status']);
+  Widget _card(Map<String, dynamic> product) {
+    final id = (product['id'] as num).toInt();
+    final saved = (_home.data?.props['savedProductIds'] as List? ?? [])
+        .contains(id);
+    return ProductCard(
+      product: product,
+      session: widget.repository.session,
+      onTap: () => _openProduct(product),
+      saved: saved,
+      saving: _saving.contains(id),
+      error: _saveErrors[id],
+      saveLabel: _home.user == null
+          ? 'Sign in to save'
+          : !_canSave
+          ? 'Approval required'
+          : saved
+          ? 'Remove from saved'
+          : 'Save product',
+      onSave: _home.user == null
+          ? widget.onLogin
+          : !_canSave
+          ? null
+          : () async {
+              setState(() {
+                _saving.add(id);
+                _saveErrors.remove(id);
+              });
+              try {
+                await widget.repository.saveProduct(id, !saved);
+                if (!mounted) {
+                  return;
+                }
+                final ids = Set<dynamic>.from(
+                  _home.data?.props['savedProductIds'] as List? ?? [],
+                );
+                if (saved) {
+                  ids.remove(id);
+                } else {
+                  ids.add(id);
+                }
+                setState(
+                  () => _home.data?.props['savedProductIds'] = ids.toList(),
+                );
+              } on BackendException catch (e) {
+                if (mounted) {
+                  setState(() => _saveErrors[id] = e.message);
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(e.message)));
+                }
+              } finally {
+                if (mounted) {
+                  setState(() => _saving.remove(id));
+                }
+              }
+            },
+    );
+  }
+
+  Future<void> _openProduct(Map<String, dynamic> product) async {
+    final result = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ProductPage(
+          repository: widget.repository,
+          slug: product['slug']?.toString() ?? product['id'].toString(),
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (result == true) {
+      widget.onLogin();
+    } else {
+      await _home.load();
+    }
+  }
 
   Widget _categoryChip(String slug, String title, IconData icon) => Padding(
     padding: const EdgeInsets.only(right: 8),
@@ -569,18 +699,23 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 24),
         if (_home.data != null && !_home.isMarketplace) ...[
           Notice(
-            mapOf(_home.data!.props['status'])['message']?.toString() ??
-                'Review your account status on the BagooPH website.',
+            mapOf(_home.data!.props['status'])['message']?.toString() ?? 'Your account needs attention. Review the recorded status below.',
             error: true,
           ),
           const SizedBox(height: 16),
         ],
         const Text(
-          'Manage delivery addresses, identity verification, purchases, and account settings on the BagooPH website.',
+          'Your buyer account status and identity review are managed by BagooPH. Checkout requires an active approved account.',
           style: TextStyle(height: 1.7, color: BagooTheme.muted),
         ),
         const SizedBox(height: 24),
         if (_logoutError != null) Notice(_logoutError!, error: true),
+        OutlinedButton.icon(
+          onPressed: _openingOrders ? null : _orders,
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: Text(_openingOrders ? 'Loading orders…' : 'Your orders'),
+        ),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _signingOut ? null : _logout,
           icon: const Icon(Icons.logout_rounded),

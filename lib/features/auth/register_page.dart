@@ -388,7 +388,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     autofill: const [AutofillHints.telephoneNumber],
                   ),
                   const Text(
-                    'You can add your delivery address and submit identity documents from your buyer account on the web.',
+                    'Delivery details are collected at checkout. Identity approval is required before purchasing.',
                     style: TextStyle(
                       fontSize: 13,
                       color: BagooTheme.muted,

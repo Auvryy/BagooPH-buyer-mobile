@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'app/theme.dart';
 import 'core/buyer_repository.dart';
+import 'core/buyer_actions.dart';
 import 'core/web_session.dart';
 import 'core/widgets.dart';
 import 'features/auth/login_page.dart';
@@ -26,6 +27,8 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> {
+  final _navigator = GlobalKey<NavigatorState>();
+  String? _pendingProduct;
   BuyerRepository? _repository;
   String? _configurationError;
   _Screen _screen = _Screen.login;
@@ -97,6 +100,15 @@ class _MainAppState extends State<MainApp> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'BagooPH Buyer',
+    navigatorKey: _navigator,
+    builder: (context, child) => BuyerActions(
+      signIn: (slug) {
+        _pendingProduct = slug;
+        _navigator.currentState?.popUntil((route) => route.isFirst);
+        _go(_Screen.login);
+      },
+      child: child ?? const SizedBox.shrink(),
+    ),
     debugShowCheckedModeBanner: false,
     theme: BagooTheme.light,
     themeMode: ThemeMode.light,
@@ -165,6 +177,8 @@ class _MainAppState extends State<MainApp> {
               _Screen.home => HomePage(
                 repository: _repository!,
                 initial: _initial,
+                initialProductSlug: _pendingProduct,
+                onProductRestored: () => _pendingProduct = null,
                 onLogin: () => _go(_Screen.login),
                 onLogout: _logout,
               ),
