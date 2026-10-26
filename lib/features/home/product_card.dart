@@ -3,33 +3,10 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../products/product_model.dart';
+export '../products/product_model.dart' show amount, pesos, productPrice;
 
-double? amount(dynamic value) =>
-    value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
-String pesos(dynamic value) {
-  final number = amount(value);
-  if (number == null) {
-    return 'Price unavailable';
-  }
-  final pieces = number.toStringAsFixed(2).split('.');
-  final grouped = pieces.first.replaceAllMapped(
-    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-    (m) => '${m[1]},',
-  );
-  return '₱$grouped.${pieces[1]}';
-}
-
-String productPrice(Map<String, dynamic> product) {
-  final range = mapOf(product['price_range']);
-  final minimum =
-      amount(range['min']) ??
-      amount(mapOf(product['sale_offer'])['effective_price']) ??
-      amount(product['price']);
-  final maximum = amount(range['max']);
-  return maximum != null && minimum != null && maximum > minimum
-      ? '${pesos(minimum)} – ${pesos(maximum)}'
-      : pesos(minimum);
-}
+const productCardBodyHeight = 244.0;
 
 Uri? imageUri(WebSession session, dynamic source) {
   if (source is! String || source.isEmpty) {
@@ -45,25 +22,39 @@ Uri? imageUri(WebSession session, dynamic source) {
   }
 }
 
+/// Matches the web card hierarchy with fixed slots so rows remain aligned.
 class ProductCard extends StatelessWidget {
   const ProductCard({
     super.key,
     required this.product,
     required this.session,
     required this.onTap,
+    this.onSave,
+    this.saved = false,
+    this.saving = false,
+    this.saveLabel = 'Sign in to save',
+    this.bodyExtent,
+    this.error,
   });
   final Map<String, dynamic> product;
   final WebSession session;
   final VoidCallback onTap;
+  final VoidCallback? onSave;
+  final bool saved;
+  final bool saving;
+  final String saveLabel;
+  final double? bodyExtent;
+  final String? error;
   @override
   Widget build(BuildContext context) {
-    final rating = amount(product['rating']);
-    final count = (product['sales_count'] as num?)?.toInt() ?? 0;
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final pricing = ProductPrice(product);
+    final out = (amount(product['stock']) ?? 0) <= 0;
     final shop = mapOf(product['shop']);
     return Material(
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         side: const BorderSide(color: BagooTheme.border),
       ),
       clipBehavior: Clip.antiAlias,
@@ -72,115 +63,264 @@ class ProductCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ExcludeSemantics(
-                    child: RemoteImage(
-                      uri: imageUri(session, product['featured_image']),
+            InkWell(
+              onTap: onTap,
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Opacity(
+                      opacity: out ? .7 : 1,
+                      child: ExcludeSemantics(
+                        child: RemoteImage(
+                          uri: imageUri(session, product['featured_image']),
+                        ),
+                      ),
                     ),
-                  ),
-                  if ((amount(product['stock']) ?? 0) <= 0)
-                    Align(
-                      alignment: Alignment.topLeft,
-                      child: Container(
-                        margin: const EdgeInsets.all(8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 5,
+                    if (shop['vacation_mode'] == true)
+                      Align(
+                        alignment: Alignment.topLeft,
+                        child: _Badge(
+                          'On vacation',
+                          color: const Color(0xFFFFF4DF),
+                          textColor: const Color(0xFF92400E),
                         ),
-                        decoration: BoxDecoration(
-                          color: BagooTheme.ink,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
+                      ),
+                    if (out)
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: _Badge(
                           'Out of stock',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
+                          color: BagooTheme.ink,
+                          textColor: Colors.white,
+                        ),
+                      ),
+                    Align(
+                      alignment: Alignment.bottomLeft,
+                      child: Wrap(
+                        children: [
+                          Semantics(
+                            label: 'Cash on Delivery',
+                            child: ExcludeSemantics(
+                              child: ClipPath(
+                                clipper: const _Ribbon(),
+                                child: Container(
+                                  color: BagooTheme.crimson,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    8,
+                                    5,
+                                    14,
+                                    5,
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.local_shipping_outlined,
+                                        size: 12,
+                                        color: Colors.white,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'COD',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (pricing.discount != null)
+                            ClipPath(
+                              clipper: const _Ribbon(),
+                              child: Container(
+                                color: const Color(0xFFFBBF24),
+                                padding: const EdgeInsets.fromLTRB(8, 5, 14, 5),
+                                child: Text(
+                                  '-${pricing.discount}%',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    color: BagooTheme.ink,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(
+              height: bodyExtent ?? productCardBodyHeight * scale,
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    InkWell(
+                      onTap: onTap,
+                      child: SizedBox(
+                        height: 34 * scale,
+                        child: Text(
+                          product['name']?.toString() ?? 'Product',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            height: 1.25,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
                     ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product['name']?.toString() ?? 'Product',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    productPrice(product),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: BagooTheme.strong,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Divider(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 42 * scale,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 2,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const ExcludeSemantics(
-                            child: Icon(
-                              Icons.star_rounded,
-                              size: 16,
-                              color: Color(0xFF92400E),
+                          Text(
+                            pricing.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              height: 1.2,
+                              fontWeight: FontWeight.w900,
+                              color: BagooTheme.crimson,
                             ),
                           ),
-                          const SizedBox(width: 3),
-                          Text(
-                            rating == null
-                                ? 'No reviews'
-                                : rating.toStringAsFixed(1),
+                          if (pricing.discount != null)
+                            Text(
+                              pesos(pricing.comparison),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: BagooTheme.muted,
+                                decoration: TextDecoration.lineThrough,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 12, color: Color(0xFFE2E8F0)),
+                    SizedBox(
+                      height: 30 * scale,
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: Icon(
+                                recordedRating(product['rating']) == null
+                                    ? Icons.star_border_rounded
+                                    : Icons.star_rounded,
+                                size: 14,
+                                color: const Color(0xFFB45309),
+                              ),
+                            ),
+                            TextSpan(
+                              text:
+                                  ' ${ratingLabel(product['rating'])}  ·  ${product['sales_count'] ?? 0} sold',
+                            ),
+                          ],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          height: 1.3,
+                          color: BagooTheme.muted,
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        const ExcludeSemantics(
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            size: 13,
+                            color: BagooTheme.muted,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            (shop['city']?.toString().trim().isNotEmpty ??
+                                    false)
+                                ? shop['city'].toString()
+                                : 'Location unavailable',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 11,
+                              height: 1.3,
                               color: BagooTheme.muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    if (error != null)
+                      Text(
+                        error!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFFBE123C),
+                        ),
+                      ),
+                    OutlinedButton(
+                      onPressed: saving ? null : onSave,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 8,
+                        ),
+                        foregroundColor: BagooTheme.strong,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ExcludeSemantics(
+                            child: Icon(
+                              saving
+                                  ? Icons.hourglass_top
+                                  : saved
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              saving ? 'Saving…' : saveLabel,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                      Text(
-                        '$count sold',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: BagooTheme.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    shop['city']?.toString() ?? 'Location not provided',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: BagooTheme.muted,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -190,79 +330,50 @@ class ProductCard extends StatelessWidget {
   }
 }
 
-Future<void> showProduct(
-  BuildContext context,
-  Map<String, dynamic> product,
-  WebSession session,
-) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  showDragHandle: true,
-  useSafeArea: true,
-  backgroundColor: Colors.white,
-  builder: (context) => DraggableScrollableSheet(
-    expand: false,
-    initialChildSize: .8,
-    maxChildSize: .95,
-    minChildSize: .4,
-    builder: (context, controller) => ListView(
-      controller: controller,
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: IconButton(
-            tooltip: 'Close product',
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close),
-          ),
-        ),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 300),
-          child: AspectRatio(
-            aspectRatio: 1.3,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: RemoteImage(
-                uri: imageUri(session, product['featured_image']),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          product['name']?.toString() ?? 'Product',
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          productPrice(product),
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: BagooTheme.strong,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          mapOf(product['shop'])['name']?.toString() ?? 'Shop not provided',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          mapOf(product['shop'])['city']?.toString() ?? 'Location not provided',
-        ),
-        const SizedBox(height: 20),
-        Text(
-          product['description']?.toString() ?? 'No description provided.',
-          style: const TextStyle(height: 1.7),
-        ),
-        const SizedBox(height: 24),
-        const Text(
-          'Shopping Bag and checkout are available on the BagooPH website.',
-          style: TextStyle(fontSize: 13, color: BagooTheme.muted, height: 1.6),
-        ),
-      ],
+class _Badge extends StatelessWidget {
+  const _Badge(this.label, {required this.color, required this.textColor});
+  final String label;
+  final Color color;
+  final Color textColor;
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.all(6),
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(4),
     ),
-  ),
-);
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.w700,
+        color: textColor,
+      ),
+    ),
+  );
+}
+
+class _Ribbon extends CustomClipper<Path> {
+  const _Ribbon();
+  @override
+  Path getClip(Size size) => Path()
+    ..moveTo(0, 0)
+    ..lineTo(size.width, 0)
+    ..lineTo(size.width - 6, size.height / 2)
+    ..lineTo(size.width, size.height)
+    ..lineTo(0, size.height)
+    ..close();
+  @override
+  bool shouldReclip(_Ribbon oldClipper) => false;
+}
+
+int productColumns(double width, double scale) => scale > 1.4
+    ? (width / 280).floor().clamp(1, 4)
+    : width >= 1024
+    ? 6
+    : width >= 768
+    ? 4
+    : width >= 640
+    ? 3
+    : 2;
