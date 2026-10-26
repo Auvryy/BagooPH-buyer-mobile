@@ -162,7 +162,7 @@ class WebSession {
       final location =
           response.headers.value('x-inertia-location') ??
           response.headers.value(HttpHeaders.locationHeader);
-      if ((response.isRedirect || response.statusCode == 409) &&
+      if (([301, 302, 303, 307, 308, 409].contains(response.statusCode)) &&
           location != null &&
           !(response.statusCode == 409 && inertia && method == 'GET')) {
         final target = resolve(uri.resolve(location).toString());
