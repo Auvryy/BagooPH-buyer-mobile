@@ -18,13 +18,15 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
 - Native paginated Saved Products and Followed Shops collections, with confirmed remove/unfollow actions and native product/shop pages.
 - A native Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
+- Native Help & Support using the existing Bagoo assistant and Customer Care chat, with editable suggested questions, retained drafts and explicit retry, server validation feedback, and keyboard/large-text layouts.
+- Native public parcel tracking from Home or Profile, available to guests and buyers: tracking-number lookup, masked recipient details, server-labeled milestones, Philippine times, refresh/retry, and copy-number feedback.
 - Delivery address-book editing, demo wallet credit requests/history, and available/saved/used/expired vouchers with native Bag use.
 - Paginated purchases, order tracking, cancellation, buyer receipt confirmation, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
 - Native store/courier inbox and return/refund cases, evidence, permitted buyer actions, and authenticated image/PDF viewing.
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Shopping and profile actions stay in Flutter with no browser or WebView handoff. Google OAuth remains outside this pass. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
+Shopping, support, and profile actions stay in Flutter with no browser or WebView handoff. Native Google sign-in and device push are deferred until the website maintainer supplies verified mobile contracts; this app does not call unsupported endpoints or display controls for those unfinished flows. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
@@ -85,6 +87,8 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Full product / saved products | `GET /buyer/product/{slug}`, `GET /buyer/saved-products`, `POST/DELETE /buyer/saved-products/{id}` |
 | Shop / followed shops / sale reminders | `GET /shop/{slug}`, `GET /buyer/followed-shops`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
 | Notifications | `GET /notifications/preview`, `GET /notifications`, `PATCH /notifications/{uuid}/read`, and `PATCH /notifications/read-all` using the server-issued read snapshot |
+| Help & Support | `POST /buyer/support/assistant`, existing Customer Care conversation at `GET /chat/messages/2` and `POST /chat/send` |
+| Public parcel tracking | `GET /track?number=...` through the existing `Public/Tracking` page contract |
 | Product conversation | `GET /chat/messages/{receiver}`, `POST /chat/send`, private `GET /chat/attachments/{message}` |
 | Shopping Bag | `GET/POST /cart`, `PATCH/DELETE /cart/{item}`; selected quotes use JSON `GET /cart` with `item_ids[]` |
 | Checkout / quotes / locations | `GET/POST /checkout`, `POST /buyer/vouchers/apply`, `GET /address-locations` |
@@ -109,6 +113,12 @@ When a voucher expires or becomes ineligible, checkout retains the server-confir
 
 This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
 
+All sibling products, including the Bagoo website/backend, are read-only references for mobile work. Required website additions are recommendations in [mobile contract requests](docs/integrations/buyer-mobile-contract-requests.md), not changes to the website repository.
+
+The Notifications screen refreshes its current filter and page when the app resumes. Read acknowledgements remain explicit buyer actions. Support history and drafts live only on the current screen; they are cleared when the account or access changes. Short windows and enlarged text use a scrollable composer to keep its fields and send action reachable with the keyboard.
+
+Use **Home → Track a parcel** or the Profile shortcut to look up a waybill number without signing in. Tracking accepts up to 64 ASCII letters/numbers, hyphens, and underscores, starting with a letter/number. Its timeline uses the website's public labels and recorded events; recipient fields remain masked. A refresh failure clearly labels the previous confirmed lookup. Changing the input invalidates older pending results. Internal `/track` links open this native screen. Order changes and buyer receipt confirmation remain in the owned order flow.
+
 ## Verification
 
 ```sh
@@ -130,5 +140,9 @@ The check needs at least one published product and reads home, registration requ
 The profile/navigation pass was checked with formatting, static analysis, Android/Linux compilation, and authenticated read-only inspection of the local backend contracts. Its account, wallet, order, return, and messaging mutations have not been exercised against live data. No automated tests were added or run for that pass; the existing test suite's earlier coverage does not verify the new profile flows. Device layout, native picker/PDF interaction, and accessibility checks still need manual review.
 
 The buyer engagement parity pass adds native campaign destinations and promotions, saved-product and followed-shop collections, and a native notifications center. Formatting, static analysis, and Android/Linux debug builds passed. No automated tests were added or run for this pass. Physical-device, screen-reader, and iOS/Xcode checks remain unverified on this Linux host.
+
+The [mobile-only support review](docs/plans/mobile-only-support-review.md) passed all 99 tests, static analysis, formatting, and Android/Linux debug builds. Its new tests cover support drafts/retries and notification account/lifecycle boundaries, plus keyboard, landscape, large-text, and resize behavior. No live backend mutation was performed. iOS and physical-device checks remain unverified.
+
+The [native public tracking pass](docs/plans/native-public-parcel-tracking.md) passed the full 129-test suite, static analysis, formatting, and Android/Linux debug builds. Its tracking tests cover real local HTML/Inertia transport, public response validation, input limits, labels/timezones, stale lookups, native navigation, clipboard feedback, and phone/landscape/tablet layouts with keyboard insets and 200% text. Tests use isolated data and do not look up real parcels. iOS and physical-device checks remain unverified.
 
 For iOS on macOS, run `flutter build ios --no-codesign`; iOS compilation was not available on the Linux development host. Review the [authentication plan](docs/plans/buyer-auth-home.md), [native product journey plan](docs/plans/buyer-products.md), [profile/navigation plan](docs/plans/buyer-profile.md), and [shopping polish plan](docs/plans/buyer-shopping-polish.md) for scope and verification evidence.
