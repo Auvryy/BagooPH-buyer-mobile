@@ -25,6 +25,12 @@ Started on `feat/buyer-engagement-parity` from freshly pulled `main` at `06016ab
 
 ## Verification and limits
 
-Use Dart formatting, Flutter analysis, and Android/Linux debug builds. Do not add or run automated tests unless the user requests testing/verification. Do not mutate live saved products, follows, notifications, orders, or profile data. Do not reset the shared backend database, open a visible browser, use browser automation, or take screenshots for routine checks. Report that physical-device, screen-reader, and iOS/Xcode checks remain unverified on this Linux host.
+- `dart format` completed for all changed Dart files.
+- `flutter analyze` passed with no issues.
+- `flutter build apk --debug` passed and produced the debug APK.
+- `flutter build linux --debug` passed and produced the Linux debug bundle.
+- No automated tests were added or run, per the mobile repository instructions.
+- No live saved-product, follow, notification, order, or profile mutations were performed.
+- Physical-device, screen-reader, and iOS/Xcode checks remain unverified on this Linux host.
 
-Status: implementation pending.
+Status: implementation and local verification are complete. The branch is local and unpushed; see the local PR draft in `.git/PR_BUYER_ENGAGEMENT_PARITY.md`.

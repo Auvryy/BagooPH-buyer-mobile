@@ -8,6 +8,7 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Two-step registration, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
 - Password recovery with email-code verification and a new password.
 - Guest browsing and signed-in home with real products, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
+- Tappable campaign banners with native promotion details and native product, shop, and search destinations.
 - Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
 - Full native product pages with gallery navigation/zoom, stock-aware options, variant prices and limits, persistent mobile Add to Bag/Buy Now controls, shop information, offers, focused specifications/review views, related product cards, descriptions, verified reviews/photos, and seller replies.
 - Native shop search/pagination/following and product chat with text, photo uploads, and private photo viewing.
@@ -15,6 +16,8 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Approved-buyer checkout with saved/new canonical Philippine addresses, delivery/payment choice cards, native paginated voucher selection and server comparison, recovery of valid voucher slots, COD or wallet, and explicit order review. Wide windows use a sidebar payment summary; phones keep the review action within reach.
 - Home, Cart, Search, and Profile bottom tabs, with independent search and preserved visited tab/form state.
 - A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
+- Native paginated Saved Products and Followed Shops collections, with confirmed remove/unfollow actions and native product/shop pages.
+- A native Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
 - Delivery address-book editing, demo wallet credit requests/history, and available/saved/used/expired vouchers with native Bag use.
 - Paginated purchases, order tracking, cancellation, buyer receipt confirmation, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
 - Native store/courier inbox and return/refund cases, evidence, permitted buyer actions, and authenticated image/PDF viewing.
@@ -77,9 +80,11 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Send / resend / verify email codes | `POST /otp/send`, `POST /otp/resend`, `POST /otp/verify` |
 | Set recovered password | `POST /password/reset-otp` |
 | Marketplace | `GET /` with search, category, sort, and page parameters |
+| Campaigns / promotion details | `GET /` campaign data, internal `GET /advertisement/{slug}` visit route, and `GET /promotions/{slug}` |
 | Dedicated catalogue search | `GET /buyer/search` with search/category/location/price/stock/rating/sort/page filters |
-| Full product / saved products | `GET /buyer/product/{slug}`, `POST/DELETE /buyer/saved-products/{id}` |
-| Shop / following / sale reminders | `GET /shop/{slug}`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
+| Full product / saved products | `GET /buyer/product/{slug}`, `GET /buyer/saved-products`, `POST/DELETE /buyer/saved-products/{id}` |
+| Shop / followed shops / sale reminders | `GET /shop/{slug}`, `GET /buyer/followed-shops`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
+| Notifications | `GET /notifications/preview`, `GET /notifications`, `PATCH /notifications/{uuid}/read`, and `PATCH /notifications/read-all` using the server-issued read snapshot |
 | Product conversation | `GET /chat/messages/{receiver}`, `POST /chat/send`, private `GET /chat/attachments/{message}` |
 | Shopping Bag | `GET/POST /cart`, `PATCH/DELETE /cart/{item}`; selected quotes use JSON `GET /cart` with `item_ids[]` |
 | Checkout / quotes / locations | `GET/POST /checkout`, `POST /buyer/vouchers/apply`, `GET /address-locations` |
@@ -122,6 +127,8 @@ dart run tool/check_backend.dart '<BACKEND_ORIGIN>'
 
 The check needs at least one published product and reads home, registration requirements, policies, filtered catalogue, dedicated search and canonical filters, full product details, shop catalogue, guest Bag, and checkout location choices. It never signs in, registers users, sends emails, places orders, or accesses private conversations. Automated tests use isolated fixtures and a temporary local HTTP server. They cover auth/session boundaries, native search, selected Bag quotes and stock, confirmed changes, voucher selection/repair/comparison, discount display, explicit checkout review, stale responses, exact retry payloads, and phone/tablet/landscape/large-text layouts. No live order, payment, email, or chat mutations are performed by these checks.
 
-The profile/navigation pass was checked with formatting, static analysis, Android/Linux compilation, and authenticated read-only inspection of the local backend contracts. Its account, wallet, order, return, and messaging mutations have not been exercised against live data. No automated tests were added or run for this pass; the existing test suite's earlier coverage does not verify the new profile flows. Device layout, native picker/PDF interaction, and accessibility checks still need manual review.
+The profile/navigation pass was checked with formatting, static analysis, Android/Linux compilation, and authenticated read-only inspection of the local backend contracts. Its account, wallet, order, return, and messaging mutations have not been exercised against live data. No automated tests were added or run for that pass; the existing test suite's earlier coverage does not verify the new profile flows. Device layout, native picker/PDF interaction, and accessibility checks still need manual review.
+
+The buyer engagement parity pass adds native campaign destinations and promotions, saved-product and followed-shop collections, and a native notifications center. Formatting, static analysis, and Android/Linux debug builds passed. No automated tests were added or run for this pass. Physical-device, screen-reader, and iOS/Xcode checks remain unverified on this Linux host.
 
 For iOS on macOS, run `flutter build ios --no-codesign`; iOS compilation was not available on the Linux development host. Review the [authentication plan](docs/plans/buyer-auth-home.md), [native product journey plan](docs/plans/buyer-products.md), [profile/navigation plan](docs/plans/buyer-profile.md), and [shopping polish plan](docs/plans/buyer-shopping-polish.md) for scope and verification evidence.
