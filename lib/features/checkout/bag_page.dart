@@ -11,9 +11,17 @@ import '../products/product_widgets.dart';
 import 'checkout_page.dart';
 
 class BagPage extends StatefulWidget {
-  const BagPage({super.key, required this.repository, this.voucherCode});
+  const BagPage({
+    super.key,
+    required this.repository,
+    this.voucherCode,
+    this.initialSelection = const [],
+    this.active = true,
+  });
   final BuyerRepository repository;
   final String? voucherCode;
+  final List<int> initialSelection;
+  final bool active;
   @override
   State<BagPage> createState() => _BagPageState();
 }
@@ -22,12 +30,35 @@ class _BagPageState extends State<BagPage> {
   WebPage? _page;
   final _selected = <int>{};
   bool _busy = false;
+  bool _refreshOnIdle = false;
   String? _error;
   List<Map<String, dynamic>> get _items => mapsOf(_page?.props['items']);
   @override
   void initState() {
     super.initState();
+    _selected.addAll(widget.initialSelection);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(BagPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) {
+      if (_busy) {
+        _refreshOnIdle = true;
+      } else {
+        _load();
+      }
+    }
+  }
+
+  void _idle() {
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (_refreshOnIdle && widget.active) {
+      _refreshOnIdle = false;
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -53,7 +84,7 @@ class _BagPageState extends State<BagPage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        _idle();
       }
     }
   }
@@ -86,7 +117,7 @@ class _BagPageState extends State<BagPage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        _idle();
       }
     }
   }
@@ -126,7 +157,7 @@ class _BagPageState extends State<BagPage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        _idle();
       }
     }
   }
