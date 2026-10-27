@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  html: ^0.15.7
 
 dev_dependencies:
   flutter_test:
@@ -17,3 +18,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/branding/
+    - assets/auth/
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: Plus Jakarta Sans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf
