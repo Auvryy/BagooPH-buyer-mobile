@@ -1,6 +1,6 @@
 # Native buyer engagement parity
 
-Started on `feat/buyer-engagement-parity` from freshly pulled `main` at `06016ab`. Work stays in `BagooPH-buyer-mobile`; the web repository is a read-only contract reference. Keep this branch local until separately authorized to push.
+Started on `feat/buyer-engagement-parity` from freshly pulled `main` at `06016ab`. Work stays in `BagooPH-buyer-mobile`; the web repository is a read-only contract reference. The branch was kept local through implementation, then pushed after the user authorized publishing.
 
 ## Acceptance
 
@@ -33,4 +33,4 @@ Started on `feat/buyer-engagement-parity` from freshly pulled `main` at `06016ab
 - No live saved-product, follow, notification, order, or profile mutations were performed.
 - Physical-device, screen-reader, and iOS/Xcode checks remain unverified on this Linux host.
 
-Status: implementation and local verification are complete. The branch is local and unpushed; see the local PR draft in `.git/PR_BUYER_ENGAGEMENT_PARITY.md`.
+Status: implementation and local verification are complete. The branch is pushed to `origin/feat/buyer-engagement-parity` and tracks the remote. See the local PR draft in `.git/PR_BUYER_ENGAGEMENT_PARITY.md`; a GitHub PR has not been opened.
