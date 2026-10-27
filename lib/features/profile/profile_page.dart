@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
@@ -17,6 +19,10 @@ import 'purchases_section.dart';
 import 'order_detail_page.dart';
 import 'inbox_page.dart';
 import 'returns_page.dart';
+import '../collections/followed_shops_page.dart';
+import '../collections/saved_products_page.dart';
+import '../home/search_controller.dart';
+import '../notifications/notifications_page.dart';
 
 const _sections = {
   'overview': 'Profile',
@@ -41,6 +47,10 @@ class ProfilePage extends StatefulWidget {
     required this.onUserChanged,
     this.initial,
     this.active = true,
+    this.initialSection = 'overview',
+    this.sectionRequest = 0,
+    this.onSearch,
+    this.onNotificationCountChanged,
   });
   final BuyerRepository repository;
   final Map<String, dynamic>? user;
@@ -49,6 +59,10 @@ class ProfilePage extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>> onUserChanged;
   final WebPage? initial;
   final bool active;
+  final String initialSection;
+  final int sectionRequest;
+  final ValueChanged<SearchFilters>? onSearch;
+  final ValueChanged<int>? onNotificationCountChanged;
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
@@ -80,6 +94,10 @@ class _ProfilePageState extends State<ProfilePage> {
   void initState() {
     super.initState();
     _repository = ProfileRepository(widget.repository);
+    if (_sections.containsKey(widget.initialSection)) {
+      _section = widget.initialSection;
+      _visited.add(_section);
+    }
     if (widget.initial?.component == 'Buyer/Profile') {
       try {
         _page = _repository.checked(widget.initial!);
@@ -99,10 +117,20 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void didUpdateWidget(ProfilePage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final sectionChanged = widget.sectionRequest != oldWidget.sectionRequest;
+    if (sectionChanged) {
+      _select(
+        _sections.containsKey(widget.initialSection)
+            ? widget.initialSection
+            : 'overview',
+      );
+      unawaited(_load());
+    }
     if (widget.active &&
         !oldWidget.active &&
         widget.user != null &&
-        !_loading) {
+        !_loading &&
+        !sectionChanged) {
       _load(refreshActivity: false);
     }
   }
@@ -233,6 +261,44 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
     if (mounted) await _load();
+  }
+
+  Future<void> _openEngagement(String destination) async {
+    final userId = widget.user?['id'];
+    if (userId is! num) {
+      widget.onLogin();
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => switch (destination) {
+          'saved' => SavedProductsPage(
+            repository: widget.repository,
+            ownerId: userId.toInt(),
+            onSearch: widget.onSearch,
+          ),
+          'followed' => FollowedShopsPage(
+            repository: widget.repository,
+            ownerId: userId.toInt(),
+            onSearch: widget.onSearch,
+          ),
+          _ => NotificationsPage(
+            repository: widget.repository,
+            ownerId: userId.toInt(),
+            onSearch: widget.onSearch,
+            onProfileSection: (section) {
+              _select(section);
+              unawaited(_load());
+            },
+            onSummaryChanged: (count) {
+              if (mounted && widget.user?['id'] == userId) {
+                widget.onNotificationCountChanged?.call(count);
+              }
+            },
+          ),
+        },
+      ),
+    );
   }
 
   Widget _identity() => Container(
@@ -418,6 +484,43 @@ class _ProfilePageState extends State<ProfilePage> {
       'Vouchers & Promos',
       Icons.local_offer_outlined,
       count: _page?.props['availableVoucherCount']?.toString(),
+    ),
+    const Divider(height: 24),
+    ListTile(
+      leading: const ExcludeSemantics(
+        child: Icon(Icons.favorite_border, size: 20),
+      ),
+      title: const Text(
+        'Saved products',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      enabled: !_signingOut,
+      onTap: () => _openEngagement('saved'),
+    ),
+    ListTile(
+      leading: const ExcludeSemantics(
+        child: Icon(Icons.storefront_outlined, size: 20),
+      ),
+      title: const Text(
+        'Followed shops',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      enabled: !_signingOut,
+      onTap: () => _openEngagement('followed'),
+    ),
+    ListTile(
+      leading: const ExcludeSemantics(
+        child: Icon(Icons.notifications_none, size: 20),
+      ),
+      title: const Text(
+        'Notifications',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      enabled: !_signingOut,
+      onTap: () => _openEngagement('notifications'),
     ),
     const Divider(height: 24),
     ListTile(

@@ -103,6 +103,17 @@ class WebSession {
     return data;
   }
 
+  /// Sends a JSON mutation whose successful response has no body (for example,
+  /// an optional analytics event returning HTTP 204).
+  Future<void> jsonPostNoContent(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+  }) async {
+    await _post(path, values, method: method, referer: referer);
+  }
+
   Future<WebPage> submit(
     String path,
     Map<String, dynamic> values, {
