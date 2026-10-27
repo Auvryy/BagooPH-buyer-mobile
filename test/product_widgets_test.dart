@@ -34,7 +34,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Product specifications'),
         400,
-        scrollable: verticalScroll(),
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       expect(find.text('Declared weight'), findsOneWidget);
@@ -55,7 +60,13 @@ void main() {
       expect(find.text('-20% OFF'), findsOneWidget);
       expect(find.text('SKU: BAG-001'), findsOneWidget);
       await press(tester, find.widgetWithText(OutlinedButton, 'Add to Bag'));
-      expect(find.text('1 added to your Shopping Bag.'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text('1 added to your Shopping Bag.'),
+        ),
+        findsOneWidget,
+      );
     },
   );
   testWidgets(
@@ -102,10 +113,60 @@ void main() {
       expect(find.text('Order #TEST-1 successfully placed.'), findsOneWidget);
     },
   );
+  testWidgets(
+    'mobile purchase controls guide option selection before checkout',
+    (tester) async {
+      repo.signedIn = true;
+      final page = productPage(signedIn: true);
+      page.props['variations'] = {
+        'colors': [
+          {'name': 'Red'},
+          {'name': 'Blue'},
+        ],
+        'sizes': [
+          {'name': 'Small'},
+        ],
+        'combinations': [
+          {'color': 'Red', 'size': 'Small', 'stock': 0},
+          {'color': 'Blue', 'size': 'Small', 'stock': 3},
+        ],
+      };
+      repo.productResponse = page;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Buy Now'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CheckoutPage), findsNothing);
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Red'))
+            .onSelected,
+        isNull,
+      );
+      final blue = find.widgetWithText(ChoiceChip, 'Blue');
+      await tester.ensureVisible(blue);
+      await tester.tap(blue);
+      await tester.pumpAndSettle();
+      final size = find.widgetWithText(ChoiceChip, 'Small');
+      await tester.ensureVisible(size);
+      await tester.tap(size);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Buy Now'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CheckoutPage), findsOneWidget);
+      expect(repo.orderCalls, 0);
+    },
+  );
   for (final scenario in [
     (size: const Size(320, 640), scale: 1.0),
     (size: const Size(430, 860), scale: 1.0),
     (size: const Size(1024, 768), scale: 1.0),
+    (size: const Size(820, 375), scale: 1.0),
     (size: const Size(375, 812), scale: 2.0),
   ]) {
     testWidgets(

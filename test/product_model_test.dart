@@ -109,6 +109,37 @@ void main() {
     expect(selection.regular, 120);
     expect(selection.price, 100);
   });
+
+  test('disabled colors and legacy size stock cannot be selected', () {
+    final page = productPage();
+    page.props['variations'] = {
+      'colors': [
+        {'name': 'Paused', 'in_stock': false},
+        {'name': 'Available'},
+      ],
+      'sizes': [
+        {'name': 'Sold out', 'stock': 0},
+        {'name': 'Small', 'stock': 4},
+      ],
+    };
+    final selection = ProductSelection(page);
+    expect(selection.colorAvailable('Paused'), false);
+    expect(selection.colorAvailable('Available'), true);
+    expect(selection.sizeAvailable('Sold out'), false);
+    expect(selection.sizeAvailable('Small'), true);
+    page.props['variations'] = {
+      'colors': [
+        {'name': 'Red'},
+        {'name': 'Blue'},
+      ],
+      'combinations': [
+        {'color': 'Red', 'size': 'S', 'stock': 0},
+        {'color': 'Blue', 'size': 'S', 'stock': 2},
+      ],
+    };
+    expect(selection.colorAvailable('Red'), false);
+    expect(selection.colorAvailable('Blue'), true);
+  });
   test(
     'gallery contains only real unique images and vacation blocks additions',
     () {
