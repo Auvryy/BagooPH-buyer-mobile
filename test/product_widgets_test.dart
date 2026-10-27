@@ -166,6 +166,7 @@ void main() {
     (size: const Size(320, 640), scale: 1.0),
     (size: const Size(430, 860), scale: 1.0),
     (size: const Size(1024, 768), scale: 1.0),
+    (size: const Size(1200, 900), scale: 1.0),
     (size: const Size(820, 375), scale: 1.0),
     (size: const Size(375, 812), scale: 2.0),
   ]) {

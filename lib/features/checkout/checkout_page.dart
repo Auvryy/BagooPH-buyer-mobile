@@ -7,10 +7,14 @@ import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
-import '../products/product_model.dart';
 import '../products/product_widgets.dart';
 import 'location_picker.dart';
 import 'order_result_page.dart';
+import '../home/product_card.dart';
+import 'checkout_widgets.dart';
+import 'purchase_quote.dart';
+import 'voucher_selection.dart';
+import 'voucher_picker.dart';
 
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({
@@ -29,6 +33,12 @@ class CheckoutPage extends StatefulWidget {
 class _CheckoutPageState extends State<CheckoutPage> {
   final _form = GlobalKey<FormState>();
   final _summary = GlobalKey();
+  final _contentKey = GlobalKey();
+  final _fieldKeys = <String, GlobalKey<FormFieldState<String>>>{};
+  final _fieldFocus = <String, FocusNode>{};
+  bool _choosingBest = false;
+  bool _voucherProblem = false;
+  String? _voucherFeedback;
   final _fields = {
     for (final k in [
       'recipient_name',
@@ -160,10 +170,28 @@ class _CheckoutPageState extends State<CheckoutPage> {
     _debounce = Timer(const Duration(milliseconds: 300), _updateQuote);
   }
 
-  Future<bool> _updateQuote() async {
-    if (_frozen) {
-      return _ready;
-    }
+  VoucherSelection get _vouchers => VoucherSelection(
+    code: _fields['voucher_code']!.text.trim().toUpperCase(),
+    platform: _platformVoucher,
+    shops: Map.of(_shopVouchers),
+  );
+  List<Map<String, dynamic>> get _applied => !_ready
+      ? []
+      : _quote['vouchers'] is List
+      ? mapsOf(_quote['vouchers'])
+      : _quote['voucher'] is Map
+      ? [mapOf(_quote['voucher'])]
+      : [];
+  void _setVouchers(VoucherSelection value) {
+    _fields['voucher_code']!.text = value.code;
+    _platformVoucher = value.platform;
+    _shopVouchers
+      ..clear()
+      ..addAll(value.shops);
+  }
+
+  Future<bool> _updateQuote({bool repair = true}) async {
+    if (_frozen) return _ready;
     final generation = ++_generation;
     final body = _quoteInput;
     setState(() {
@@ -172,29 +200,46 @@ class _CheckoutPageState extends State<CheckoutPage> {
       _error = null;
     });
     try {
-      final data = await widget.repository.quote(body);
-      if (!mounted || generation != _generation) {
-        return false;
+      Map<String, dynamic> data;
+      try {
+        data = await widget.repository.quote(body);
+      } on BackendException catch (e) {
+        if (e.status != 422 ||
+            e.data['quote'] is! Map ||
+            e.data['validSelection'] is! Map) {
+          rethrow;
+        }
+        data = e.data;
       }
-      final quote = mapOf(data['quote']);
-      if (data['success'] != true ||
-          data['validSelection'] == false ||
-          quote['items'] is! List ||
-          quote['shops'] is! List ||
-          ![
-            'subtotal',
-            'shipping_fee',
-            'discount',
-            'shipping_discount',
-            'total',
-          ].every((k) => amount(quote[k]) != null && amount(quote[k])! >= 0)) {
-        throw const BackendException(
-          'The checkout total could not be confirmed.',
-        );
-      }
+      if (!mounted || generation != _generation) return false;
+      final quote = checkedPurchaseQuote(data['quote'], itemIds: _ids);
       final errors = mapOf(data['selectionErrors']);
-      if (errors.isNotEmpty) {
-        throw BackendException(errors.values.join('\n'));
+      if (data['validSelection'] is Map) {
+        final valid = VoucherSelection.checked(data['validSelection']);
+        if (jsonEncode(_vouchers.values) != jsonEncode(valid.values)) {
+          setState(() {
+            _setVouchers(valid);
+            if (errors.isNotEmpty) {
+              _voucherProblem = true;
+              _voucherFeedback =
+                  '${errors.values.join(' ')} Your other voucher choices are retained.';
+            }
+          });
+          if (repair) return await _updateQuote(repair: false);
+          throw const BackendException(
+            'Vouchers changed again. Review your choices and refresh the quote.',
+          );
+        }
+      }
+      if (data['success'] != true ||
+          errors.isNotEmpty ||
+          quote['voucher_error'] != null) {
+        throw BackendException(
+          errors.isNotEmpty
+              ? errors.values.join(' ')
+              : quote['voucher_error']?.toString() ??
+                    'The checkout total could not be confirmed.',
+        );
       }
       setState(() {
         _quote = quote;
@@ -214,6 +259,81 @@ class _CheckoutPageState extends State<CheckoutPage> {
       if (mounted && generation == _generation) {
         setState(() => _quoting = false);
       }
+    }
+  }
+
+  Future<void> _pickVoucher({int? shopId, required String title}) async {
+    final requested = jsonEncode(_quoteInput);
+    final current = shopId == null
+        ? _platformVoucher
+        : _shopVouchers['$shopId'];
+    final selected = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => VoucherPickerPage(
+          repository: widget.repository,
+          values: _quoteInput,
+          title: title,
+          shopId: shopId,
+          selectedRevision: current,
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    if (requested != jsonEncode(_quoteInput) || _frozen || _submitting) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Checkout changed. Choose a voucher again for the current selection.',
+          ),
+        ),
+      );
+      return;
+    }
+    final next = selected['remove'] == true
+        ? _vouchers.remove(shopId?.toString(), _applied)
+        : _vouchers.choose(selected, _applied);
+    setState(() {
+      _setVouchers(next);
+      _voucherFeedback = null;
+      _voucherProblem = false;
+    });
+    _edit();
+  }
+
+  Future<void> _bestVouchers() async {
+    if (_choosingBest || !_ready || _frozen || _submitting) return;
+    final requested = jsonEncode(_quoteInput);
+    setState(() {
+      _choosingBest = true;
+      _voucherFeedback = null;
+      _voucherProblem = false;
+    });
+    try {
+      final result = await widget.repository.bestVouchers(_quoteInput);
+      if (!mounted) return;
+      if (requested != jsonEncode(_quoteInput) || _frozen) {
+        setState(() {
+          _voucherProblem = true;
+          _voucherFeedback = 'Checkout changed. Compare vouchers again for the updated items and delivery.';
+        });
+        return;
+      }
+      checkedPurchaseQuote(result['quote'], itemIds: _ids);
+      final next = VoucherSelection.checked(result['selection']);
+      setState(() {
+        _setVouchers(next);
+        _voucherFeedback = 'The best available voucher combination is selected. Review the updated total.';
+      });
+      _edit();
+    } on BackendException catch (e) {
+      if (mounted && requested == jsonEncode(_quoteInput)) {
+        setState(() {
+          _voucherProblem = true;
+          _voucherFeedback = e.message;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _choosingBest = false);
     }
   }
 
@@ -255,13 +375,30 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _review() async {
-    if (_submitting || _quoting) {
+    if (_submitting || _quoting || _choosingBest) {
       return;
     }
     if (!_frozen) {
       if (!_form.currentState!.validate() || _locationLoading) {
         setState(
           () => _error = 'Complete the recipient and address fields, and wait for location choices.',
+        );
+        final invalid = _fieldKeys.entries
+            .where((entry) => entry.value.currentState?.hasError == true)
+            .firstOrNull;
+        if (invalid != null && invalid.value.currentContext != null) {
+          _fieldFocus[invalid.key]?.requestFocus();
+          Scrollable.ensureVisible(
+            invalid.value.currentContext!,
+            alignment: .15,
+          );
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Check the highlighted delivery and recipient fields.',
+            ),
+          ),
         );
         return;
       }
@@ -404,22 +541,62 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
     child: TextFormField(
+      key: _fieldKeys.putIfAbsent(
+        key,
+        () => GlobalKey<FormFieldState<String>>(),
+      ),
+      focusNode: _fieldFocus.putIfAbsent(key, FocusNode.new),
       controller: _fields[key],
       keyboardType: keyboard,
       enabled: !_submitting && !_frozen,
-      onChanged: (_) => _edit(),
+      onChanged: (_) {
+        if (key == 'voucher_code') _voucherFeedback = null;
+        _edit();
+      },
+      maxLength: {
+        'recipient_name': 100,
+        'shipping_address': 500,
+        'landmark': 255,
+        'notes': 500,
+        'voucher_code': 50,
+      }[key],
       autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
         labelText: label,
         errorText: _fieldErrors[key],
         errorMaxLines: 4,
+        counterText: '',
       ),
-      validator: (v) => required && (v?.trim().isEmpty ?? true)
-          ? 'Enter ${label.toLowerCase()}.'
-          : key == 'shipping_postal_code' &&
-                !RegExp(r'^\d{4}$').hasMatch(v ?? '')
-          ? 'Enter a four-digit postal code.'
-          : null,
+      validator: (v) {
+        final value = v?.trim() ?? '';
+        if (required && value.isEmpty) return 'Enter ${label.toLowerCase()}.';
+        if (value.isEmpty) return null;
+        final minimum =
+            {'recipient_name': 2, 'shipping_address': 5, 'landmark': 5}[key] ??
+            1;
+        if (value.length < minimum) return 'Use at least $minimum characters.';
+        if (key == 'shipping_postal_code' &&
+            !RegExp(r'^[0-9]{4}$').hasMatch(value)) {
+          return 'Enter a four-digit postal code.';
+        }
+        if (key == 'recipient_phone') {
+          var phone = value.replaceAll(RegExp(r'[ ()-]'), '');
+          if (phone.startsWith('0')) {
+            phone = '+63${phone.substring(1)}';
+          } else if (phone.startsWith('63')) {
+            phone = '+$phone';
+          }
+          if (!RegExp(r'^\+?[0-9 ()-]+$').hasMatch(value) ||
+              !RegExp(r'^\+639[0-9]{9}$').hasMatch(phone)) {
+            return 'Use a Philippine mobile number, such as 09171234567.';
+          }
+        }
+        if (key == 'voucher_code' &&
+            !RegExp(r'^[A-Z0-9_-]+$').hasMatch(value.toUpperCase())) {
+          return 'Use letters, numbers, underscores or hyphens.';
+        }
+        return null;
+      },
     ),
   );
   @override
@@ -429,8 +606,558 @@ class _CheckoutPageState extends State<CheckoutPage> {
     for (final c in _fields.values) {
       c.dispose();
     }
+    for (final node in _fieldFocus.values) {
+      node.dispose();
+    }
     super.dispose();
   }
+
+  Widget _reviewButton() => SubmitButton(
+    label: _submitting
+        ? 'Placing order…'
+        : _frozen
+        ? 'Review safe retry'
+        : 'Review order',
+    busy: _submitting,
+    onPressed:
+        _choosingBest || _quoting || (!_ready && !_frozen) || _locationLoading
+        ? null
+        : _review,
+  );
+
+  Widget _itemsPanel() => ProductPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProductHeading('Selected items (${_items.length})'),
+        for (final item in _items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox.square(
+                        dimension: 56,
+                        child: RemoteImage(
+                          uri: imageUri(
+                            widget.repository.session,
+                            mapOf(item['product'])['featured_image'],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            mapOf(
+                                  mapOf(item['product'])['shop'],
+                                )['name']?.toString() ??
+                                'Shop',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: BagooTheme.muted,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            mapOf(item['product'])['name']?.toString() ??
+                                'Product',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              height: 1.5,
+                            ),
+                          ),
+                          Text(
+                            [
+                              item['color'],
+                              item['size'],
+                            ].whereType<String>().join(' · '),
+                            style: const TextStyle(fontSize: 12, height: 1.6),
+                          ),
+                          Text(
+                            'Quantity ${mapOf(_page.props['itemQuantities'])[item['id'].toString()] ?? item['quantity']}',
+                            style: const TextStyle(fontSize: 12, height: 1.6),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (!_ready)
+                  const Text(
+                    'Updating selected item prices…',
+                    style: TextStyle(fontSize: 12),
+                  )
+                else
+                  for (final segment in mapsOf(
+                    mapsOf(_quote['items'])
+                        .where((row) => row['id'] == item['id'])
+                        .firstOrNull?['price_segments'],
+                  ))
+                    Text(
+                      '${segment['quantity']} × ${pesos(segment['unit_price'])} = ${pesos(segment['subtotal'])}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.7,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Widget _vouchersPanel() => ProductPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProductHeading('Vouchers & promos'),
+        _field('voucher_code', 'Voucher code (optional)', required: false),
+        if (_voucherFeedback != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Notice(_voucherFeedback!, error: _voucherProblem),
+          ),
+        if (_applied.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final offer in _applied)
+                InputChip(
+                  label: Text(
+                    '${offer['code']} · ${offer['issuer'] == 'platform' ? 'Bagoo' : offer['shop_name'] ?? 'Shop'}',
+                  ),
+                  deleteButtonTooltipMessage: 'Remove ${offer['code']}',
+                  onDeleted: () {
+                    final next = _vouchers.remove(
+                      offer['issuer'] == 'platform'
+                          ? null
+                          : offer['shop_id'].toString(),
+                      _applied,
+                    );
+                    setState(() {
+                      _setVouchers(next);
+                      _voucherFeedback = null;
+                    });
+                    _edit();
+                  },
+                ),
+            ],
+          ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: !_ready || _choosingBest ? null : _bestVouchers,
+          icon: const Icon(Icons.auto_awesome_outlined, size: 20),
+          label: Text(
+            _choosingBest ? 'Comparing vouchers…' : 'Use best vouchers',
+          ),
+        ),
+        const SizedBox(height: 8),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.local_offer_outlined),
+          title: const Text(
+            'Bagoo voucher',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            _platformVoucher == null
+                ? 'Choose a platform offer'
+                : 'Platform voucher selected',
+            style: const TextStyle(fontSize: 12),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          enabled: _ready && !_choosingBest,
+          onTap: () => _pickVoucher(title: 'Bagoo vouchers'),
+        ),
+        for (final shop in mapsOf(_quote['shops']))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.storefront_outlined),
+            title: Text(
+              '${shop['shop_name']} vouchers',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              _shopVouchers[shop['shop_id'].toString()] == null
+                  ? 'Choose a shop offer'
+                  : 'Shop voucher selected',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: _ready && !_choosingBest,
+            onTap: () => _pickVoucher(
+              shopId: (shop['shop_id'] as num).toInt(),
+              title: '${shop['shop_name']} vouchers',
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          '${_offers.length} offers in the current quote. Each shop and Bagoo can have their own voucher slot. Availability is checked again before ordering.',
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.7,
+            color: BagooTheme.muted,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _paymentPanel() => ProductPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProductHeading('Payment method'),
+        CheckoutChoice(
+          title: 'Cash on Delivery',
+          description: 'Pay the assigned rider or pickup counter when receiving your parcel.',
+          icon: Icons.payments_outlined,
+          selected: _payment == 'cod',
+          onTap: () => setState(() => _payment = 'cod'),
+        ),
+        CheckoutChoice(
+          title: 'Bagoo Wallet',
+          description: _page.props['walletBalanceCents'] == null
+              ? 'Your wallet balance is unavailable.'
+              : 'Available virtual credits: ${pesos((amount(_page.props['walletBalanceCents']) ?? 0) / 100)}. Review and confirm wallet payment after placing the order. Unpaid wallet orders expire after one hour.',
+          icon: Icons.account_balance_wallet_outlined,
+          selected: _payment == 'wallet',
+          onTap: _page.props['walletBalanceCents'] == null
+              ? null
+              : () => setState(() => _payment = 'wallet'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _money(
+    String label,
+    dynamic value, {
+    bool total = false,
+    bool discount = false,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      spacing: 16,
+      runSpacing: 4,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: total ? FontWeight.w800 : FontWeight.w500,
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          _ready
+              ? '${discount ? '-' : ''}${pesos(value)}'
+              : _quoting
+              ? 'Updating…'
+              : 'Unavailable',
+          style: TextStyle(
+            fontSize: total ? 23 : 14,
+            fontWeight: FontWeight.w800,
+            color: total ? BagooTheme.strong : BagooTheme.ink,
+          ),
+        ),
+      ],
+    ),
+  );
+  Widget _summaryPanel() => ProductPanel(
+    key: _summary,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProductHeading('Payment summary'),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Notice(_error!, error: true),
+            ),
+          ),
+        if (_fieldErrors.containsKey('checkout_token'))
+          TextButton(
+            onPressed: _submitting ? null : _reload,
+            child: const Text('Reload checkout and review updated prices'),
+          ),
+        if (_frozen && !_submitting)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Notice(
+              'The previous result was not confirmed. Your exact checkout details are retained for a safe retry. Check your orders before starting a different checkout.',
+              error: true,
+            ),
+          ),
+        if (_quoting)
+          const LinearProgressIndicator(
+            semanticsLabel: 'Updating checkout quote',
+          ),
+        _money('Subtotal', _quote['subtotal']),
+        _money('Delivery', _quote['shipping_fee']),
+        if ((amount(_quote['discount']) ?? 0) >
+            (amount(_quote['shipping_discount']) ?? 0))
+          _money(
+            'Product discount',
+            (amount(_quote['discount']) ?? 0) -
+                (amount(_quote['shipping_discount']) ?? 0),
+            discount: true,
+          ),
+        if ((amount(_quote['shipping_discount']) ?? 0) > 0)
+          _money(
+            'Shipping discount',
+            _quote['shipping_discount'],
+            discount: true,
+          ),
+        const Divider(height: 24),
+        _money('Total', _quote['total'], total: true),
+        const Text(
+          'Shipping is calculated separately for each shop.',
+          style: TextStyle(fontSize: 12, height: 1.7, color: BagooTheme.muted),
+        ),
+        if (_ready)
+          for (final shop in mapsOf(_quote['shops']))
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    shop['shop_name'].toString(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  _money('Shop subtotal', shop['subtotal']),
+                  _money('Shop delivery', shop['shipping']),
+                  if ((amount(shop['discount']) ?? 0) > 0)
+                    _money('Shop savings', shop['discount'], discount: true),
+                  _money('Shop total', shop['total']),
+                ],
+              ),
+            ),
+        const SizedBox(height: 20),
+        _reviewButton(),
+        const SizedBox(height: 12),
+        const Text(
+          'You will review and confirm your order before it is placed. Vouchers do not reserve discounts or stock.',
+          style: TextStyle(fontSize: 12, height: 1.7, color: BagooTheme.muted),
+        ),
+        if (!_ready && !_quoting && !_frozen)
+          TextButton(
+            onPressed: () => _updateQuote(),
+            child: const Text('Retry checkout quote'),
+          ),
+        if (_frozen)
+          TextButton(
+            onPressed: _submitting
+                ? null
+                : () async {
+                    try {
+                      final page = await widget.repository.document(
+                        '/buyer/orders',
+                      );
+                      widget.repository.requireNoErrors(page);
+                      if (![
+                            'Buyer/Orders',
+                            'Buyer/Profile',
+                          ].contains(page.component) ||
+                          page.props['orders'] is! Map) {
+                        throw const BackendException(
+                          'Your recorded orders could not load. Sign in again if needed.',
+                        );
+                      }
+                      if (mounted) {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => OrderResultPage(
+                              repository: widget.repository,
+                              initial: page,
+                            ),
+                          ),
+                        );
+                      }
+                    } on BackendException catch (e) {
+                      if (mounted) setState(() => _error = e.message);
+                    }
+                  },
+            child: const Text('Check my orders'),
+          ),
+      ],
+    ),
+  );
+
+  Widget _deliveryPanel() => ProductPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProductHeading('Delivery method'),
+        CheckoutChoice(
+          title: 'Doorstep delivery',
+          description: 'Delivered to your recipient address. Shipping is calculated separately for each shop.',
+          icon: Icons.local_shipping_outlined,
+          selected: _delivery == 'doorstep',
+          onTap: () {
+            setState(() => _delivery = 'doorstep');
+            _edit();
+          },
+        ),
+        CheckoutChoice(
+          title: 'Bayan Hub self-pickup',
+          description: 'Collect from an eligible municipal hub when your parcel is ready.',
+          icon: Icons.storefront_outlined,
+          selected: _delivery == 'hub_self_pickup',
+          onTap: () {
+            setState(() => _delivery = 'hub_self_pickup');
+            _edit();
+          },
+        ),
+        if (_delivery == 'hub_self_pickup') ...[
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            initialValue: _hub,
+            isExpanded: true,
+            itemHeight: null,
+            decoration: const InputDecoration(labelText: 'Pickup Bayan Hub'),
+            items: mapsOf(_page.props['pickupHubs'])
+                .map(
+                  (h) => DropdownMenuItem(
+                    value: h['id'].toString(),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        '${h['name']} · ${h['city_municipality']}',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              setState(() => _hub = v);
+              _edit();
+            },
+            validator: (v) => _delivery == 'hub_self_pickup' && v == null
+                ? 'Choose a pickup Bayan Hub.'
+                : null,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Your parcel follows the hub network. Order tracking will show when collection is ready.',
+            style: TextStyle(fontSize: 12, height: 1.6),
+          ),
+        ],
+      ],
+    ),
+  );
+  Widget _addressPanel() => ProductPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProductHeading('Recipient and delivery address'),
+        if (_addresses.isNotEmpty) ...[
+          DropdownButtonFormField<String>(
+            key: ValueKey('address-choice-$_address'),
+            initialValue: _address,
+            isExpanded: true,
+            itemHeight: null,
+            decoration: const InputDecoration(labelText: 'Saved address'),
+            items: [
+              const DropdownMenuItem(
+                value: 'new',
+                child: Text('Use a new address'),
+              ),
+              for (final a in _addresses)
+                DropdownMenuItem(
+                  value: a['id'].toString(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      '${a['recipient_name']} · ${a['street']}, ${a['city']}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ),
+            ],
+            onChanged: (v) => _applyAddress(
+              _addresses.where((a) => a['id'].toString() == v).firstOrNull,
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+        _field('recipient_name', 'Recipient name'),
+        _field(
+          'recipient_phone',
+          'Philippine mobile number',
+          keyboard: TextInputType.phone,
+        ),
+        LocationPicker(
+          key: ValueKey('address-location-$_address'),
+          repository: widget.repository,
+          initial: _location,
+          disabled: _submitting || _frozen,
+          onLoading: (v) {
+            if (mounted) {
+              setState(() => _locationLoading = v);
+            }
+          },
+          onChanged: (value) {
+            if (!mounted) {
+              return;
+            }
+            final changed = jsonEncode(_location) != jsonEncode(value);
+            setState(() => _location = value);
+            if (changed) {
+              _edit();
+            }
+          },
+        ),
+        _field('shipping_address', 'Street / house / unit'),
+        _field(
+          'shipping_postal_code',
+          'Postal code',
+          keyboard: TextInputType.number,
+        ),
+        _field('landmark', 'Landmark (optional)', required: false),
+        _field('notes', 'Delivery notes (optional)', required: false),
+        if (_address == 'new')
+          CheckboxListTile(
+            value: _saveAddress,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            onChanged:
+                _addresses.length >=
+                    ((_page.props['addressBookLimit'] as num?)?.toInt() ?? 10)
+                ? null
+                : (v) {
+                    setState(() => _saveAddress = v ?? false);
+                    _edit();
+                  },
+            title: const Text(
+              'Save this address for future orders',
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -438,466 +1165,147 @@ class _CheckoutPageState extends State<CheckoutPage> {
     child: Scaffold(
       appBar: AppBar(title: const Text('Checkout')),
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 950),
-            child: Form(
-              key: _form,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _form,
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final wide =
+                  box.maxWidth >= 1100 &&
+                  MediaQuery.textScalerOf(context).scale(16) < 24;
+              final details = Column(
+                key: _contentKey,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const ProductPanel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Finalize checkout',
+                          style: TextStyle(
+                            fontSize: 25,
+                            fontWeight: FontWeight.w800,
+                            height: 1.3,
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Verify your delivery destination, selected items, vouchers and payment before the final review.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.7,
+                            color: BagooTheme.muted,
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          children: [
+                            Chip(label: Text('1 · Delivery')),
+                            Chip(label: Text('2 · Payment')),
+                            Chip(label: Text('3 · Review')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                   AbsorbPointer(
                     absorbing: _submitting || _frozen,
                     child: Column(
                       children: [
-                        ProductPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const ProductHeading('Delivery method'),
-                              DropdownButtonFormField<String>(
-                                initialValue: _delivery,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Delivery method',
-                                ),
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'doorstep',
-                                    child: Text('Doorstep delivery'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'hub_self_pickup',
-                                    child: Text('Self-pickup at Bayan Hub'),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  if (v != null) {
-                                    setState(() => _delivery = v);
-                                    _edit();
-                                  }
-                                },
-                              ),
-                              if (_delivery == 'hub_self_pickup') ...[
-                                const SizedBox(height: 16),
-                                DropdownButtonFormField<String>(
-                                  initialValue: _hub,
-                                  isExpanded: true,
-                                  itemHeight: null,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Pickup Bayan Hub',
-                                  ),
-                                  items: mapsOf(_page.props['pickupHubs'])
-                                      .map(
-                                        (h) => DropdownMenuItem(
-                                          value: h['id'].toString(),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 8,
-                                            ),
-                                            child: Text(
-                                              '${h['name']} · ${h['city_municipality']}',
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (v) {
-                                    setState(() => _hub = v);
-                                    _edit();
-                                  },
-                                  validator: (v) =>
-                                      _delivery == 'hub_self_pickup' &&
-                                          v == null
-                                      ? 'Choose a pickup Bayan Hub.'
-                                      : null,
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'Your parcel follows the hub network. Order tracking will show when collection is ready.',
-                                  style: TextStyle(fontSize: 12, height: 1.6),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        ProductPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const ProductHeading(
-                                'Recipient and delivery address',
-                              ),
-                              if (_addresses.isNotEmpty) ...[
-                                DropdownButtonFormField<String>(
-                                  key: ValueKey('address-choice-$_address'),
-                                  initialValue: _address,
-                                  isExpanded: true,
-                                  itemHeight: null,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Saved address',
-                                  ),
-                                  items: [
-                                    const DropdownMenuItem(
-                                      value: 'new',
-                                      child: Text('Use a new address'),
-                                    ),
-                                    for (final a in _addresses)
-                                      DropdownMenuItem(
-                                        value: a['id'].toString(),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 8,
-                                          ),
-                                          child: Text(
-                                            '${a['recipient_name']} · ${a['street']}, ${a['city']}',
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (v) => _applyAddress(
-                                    _addresses
-                                        .where((a) => a['id'].toString() == v)
-                                        .firstOrNull,
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                              ],
-                              _field('recipient_name', 'Recipient name'),
-                              _field(
-                                'recipient_phone',
-                                'Philippine mobile number',
-                                keyboard: TextInputType.phone,
-                              ),
-                              LocationPicker(
-                                key: ValueKey('address-location-$_address'),
-                                repository: widget.repository,
-                                initial: _location,
-                                disabled: _submitting || _frozen,
-                                onLoading: (v) {
-                                  if (mounted) {
-                                    setState(() => _locationLoading = v);
-                                  }
-                                },
-                                onChanged: (value) {
-                                  if (!mounted) {
-                                    return;
-                                  }
-                                  final changed =
-                                      jsonEncode(_location) !=
-                                      jsonEncode(value);
-                                  setState(() => _location = value);
-                                  if (changed) {
-                                    _edit();
-                                  }
-                                },
-                              ),
-                              _field(
-                                'shipping_address',
-                                'Street / house / unit',
-                              ),
-                              _field(
-                                'shipping_postal_code',
-                                'Postal code',
-                                keyboard: TextInputType.number,
-                              ),
-                              _field(
-                                'landmark',
-                                'Landmark (optional)',
-                                required: false,
-                              ),
-                              _field(
-                                'notes',
-                                'Delivery notes (optional)',
-                                required: false,
-                              ),
-                              if (_address == 'new')
-                                CheckboxListTile(
-                                  value: _saveAddress,
-                                  contentPadding: EdgeInsets.zero,
-                                  controlAffinity:
-                                      ListTileControlAffinity.leading,
-                                  onChanged:
-                                      _addresses.length >=
-                                          ((_page.props['addressBookLimit']
-                                                      as num?)
-                                                  ?.toInt() ??
-                                              10)
-                                      ? null
-                                      : (v) {
-                                          setState(
-                                            () => _saveAddress = v ?? false,
-                                          );
-                                          _edit();
-                                        },
-                                  title: const Text(
-                                    'Save this address for future orders',
-                                    style: TextStyle(fontSize: 13),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        ProductPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const ProductHeading('Order summary'),
-                              for (final item in _items)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        mapOf(
-                                              item['product'],
-                                            )['name']?.toString() ??
-                                            'Product',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      Text(
-                                        [
-                                          item['color'],
-                                          item['size'],
-                                        ].whereType<String>().join(' · '),
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                      for (final segment in mapsOf(
-                                        (mapsOf(_quote['items'])
-                                                .where(
-                                                  (q) => q['id'] == item['id'],
-                                                )
-                                                .firstOrNull ??
-                                            {})['price_segments'],
-                                      ))
-                                        Text(
-                                          _ready
-                                              ? '${segment['quantity']} × ${pesos(segment['unit_price'])} = ${pesos(segment['subtotal'])}'
-                                              : 'Updating price…',
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              const Divider(height: 24),
-                              _field(
-                                'voucher_code',
-                                'Voucher code (optional)',
-                                required: false,
-                              ),
-                              if (_platformVoucher != null ||
-                                  _shopVouchers.isNotEmpty)
-                                TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _platformVoucher = null;
-                                      _shopVouchers.clear();
-                                    });
-                                    _edit();
-                                  },
-                                  child: const Text('Clear selected vouchers'),
-                                ),
-                              for (final o in _offers)
-                                OfferTile(
-                                  offer: o,
-                                  repository: widget.repository,
-                                  onUse: () {
-                                    final id = (o['revision_id'] as num?)
-                                        ?.toInt();
-                                    if (id == null) {
-                                      return;
-                                    }
-                                    setState(() {
-                                      _fields['voucher_code']!.clear();
-                                      if (o['issuer'] == 'platform') {
-                                        _platformVoucher = id;
-                                      } else if (o['shop_id'] != null) {
-                                        _shopVouchers[o['shop_id'].toString()] =
-                                            id;
-                                      }
-                                    });
-                                    _edit();
-                                  },
-                                ),
-                              const ProductHeading('Payment method'),
-                              DropdownButtonFormField<String>(
-                                initialValue: _payment,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Pay with',
-                                ),
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: 'cod',
-                                    child: Text('Cash on Delivery'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'wallet',
-                                    enabled:
-                                        _page.props['walletBalanceCents'] !=
-                                        null,
-                                    child: const Text(
-                                      'Bagoo Wallet · virtual credits',
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  if (v != null) {
-                                    setState(() => _payment = v);
-                                  }
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                _payment == 'wallet'
-                                    ? 'Available virtual credits: ${_page.props['walletBalanceCents'] == null ? 'Unavailable' : pesos((amount(_page.props['walletBalanceCents']) ?? 0) / 100)}. Review and confirm wallet payment after placing the order. Unpaid wallet orders expire after one hour.'
-                                    : 'Pay the assigned rider or pickup counter when receiving your parcel.',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: BagooTheme.muted,
-                                  height: 1.6,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ProductPanel(
-                    key: _summary,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Notice(_error!, error: true),
-                          ),
-                        if (_fieldErrors.containsKey('checkout_token'))
-                          TextButton(
-                            onPressed: _reload,
-                            child: const Text(
-                              'Reload checkout and review updated prices',
-                            ),
-                          ),
-                        if (_frozen && !_submitting)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 16),
-                            child: Notice(
-                              'The previous result was not confirmed. Your exact checkout details are retained for a safe retry. Check your orders before starting a different checkout.',
-                              error: true,
-                            ),
-                          ),
-                        if (_quoting) const LinearProgressIndicator(),
-                        for (final row in {
-                          'Subtotal': _quote['subtotal'],
-                          'Delivery': _quote['shipping_fee'],
-                          'Product discount': _quote['discount'],
-                          'Shipping discount': _quote['shipping_discount'],
-                          'Total': _quote['total'],
-                        }.entries)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Wrap(
-                              alignment: WrapAlignment.spaceBetween,
-                              spacing: 16,
-                              children: [
-                                Text(
-                                  row.key,
-                                  style: TextStyle(
-                                    fontWeight: row.key == 'Total'
-                                        ? FontWeight.w800
-                                        : FontWeight.w500,
-                                  ),
-                                ),
-                                Text(
-                                  _ready ? pesos(row.value) : 'Updating…',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: row.key == 'Total'
-                                        ? BagooTheme.strong
-                                        : BagooTheme.ink,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        for (final shop in mapsOf(_quote['shops']))
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              _ready
-                                  ? '${shop['shop_name']}: ${pesos(shop['total'])}'
-                                  : 'Updating shop total…',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        const SizedBox(height: 20),
-                        SubmitButton(
-                          label: _submitting
-                              ? 'Placing order…'
-                              : _frozen
-                              ? 'Review safe retry'
-                              : 'Review order',
-                          busy: _submitting,
-                          onPressed:
-                              _quoting ||
-                                  (!_ready && !_frozen) ||
-                                  _locationLoading
-                              ? null
-                              : _review,
-                        ),
-                        if (!_ready && !_quoting && !_frozen)
-                          TextButton(
-                            onPressed: _updateQuote,
-                            child: const Text('Retry checkout quote'),
-                          ),
-                        if (_frozen)
-                          TextButton(
-                            onPressed: _submitting
-                                ? null
-                                : () async {
-                                    try {
-                                      final page = await widget.repository
-                                          .document('/buyer/orders');
-                                      if (context.mounted) {
-                                        await Navigator.of(context).push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) => OrderResultPage(
-                                              repository: widget.repository,
-                                              initial: page,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    } on BackendException catch (e) {
-                                      if (mounted) {
-                                        setState(() => _error = e.message);
-                                      }
-                                    }
-                                  },
-                            child: const Text('Check my orders'),
-                          ),
+                        _deliveryPanel(),
+                        _addressPanel(),
+                        _itemsPanel(),
+                        _vouchersPanel(),
+                        _paymentPanel(),
                       ],
                     ),
                   ),
                 ],
-              ),
-            ),
+              );
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1380),
+                  child: wide
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: ListView(
+                                padding: const EdgeInsets.all(24),
+                                keyboardDismissBehavior:
+                                    ScrollViewKeyboardDismissBehavior.onDrag,
+                                children: [details],
+                              ),
+                            ),
+                            SizedBox(
+                              width: 360,
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.fromLTRB(
+                                  0,
+                                  24,
+                                  24,
+                                  24,
+                                ),
+                                child: _summaryPanel(),
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView(
+                          padding: const EdgeInsets.all(16),
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          children: [
+                            Column(children: [details, _summaryPanel()]),
+                          ],
+                        ),
+                ),
+              );
+            },
           ),
         ),
       ),
+      bottomNavigationBar:
+          MediaQuery.sizeOf(context).width < 1100 &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? SafeArea(
+              top: false,
+              child: Material(
+                color: Colors.white,
+                elevation: 6,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * .4,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          _ready
+                              ? pesos(_quote['total'])
+                              : _quoting
+                              ? 'Updating total…'
+                              : 'Total unavailable',
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: BagooTheme.strong,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _reviewButton(),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
     ),
   );
 }
