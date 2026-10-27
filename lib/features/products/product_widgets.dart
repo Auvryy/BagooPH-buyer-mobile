@@ -148,12 +148,14 @@ class OfferTile extends StatefulWidget {
     this.onUse,
     this.onSignIn,
     this.canSave = true,
+    this.onSaved,
   });
   final Map<String, dynamic> offer;
   final BuyerRepository repository;
   final VoidCallback? onUse;
   final VoidCallback? onSignIn;
   final bool canSave;
+  final Future<void> Function()? onSaved;
   @override
   State<OfferTile> createState() => _OfferTileState();
 }
@@ -195,6 +197,7 @@ class _OfferTileState extends State<OfferTile> {
       }
       if (mounted) {
         setState(() => _saved = data['saved_id']);
+        await widget.onSaved?.call();
       }
     } on BackendException catch (e) {
       if (mounted) {

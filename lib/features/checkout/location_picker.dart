@@ -42,7 +42,7 @@ class _LocationPickerState extends State<LocationPicker> {
       _error = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && generation == _generation) {
+      if (mounted && generation == _generation && _busy) {
         widget.onLoading(true);
       }
     });
@@ -84,7 +84,7 @@ class _LocationPickerState extends State<LocationPicker> {
     } finally {
       if (mounted && generation == _generation) {
         setState(() => _busy = false);
-        widget.onLoading(false);
+        widget.onLoading(_error != null);
       }
     }
   }
