@@ -1,4 +1,5 @@
 import 'web_session.dart';
+import 'uploads.dart';
 
 class BuyerRepository {
   BuyerRepository(this.session);
@@ -311,8 +312,13 @@ class BuyerRepository {
     return mapsOf(data['messages']);
   }
 
-  Future<Map<String, dynamic>> sendMessage(Map<String, dynamic> values) async {
-    final data = await session.jsonPost('/chat/send', values);
+  Future<Map<String, dynamic>> sendMessage(
+    Map<String, dynamic> values, {
+    List<UploadPart>? files,
+  }) async {
+    final data = files != null && files.isNotEmpty
+        ? await session.uploadJson('/chat/send', values, files)
+        : await session.jsonPost('/chat/send', values);
     if (data['success'] != true || mapOf(data['message'])['id'] is! num) {
       throw const BackendException('Your message was not confirmed.');
     }

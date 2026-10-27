@@ -57,7 +57,7 @@ void main() {
       await press(tester, find.widgetWithText(FilledButton, 'Log In'));
       expect(repository.loginCalls, 1);
       expect(find.text('Recommended for you'), findsOneWidget);
-      await press(tester, find.text('Account'));
+      await press(tester, find.text('Profile'));
       expect(find.text('Test Buyer'), findsOneWidget);
       await press(tester, find.text('Log out'));
       expect(find.text('You have been logged out.'), findsOneWidget);
@@ -74,7 +74,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(repository.homeRequests.last['search'], 'tea & coffee');
-      await press(tester, find.text('Departments'));
+      await press(tester, find.text('Search'));
       await press(tester, find.text('Electronics and Gadgets'));
       expect(repository.homeRequests.last['category'], 'electronics');
     },

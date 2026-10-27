@@ -1,12 +1,26 @@
 import 'package:flutter/material.dart';
 
 class BuyerActions extends InheritedWidget {
-  const BuyerActions({super.key, required this.signIn, required super.child});
+  const BuyerActions({
+    super.key,
+    required this.signIn,
+    required super.child,
+    this.signInTo,
+  });
   final void Function(String? productSlug) signIn;
-  static void login(BuildContext context, {String? productSlug}) {
+  final void Function(String destination)? signInTo;
+  static void login(
+    BuildContext context, {
+    String? productSlug,
+    String? destination,
+  }) {
     final actions = context.dependOnInheritedWidgetOfExactType<BuyerActions>();
     if (actions != null) {
-      actions.signIn(productSlug);
+      if (destination != null && actions.signInTo != null) {
+        actions.signInTo!(destination);
+      } else {
+        actions.signIn(productSlug);
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please log in with a buyer account.')),
@@ -15,5 +29,6 @@ class BuyerActions extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(BuyerActions oldWidget) => oldWidget.signIn != signIn;
+  bool updateShouldNotify(BuyerActions oldWidget) =>
+      oldWidget.signIn != signIn || oldWidget.signInTo != signInTo;
 }

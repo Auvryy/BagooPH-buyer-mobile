@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'uploads.dart';
 
 import 'package:html/parser.dart' as html;
 
@@ -25,6 +28,7 @@ class WebSession {
   final Map<String, _SessionCookie> _cookies = {};
   String? _version;
   String? _csrf;
+  int _sessionEpoch = 0;
 
   Uri resolve(String path) {
     final target = origin.resolve(path);
@@ -104,14 +108,46 @@ class WebSession {
     Map<String, dynamic> values, {
     String method = 'POST',
     String? referer,
+    List<UploadPart>? files,
   }) async {
     final response = await _post(
       path,
       values,
       method: method,
       referer: referer,
+      files: files,
     );
     return _readPage(response);
+  }
+
+  Future<Map<String, dynamic>> uploadJson(
+    String path,
+    Map<String, dynamic> values,
+    List<UploadPart> files, {
+    String? referer,
+  }) async {
+    final response = await _post(path, values, files: files, referer: referer);
+    final data = _json(response.body);
+    if (data['success'] == false) {
+      throw BackendException(
+        data['message']?.toString() ?? 'The upload was not confirmed.',
+      );
+    }
+    return data;
+  }
+
+  Future<RemoteDocument> documentBytes(String path) async {
+    final response = await _request('GET', resolve(path), binary: true);
+    if (!response.mime.startsWith('image/') &&
+        response.mime != 'application/pdf') {
+      throw const BackendException(
+        'This document is unavailable. Sign in again if your session expired.',
+      );
+    }
+    if (response.bytes == null || response.bytes!.isEmpty) {
+      throw const BackendException('The document is empty.');
+    }
+    return RemoteDocument(response.bytes!, response.mime);
   }
 
   Future<_Reply> _post(
@@ -119,12 +155,26 @@ class WebSession {
     Map<String, dynamic> values, {
     String method = 'POST',
     String? referer,
+    List<UploadPart>? files,
   }) async {
+    final sessionEpoch = _sessionEpoch;
     if (_csrf == null &&
         !_cookies.values.any((c) => c.cookie.name == 'XSRF-TOKEN')) {
       await page('/login', bootstrap: true);
     }
-    return _request(method, resolve(path), values: values, referer: referer);
+    if (sessionEpoch != _sessionEpoch) {
+      throw const BackendException(
+        'Your session changed. Start this action again after signing in.',
+        status: 401,
+      );
+    }
+    return _request(
+      method,
+      resolve(path),
+      values: values,
+      referer: referer,
+      files: files,
+    );
   }
 
   Future<_Reply> _request(
@@ -133,6 +183,8 @@ class WebSession {
     Map<String, dynamic>? values,
     bool inertia = false,
     bool acceptJson = false,
+    bool binary = false,
+    List<UploadPart>? files,
     String? referer,
     int redirects = 0,
   }) async {
@@ -142,9 +194,17 @@ class WebSession {
       );
     }
     try {
+      final sessionEpoch = _sessionEpoch;
       final request = await _client
           .openUrl(method, uri)
           .timeout(const Duration(seconds: 20));
+      if (sessionEpoch != _sessionEpoch) {
+        request.abort();
+        throw const BackendException(
+          'Your session changed. Start this action again after signing in.',
+          status: 401,
+        );
+      }
       request.followRedirects = false;
       request.headers.set(
         HttpHeaders.acceptHeader,
@@ -186,12 +246,30 @@ class WebSession {
         } else if (_csrf != null) {
           request.headers.set('X-CSRF-TOKEN', _csrf!);
         }
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(values));
+        if (files != null && files.isNotEmpty) {
+          final payload = MultipartPayload(values, files);
+          request.headers.contentType = ContentType(
+            'multipart',
+            'form-data',
+            parameters: {'boundary': payload.boundary},
+          );
+          request.contentLength = payload.bytes.length;
+          request.add(payload.bytes);
+        } else {
+          request.headers.contentType = ContentType.json;
+          request.write(jsonEncode(values));
+        }
       }
       final response = await request.close().timeout(
         const Duration(seconds: 25),
       );
+      if (sessionEpoch != _sessionEpoch) {
+        await response.drain<void>().timeout(const Duration(seconds: 25));
+        throw const BackendException(
+          'Your session changed. Sign in again before continuing.',
+          status: 401,
+        );
+      }
       for (final cookie in response.cookies) {
         final domain = cookie.domain?.replaceFirst(RegExp(r'^\.'), '');
         if (domain != null &&
@@ -207,10 +285,25 @@ class WebSession {
               : cookie.expires,
         );
       }
-      final body = await utf8.decoder
-          .bind(response)
-          .join()
-          .timeout(const Duration(seconds: 25));
+      final chunks = BytesBuilder(copy: false);
+      await for (final bytes in response.timeout(const Duration(seconds: 25))) {
+        chunks.add(bytes);
+        if (binary && chunks.length > 20 * 1024 * 1024) {
+          throw const BackendException(
+            'This document is too large to preview.',
+          );
+        }
+      }
+      final responseBytes = chunks.takeBytes();
+      if (sessionEpoch != _sessionEpoch) {
+        throw const BackendException(
+          'Your session changed. Sign in again before continuing.',
+          status: 401,
+        );
+      }
+      final body = binary && response.statusCode < 400
+          ? ''
+          : utf8.decode(responseBytes, allowMalformed: true);
       final location =
           response.headers.value('x-inertia-location') ??
           response.headers.value(HttpHeaders.locationHeader);
@@ -219,9 +312,20 @@ class WebSession {
           !(response.statusCode == 409 && inertia && method == 'GET')) {
         final target = resolve(uri.resolve(location).toString());
         // Never replay a credential-bearing POST on a redirect.
-        return await _request('GET', target, redirects: redirects + 1);
+        return await _request(
+          'GET',
+          target,
+          redirects: redirects + 1,
+          binary: binary,
+          acceptJson: acceptJson,
+        );
       }
-      final reply = _Reply(response.statusCode, body);
+      final reply = _Reply(
+        response.statusCode,
+        body,
+        bytes: binary ? responseBytes : null,
+        mime: response.headers.contentType?.mimeType ?? '',
+      );
       if (response.statusCode >= 400 &&
           !(response.statusCode == 409 && inertia && method == 'GET')) {
         final data = _json(body, optional: true);
@@ -235,8 +339,7 @@ class WebSession {
           }
         }
         if (response.statusCode == 419) {
-          _csrf = null;
-          _cookies.clear();
+          clear();
         }
         throw BackendException(
           switch (response.statusCode) {
@@ -327,6 +430,7 @@ class WebSession {
   }
 
   void clear() {
+    _sessionEpoch++;
     _cookies.clear();
     _csrf = null;
     _version = null;
@@ -379,7 +483,9 @@ class _SessionCookie {
 }
 
 class _Reply {
-  const _Reply(this.status, this.body);
+  const _Reply(this.status, this.body, {this.bytes, this.mime = ''});
   final int status;
   final String body;
+  final Uint8List? bytes;
+  final String mime;
 }

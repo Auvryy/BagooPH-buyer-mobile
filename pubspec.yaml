@@ -7,9 +7,11 @@ environment:
   sdk: ^3.13.1
 
 dependencies:
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   html: ^0.15.7
+  pdfrx: ^2.10.1
 
 dev_dependencies:
   flutter_test:
