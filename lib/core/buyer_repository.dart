@@ -270,6 +270,28 @@ class BuyerRepository {
 
   Future<Map<String, dynamic>> quote(Map<String, dynamic> values) =>
       session.jsonPost('/buyer/vouchers/apply', values);
+  Future<Map<String, dynamic>> voucherChoices(
+    Map<String, dynamic> values,
+  ) async {
+    final result = await session.jsonPost('/buyer/vouchers/choices', values);
+    if (mapOf(result['offers'])['data'] is! List) {
+      throw const BackendException(
+        'Voucher choices could not load. Try again.',
+      );
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> bestVouchers(Map<String, dynamic> values) async {
+    final result = await session.jsonPost('/buyer/vouchers/best', values);
+    if (result['selection'] is! Map || result['quote'] is! Map) {
+      throw const BackendException(
+        'Voucher comparison was not confirmed. Try again.',
+      );
+    }
+    return result;
+  }
+
   Future<WebPage> placeOrder(Map<String, dynamic> values) async {
     final page = await session.submit(
       '/checkout',

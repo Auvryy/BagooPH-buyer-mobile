@@ -355,6 +355,7 @@ class WebSession {
           },
           fields: fields,
           status: response.statusCode,
+          data: data,
         );
       }
       return reply;
@@ -468,10 +469,16 @@ List<Map<String, dynamic>> mapsOf(dynamic value) => value is List
     : [];
 
 class BackendException implements Exception {
-  const BackendException(this.message, {this.fields = const {}, this.status});
+  const BackendException(
+    this.message, {
+    this.fields = const {},
+    this.status,
+    this.data = const {},
+  });
   final String message;
   final Map<String, String> fields;
   final int? status;
+  final Map<String, dynamic> data;
   @override
   String toString() => message;
 }
