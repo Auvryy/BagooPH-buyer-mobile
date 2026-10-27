@@ -2,6 +2,8 @@ import 'package:bagoo_buyer_mobile/core/buyer_actions.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
+import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart'
+    show ImageViewer;
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
@@ -15,6 +17,28 @@ void main() {
   late FakeBuyerRepository repo;
   setUp(() => repo = FakeBuyerRepository());
   tearDown(() => repo.session.close());
+  testWidgets('named product photo control opens the native image viewer', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 820);
+    addTearDown(tester.view.reset);
+    repo.productResponse = productPage(
+      override: {'featured_image': '/product-photo.jpg'},
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final photo = find.bySemanticsLabel('Open product photo 1 of 1');
+    expect(photo, findsOneWidget);
+    await tester.tap(photo);
+    await tester.pumpAndSettle();
+    expect(find.byType(ImageViewer), findsOneWidget);
+  });
   testWidgets(
     'home cards use equal sizes and open a fetched full product page',
     (tester) async {

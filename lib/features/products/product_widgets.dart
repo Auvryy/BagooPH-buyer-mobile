@@ -37,12 +37,15 @@ class ProductHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
-    child: Text(
-      text,
-      style: const TextStyle(
-        fontSize: 18,
-        height: 1.4,
-        fontWeight: FontWeight.w800,
+    child: Semantics(
+      header: true,
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 18,
+          height: 1.4,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     ),
   );

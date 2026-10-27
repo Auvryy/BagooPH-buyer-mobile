@@ -625,10 +625,16 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                           s.gallery[_image],
                           s.product['name'].toString(),
                         ),
-                  child: RemoteImage(
-                    uri: s.gallery.isEmpty
-                        ? null
-                        : imageUri(repo.session, s.gallery[_image]),
+                  child: Semantics(
+                    label: s.gallery.isEmpty
+                        ? 'No product photo available'
+                        : 'Open product photo ${_image + 1} of ${s.gallery.length}',
+                    excludeSemantics: true,
+                    child: RemoteImage(
+                      uri: s.gallery.isEmpty
+                          ? null
+                          : imageUri(repo.session, s.gallery[_image]),
+                    ),
                   ),
                 ),
               ),
@@ -1440,8 +1446,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                             style: OutlinedButton.styleFrom(
                               padding: EdgeInsets.zero,
                             ),
-                            child: RemoteImage(
-                              uri: imageUri(repo.session, photo),
+                            child: Semantics(
+                              label:
+                                  'Open review photo ${(r['images'] as List).indexOf(photo) + 1}',
+                              excludeSemantics: true,
+                              child: RemoteImage(
+                                uri: imageUri(repo.session, photo),
+                              ),
                             ),
                           ),
                         ),
