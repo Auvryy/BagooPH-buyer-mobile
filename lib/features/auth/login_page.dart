@@ -5,12 +5,14 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'auth_shell.dart';
+import 'native_google_sign_in.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
     super.key,
     required this.repository,
     required this.onAuthenticated,
+    required this.onGoogleRegistration,
     required this.onRegister,
     required this.onForgot,
     required this.onBrowse,
@@ -18,6 +20,7 @@ class LoginPage extends StatefulWidget {
   });
   final BuyerRepository repository;
   final ValueChanged<WebPage> onAuthenticated;
+  final ValueChanged<GoogleRegistrationChallenge> onGoogleRegistration;
   final VoidCallback onRegister;
   final VoidCallback onForgot;
   final VoidCallback onBrowse;
@@ -73,6 +76,42 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         setState(() => _busy = false);
       }
+    }
+  }
+
+  Future<void> _googleSignIn() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _errors = {};
+    });
+    try {
+      final token = await NativeGoogleSignIn.instance.requestIdToken();
+      if (!mounted || token == null) return;
+      final result = await widget.repository.signInWithGoogle(token);
+      if (!mounted) return;
+      final page = result.page;
+      final registration = result.registration;
+      if (page != null) {
+        widget.onAuthenticated(page);
+      } else if (registration != null) {
+        widget.onGoogleRegistration(registration);
+      } else {
+        setState(() {
+          _error = 'Bagoo could not confirm Google sign-in. Please try again.';
+        });
+      }
+    } on BackendException catch (exception) {
+      if (mounted) setState(() => _error = exception.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _error = 'Google sign-in could not finish. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -142,6 +181,21 @@ class _LoginPageState extends State<LoginPage> {
             busy: _busy,
             onPressed: _submit,
           ),
+          const SizedBox(height: 14),
+          if (NativeGoogleSignIn.isSupported)
+            OutlinedButton(
+              onPressed: _busy ? null : _googleSignIn,
+              child: const Text('Continue with Google'),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Google sign-in is available in the Android and iOS apps.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+              ),
+            ),
           const SizedBox(height: 24),
           Wrap(
             alignment: WrapAlignment.center,

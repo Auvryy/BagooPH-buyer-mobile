@@ -1,6 +1,28 @@
 import 'web_session.dart';
 import 'uploads.dart';
 
+class GoogleRegistrationChallenge {
+  const GoogleRegistrationChallenge({
+    required this.identity,
+    required this.nonce,
+    required this.birthDateLimits,
+    required this.policies,
+  });
+
+  final Map<String, dynamic> identity;
+  final String nonce;
+  final Map<String, dynamic> birthDateLimits;
+  final Map<String, dynamic> policies;
+}
+
+class NativeGoogleAuthOutcome {
+  const NativeGoogleAuthOutcome.signedIn(this.page) : registration = null;
+  const NativeGoogleAuthOutcome.registration(this.registration) : page = null;
+
+  final WebPage? page;
+  final GoogleRegistrationChallenge? registration;
+}
+
 class BuyerRepository {
   BuyerRepository(this.session);
   final WebSession session;
@@ -16,6 +38,65 @@ class BuyerRepository {
     if (page.user == null || page.user?['role'] != 'buyer') {
       throw const BackendException(
         'We could not sign in to your buyer account. Please try again.',
+      );
+    }
+    return page;
+  }
+
+  Future<NativeGoogleAuthOutcome> signInWithGoogle(String idToken) async {
+    final result = await session.jsonPost('/auth/google/native', {
+      'id_token': idToken,
+    });
+    if (result['authenticated'] == true) {
+      return NativeGoogleAuthOutcome.signedIn(await _signedInBuyer());
+    }
+    if (result['registration_required'] != true) {
+      throw const BackendException(
+        'Bagoo could not confirm Google sign-in. Please try again.',
+      );
+    }
+
+    final contract = await session.jsonGet('/auth/google/native/registration');
+    if (contract['identity'] is! Map ||
+        contract['registrationNonce'] is! String ||
+        contract['birthDateLimits'] is! Map ||
+        contract['policies'] is! Map) {
+      throw const BackendException(
+        'The buyer registration details could not be loaded. Start Google sign-in again.',
+      );
+    }
+    return NativeGoogleAuthOutcome.registration(
+      GoogleRegistrationChallenge(
+        identity: mapOf(contract['identity']),
+        nonce: contract['registrationNonce'] as String,
+        birthDateLimits: mapOf(contract['birthDateLimits']),
+        policies: mapOf(contract['policies']),
+      ),
+    );
+  }
+
+  Future<WebPage> completeGoogleRegistration(
+    Map<String, dynamic> values,
+  ) async {
+    final result = await session.jsonPost(
+      '/auth/google/native/register',
+      values,
+    );
+    if (result['registered'] != true) {
+      throw const BackendException(
+        'Bagoo did not confirm buyer registration. Please try again.',
+      );
+    }
+    return _signedInBuyer();
+  }
+
+  Future<WebPage> _signedInBuyer() async {
+    final page = await session.page('/');
+    requireNoErrors(page);
+    if (page.user?['role'] != 'buyer') {
+      throw const BackendException(
+        'Bagoo could not open your buyer account. Sign in again to continue.',
+        status: 401,
       );
     }
     return page;

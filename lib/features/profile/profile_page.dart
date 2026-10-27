@@ -23,6 +23,7 @@ import '../collections/followed_shops_page.dart';
 import '../collections/saved_products_page.dart';
 import '../home/search_controller.dart';
 import '../notifications/notifications_page.dart';
+import '../support/support_assistant_page.dart';
 
 const _sections = {
   'overview': 'Profile',
@@ -261,6 +262,23 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
     if (mounted) await _load();
+  }
+
+  Future<void> _openSupport() async {
+    final userId = user['id'];
+    if (userId is! num) {
+      widget.onLogin();
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SupportAssistantPage(
+          repository: widget.repository,
+          user: Map<String, dynamic>.from(user),
+          available: _page?.props['canUsePortal'] == true,
+        ),
+      ),
+    );
   }
 
   Future<void> _openEngagement(String destination) async {
@@ -521,6 +539,19 @@ class _ProfilePageState extends State<ProfilePage> {
       trailing: const Icon(Icons.chevron_right, size: 18),
       enabled: !_signingOut,
       onTap: () => _openEngagement('notifications'),
+    ),
+    ListTile(
+      leading: const ExcludeSemantics(
+        child: Icon(Icons.support_agent_outlined, size: 20),
+      ),
+      title: const Text(
+        'Help & Support',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      subtitle: const Text('Ask Bagoo or message Customer Care'),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      enabled: !_signingOut,
+      onTap: _openSupport,
     ),
     const Divider(height: 24),
     ListTile(

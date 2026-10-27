@@ -14,6 +14,7 @@ import 'search_controller.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../notifications/notifications_page.dart';
+import '../notifications/push_notifications.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
@@ -68,6 +69,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
     _home.addListener(_homeChanged);
+    PushNotifications.instance.foregroundRefresh.addListener(
+      _foregroundPushReceived,
+    );
     _homeChanged();
     _tab = widget.initialDestination;
     _visited.add(_tab);
@@ -96,6 +100,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _home.removeListener(_homeChanged);
+    PushNotifications.instance.foregroundRefresh.removeListener(
+      _foregroundPushReceived,
+    );
     _home.dispose();
     _search.dispose();
     super.dispose();
@@ -168,6 +175,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         setState(() => _notificationCount = null);
       }
     }
+  }
+
+  void _foregroundPushReceived() {
+    final owner = _home.user?['id'];
+    if (owner is! num || !mounted) return;
+    unawaited(_refreshNotificationSummary(owner));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('You have a new Bagoo update.'),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () => unawaited(_openNotifications()),
+        ),
+      ),
+    );
   }
 
   Future<void> _openNotifications() async {

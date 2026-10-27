@@ -18,13 +18,16 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
 - Native paginated Saved Products and Followed Shops collections, with confirmed remove/unfollow actions and native product/shop pages.
 - A native Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
+- Native Help & Support with Bagoo's account-aware assistant and direct native Bagoo Customer Care chat.
+- Google sign-in and buyer registration in native Flutter, using server-verified Google identity and the same buyer registration policies as the website.
+- Opt-in push alerts for Android/iOS, with generic lock-screen text and notification details loaded from the authenticated native Notifications center.
 - Delivery address-book editing, demo wallet credit requests/history, and available/saved/used/expired vouchers with native Bag use.
 - Paginated purchases, order tracking, cancellation, buyer receipt confirmation, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
 - Native store/courier inbox and return/refund cases, evidence, permitted buyer actions, and authenticated image/PDF viewing.
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Shopping and profile actions stay in Flutter with no browser or WebView handoff. Google OAuth remains outside this pass. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
+Shopping, support, profile actions, and Google buyer registration stay in Flutter with no browser or WebView handoff. Native Google sign-in is available on Android and iOS after provider setup below. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
@@ -85,6 +88,9 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Full product / saved products | `GET /buyer/product/{slug}`, `GET /buyer/saved-products`, `POST/DELETE /buyer/saved-products/{id}` |
 | Shop / followed shops / sale reminders | `GET /shop/{slug}`, `GET /buyer/followed-shops`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
 | Notifications | `GET /notifications/preview`, `GET /notifications`, `PATCH /notifications/{uuid}/read`, and `PATCH /notifications/read-all` using the server-issued read snapshot |
+| Native support | `POST /buyer/support/assistant`, `GET /chat/messages/2`, and `POST /chat/send` |
+| Native Google sign-in | `POST /auth/google/native`, `GET /auth/google/native/registration`, and `POST /auth/google/native/register` |
+| Push device registration | `POST/DELETE /buyer/push-device` |
 | Product conversation | `GET /chat/messages/{receiver}`, `POST /chat/send`, private `GET /chat/attachments/{message}` |
 | Shopping Bag | `GET/POST /cart`, `PATCH/DELETE /cart/{item}`; selected quotes use JSON `GET /cart` with `item_ids[]` |
 | Checkout / quotes / locations | `GET/POST /checkout`, `POST /buyer/vouchers/apply`, `GET /address-locations` |
@@ -108,6 +114,12 @@ Checkout fetches server quotes and ignores stale responses. Order placement requ
 When a voucher expires or becomes ineligible, checkout retains the server-confirmed valid slots and fetches a fresh quote before review. A late voucher comparison cannot replace a newer delivery selection. The payment summary separates product savings from shipping savings within the server's total discount. Form fields remain mounted while scrolling so recipient/address validation and entered values survive both long forms and window resizing.
 
 This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
+
+## Native provider setup
+
+Google sign-in is enabled with build-time Dart defines. Set `BAGOO_GOOGLE_SERVER_CLIENT_ID` to the Google Web OAuth client ID. Set `BAGOO_GOOGLE_IOS_CLIENT_ID` for iOS and replace the `CFBundleURLSchemes` placeholder in `ios/Runner/Info.plist` with that iOS client's reversed ID. Register Android package `shop.bagooph.bagoo_buyer_mobile` with the debug and release signing SHA fingerprints, and register iOS bundle ID `shop.bagooph.bagooBuyerMobile`. On the backend, allow the Web and native client IDs in `GOOGLE_NATIVE_CLIENT_IDS`. Keep the Google Web client secret on the backend only.
+
+Push alerts require Firebase apps registered for those Android/iOS identifiers. Provide `BAGOO_FIREBASE_PROJECT_ID`, `BAGOO_FIREBASE_MESSAGING_SENDER_ID`, `BAGOO_FIREBASE_ANDROID_API_KEY`, `BAGOO_FIREBASE_ANDROID_APP_ID`, `BAGOO_FIREBASE_IOS_API_KEY`, `BAGOO_FIREBASE_IOS_APP_ID`, and `BAGOO_FIREBASE_IOS_BUNDLE_ID` as build-time Dart defines for the target platform. Keep `android/app/google-services.json` local; the Android Google Services plugin is applied only when that file exists. Do not commit Firebase app files or service-account credentials. On iOS, enable Push Notifications and Background Modes, use the provided Runner entitlements, and upload the APNs authentication key to Firebase. The backend needs `FIREBASE_PROJECT_ID`, a readable service-account file outside the repository configured by `FIREBASE_CREDENTIALS_PATH`, the Firebase Cloud Messaging API enabled, and Laravel's scheduler running for `push:deliver-pending`. Linux preview keeps push and Google sign-in disabled.
 
 ## Verification
 

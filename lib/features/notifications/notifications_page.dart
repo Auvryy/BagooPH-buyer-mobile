@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
@@ -8,12 +10,14 @@ import '../../core/widgets.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../home/search_controller.dart';
+import 'push_notifications.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({
     super.key,
     required this.repository,
     required this.ownerId,
+    this.initialNotificationId,
     this.onSearch,
     this.onProfileSection,
     this.onSummaryChanged,
@@ -21,6 +25,7 @@ class NotificationsPage extends StatefulWidget {
 
   final BuyerRepository repository;
   final int ownerId;
+  final String? initialNotificationId;
   final ValueChanged<SearchFilters>? onSearch;
   final ValueChanged<String>? onProfileSection;
   final ValueChanged<int>? onSummaryChanged;
@@ -210,6 +215,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ),
                   children: [
                     _heading(),
+                    const SizedBox(height: 12),
+                    _PushNotificationControl(
+                      repository: widget.repository,
+                      ownerId: widget.ownerId,
+                    ),
                     const SizedBox(height: 14),
                     Wrap(
                       alignment: WrapAlignment.spaceBetween,
@@ -270,6 +280,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                       for (final notice in _notices)
                         _NotificationCard(
                           notice: notice,
+                          highlighted:
+                              notice['id'] == widget.initialNotificationId,
                           busy: _reading == notice['id'],
                           anyBusy: _reading != null,
                           onOpen: () => _openNotice(notice),
@@ -360,9 +372,145 @@ class _NotificationsPageState extends State<NotificationsPage> {
   );
 }
 
+class _PushNotificationControl extends StatefulWidget {
+  const _PushNotificationControl({
+    required this.repository,
+    required this.ownerId,
+  });
+  final BuyerRepository repository;
+  final int ownerId;
+
+  @override
+  State<_PushNotificationControl> createState() =>
+      _PushNotificationControlState();
+}
+
+class _PushNotificationControlState extends State<_PushNotificationControl> {
+  final _push = PushNotifications.instance;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _push.registrationRevision.addListener(_changed);
+    unawaited(_sync());
+  }
+
+  @override
+  void dispose() {
+    _push.registrationRevision.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _sync() async {
+    await _push.syncIfAuthorized(widget.repository, widget.ownerId);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _enable() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _push.enable(widget.repository, widget.ownerId);
+    } on BackendException catch (exception) {
+      if (mounted) setState(() => _error = exception.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _disable() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _push.disable(widget.repository, widget.ownerId);
+    } on BackendException catch (exception) {
+      if (mounted) setState(() => _error = exception.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = _push.isEnabledFor(widget.repository);
+    final configured = _push.isConfigured;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: BagooTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.notifications_active_outlined,
+                color: BagooTheme.crimson,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  enabled
+                      ? 'Push alerts are on'
+                      : 'Get Bagoo alerts on this device',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              if (configured)
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : enabled
+                      ? _disable
+                      : _enable,
+                  child: Text(
+                    _busy
+                        ? 'Please wait…'
+                        : enabled
+                        ? 'Turn off'
+                        : 'Turn on',
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            configured
+                ? 'Receive a general alert when Bagoo adds a new update. Open Notifications to view the details securely.'
+                : 'Push alerts are not configured for this build. Your updates still appear here.',
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.5,
+              color: BagooTheme.muted,
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Notice(_error!, error: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _NotificationCard extends StatelessWidget {
   const _NotificationCard({
     required this.notice,
+    required this.highlighted,
     required this.busy,
     required this.anyBusy,
     required this.onOpen,
@@ -370,6 +518,7 @@ class _NotificationCard extends StatelessWidget {
   });
 
   final Map<String, dynamic> notice;
+  final bool highlighted;
   final bool busy, anyBusy;
   final VoidCallback onOpen, onMarkRead;
 
@@ -386,12 +535,28 @@ class _NotificationCard extends StatelessWidget {
         color: unread ? const Color(0xFFFFF6F8) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: unread ? const Color(0xFFF1B7C5) : BagooTheme.border,
+          color: highlighted
+              ? BagooTheme.crimson
+              : unread
+              ? const Color(0xFFF1B7C5)
+              : BagooTheme.border,
+          width: highlighted ? 2 : 1,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (highlighted) ...[
+            const Text(
+              'Opened from your Bagoo alert',
+              style: TextStyle(
+                color: BagooTheme.strong,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

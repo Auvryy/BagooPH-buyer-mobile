@@ -12,12 +12,16 @@ class LocationPicker extends StatefulWidget {
     required this.onChanged,
     required this.onLoading,
     this.disabled = false,
+    this.required = true,
+    this.errors = const {},
   });
   final BuyerRepository repository;
   final Map<String, String> initial;
   final ValueChanged<Map<String, String>> onChanged;
   final ValueChanged<bool> onLoading;
   final bool disabled;
+  final bool required;
+  final Map<String, String> errors;
   @override
   State<LocationPicker> createState() => _LocationPickerState();
 }
@@ -139,7 +143,10 @@ class _LocationPickerState extends State<LocationPicker> {
                 : null,
             isExpanded: true,
             itemHeight: null,
-            decoration: InputDecoration(labelText: entry.value.$2),
+            decoration: InputDecoration(
+              labelText: entry.value.$2,
+              errorText: widget.errors[entry.key],
+            ),
             items: mapsOf(_options[entry.value.$1])
                 .map(
                   (o) => DropdownMenuItem(
@@ -157,7 +164,7 @@ class _LocationPickerState extends State<LocationPicker> {
             onChanged: _busy || widget.disabled
                 ? null
                 : (v) => _change(entry.key, v),
-            validator: (v) => v == null || v.isEmpty
+            validator: (v) => widget.required && (v == null || v.isEmpty)
                 ? 'Choose ${entry.value.$2.toLowerCase()}.'
                 : null,
           ),

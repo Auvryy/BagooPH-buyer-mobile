@@ -44,3 +44,9 @@ Close three high-impact gaps between the native Flutter buyer app and the Bagoo 
 - An APNs authentication key uploaded to Firebase and the iOS Push Notifications / Background Modes capabilities enabled.
 
 No credentials or generated provider files belong in Git.
+
+## Implementation status
+
+Implemented on `feat/native-buyer-support-auth-push` across the Flutter buyer app and the matching Laravel backend branch. Native support uses the current account-aware assistant and Bagoo Customer Care chat. Google identity is verified server-side before linking or registering a buyer. Push devices are opt-in, encrypted at rest, and delivered through a transactional outbox with expiry, retry, and invalid-token cleanup. Push taps open the native notification center.
+
+Flutter and PHP source formatting and `git diff --check` passed. Automated tests, analyzers, and native builds were not run for this pass. Production Google OAuth client IDs, Firebase app IDs/configuration, APNs setup, the backend Firebase service-account file, and the scheduler are still required to exercise Google sign-in and push end to end. No provider secrets or generated Firebase app files are committed.

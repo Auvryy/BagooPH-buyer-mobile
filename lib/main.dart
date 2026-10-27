@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -9,15 +10,21 @@ import 'core/buyer_actions.dart';
 import 'core/web_session.dart';
 import 'core/widgets.dart';
 import 'features/auth/login_page.dart';
+import 'features/auth/google_buyer_registration_page.dart';
+import 'features/auth/native_google_sign_in.dart';
 import 'features/auth/recovery_page.dart';
 import 'features/auth/register_page.dart';
 import 'features/home/home_page.dart';
+import 'features/notifications/notifications_page.dart';
+import 'features/notifications/push_notifications.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PushNotifications.instance.initialize();
   runApp(const MainApp());
 }
 
-enum _Screen { login, registration, recovery, home }
+enum _Screen { login, registration, googleRegistration, recovery, home }
 
 class MainApp extends StatefulWidget {
   const MainApp({super.key, this.repository});
@@ -34,10 +41,16 @@ class _MainAppState extends State<MainApp> {
   String? _configurationError;
   _Screen _screen = _Screen.login;
   WebPage? _initial;
+  GoogleRegistrationChallenge? _googleChallenge;
+  String? _pendingNotificationId;
   String? _notice;
   @override
   void initState() {
     super.initState();
+    PushNotifications.instance.openedNotificationId.addListener(
+      _handlePushOpen,
+    );
+    _handlePushOpen();
     if (widget.repository != null) {
       _repository = widget.repository;
       return;
@@ -75,17 +88,67 @@ class _MainAppState extends State<MainApp> {
     setState(() {
       _initial = page;
       _screen = _Screen.home;
+      _googleChallenge = null;
       _notice = null;
+    });
+    final userId = page.user?['id'];
+    if (userId is num) {
+      unawaited(
+        PushNotifications.instance.syncIfAuthorized(
+          _repository!,
+          userId.toInt(),
+        ),
+      );
+    }
+    _openPendingNotification();
+  }
+
+  void _handlePushOpen() {
+    final id = PushNotifications.instance.openedNotificationId.value;
+    if (id == null) return;
+    PushNotifications.instance.openedNotificationId.value = null;
+    _pendingNotificationId = id;
+    if (_screen == _Screen.login && mounted) {
+      setState(() => _notice = 'Sign in to view this Bagoo update.');
+    }
+    _openPendingNotification();
+  }
+
+  void _openPendingNotification() {
+    final id = _pendingNotificationId;
+    final user = _initial?.user;
+    final userId = user?['id'];
+    if (id == null ||
+        _screen != _Screen.home ||
+        user?['role'] != 'buyer' ||
+        userId is! num) {
+      return;
+    }
+    _pendingNotificationId = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _repository == null) return;
+      _navigator.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) => NotificationsPage(
+            repository: _repository!,
+            ownerId: userId.toInt(),
+            initialNotificationId: id,
+          ),
+        ),
+      );
     });
   }
 
   Future<void> _logout() async {
+    await PushNotifications.instance.unregister(_repository!);
     await _repository!.logout();
+    await NativeGoogleSignIn.instance.signOut();
     if (mounted) {
       setState(() {
         _initial = null;
         _pendingDestination = 0;
         _pendingProduct = null;
+        _pendingNotificationId = null;
         _screen = _Screen.login;
         _notice = 'You have been logged out.';
       });
@@ -94,6 +157,9 @@ class _MainAppState extends State<MainApp> {
 
   @override
   void dispose() {
+    PushNotifications.instance.openedNotificationId.removeListener(
+      _handlePushOpen,
+    );
     if (widget.repository == null) {
       _repository?.session.close();
     }
@@ -151,6 +217,11 @@ class _MainAppState extends State<MainApp> {
                 repository: _repository!,
                 notice: _notice,
                 onAuthenticated: _authenticated,
+                onGoogleRegistration: (challenge) => setState(() {
+                  _googleChallenge = challenge;
+                  _screen = _Screen.googleRegistration;
+                  _notice = null;
+                }),
                 onRegister: () => _go(_Screen.registration),
                 onForgot: () => _go(_Screen.recovery),
                 onBrowse: () {
@@ -179,6 +250,20 @@ class _MainAppState extends State<MainApp> {
                     );
                   }
                 },
+              ),
+              _Screen.googleRegistration => GoogleBuyerRegistrationPage(
+                repository: _repository!,
+                challenge: _googleChallenge!,
+                onBack: () {
+                  _googleChallenge = null;
+                  _go(_Screen.login);
+                },
+                onBrowse: () {
+                  _googleChallenge = null;
+                  _initial = null;
+                  _go(_Screen.home);
+                },
+                onComplete: _authenticated,
               ),
               _Screen.recovery => RecoveryPage(
                 repository: _repository!,
