@@ -8,7 +8,9 @@ import '../../core/buyer_actions.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_page.dart';
-import 'home_controller.dart';
+import '../products/product_widgets.dart';
+import 'search_controller.dart';
+import 'search_filters.dart';
 import 'product_card.dart';
 
 class SearchPage extends StatefulWidget {
@@ -19,28 +21,79 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-  late final HomeController _catalogue;
+  late final CatalogueSearchController _catalogue;
   final _text = TextEditingController();
+  final _scroll = ScrollController();
   Timer? _debounce;
   final _saving = <int>{};
+  SearchFilters get filters => _catalogue.filters;
   @override
   void initState() {
     super.initState();
-    _catalogue = HomeController(widget.repository);
-    _catalogue.load();
+    _catalogue = CatalogueSearchController(widget.repository)..load();
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
     _text.dispose();
+    _scroll.dispose();
     _catalogue.dispose();
     super.dispose();
   }
 
-  void _search() {
+  void _apply(SearchFilters value) {
     _debounce?.cancel();
-    _catalogue.filter(query: _text.text);
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _catalogue.apply(value);
+  }
+
+  void _search() => _apply(filters.copyWith(query: _text.text));
+  void _reset() => _apply(SearchFilters(query: _text.text.trim()));
+  Future<void> _filters() async {
+    _debounce?.cancel();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheet) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheet).height * .82,
+          child: Column(
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  tooltip: 'Close filters without applying',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(sheet),
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  child: SearchFiltersForm(
+                    value: filters.copyWith(query: _text.text.trim()),
+                    categories: _catalogue.categories,
+                    locations: _catalogue.locations,
+                    onApply: (value) {
+                      Navigator.pop(sheet);
+                      _apply(value);
+                    },
+                    onReset: () {
+                      Navigator.pop(sheet);
+                      _reset();
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _open(Map<String, dynamic> product) async {
@@ -65,6 +118,7 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
     final id = (product['id'] as num).toInt();
+    if (_saving.contains(id)) return;
     setState(() => _saving.add(id));
     try {
       await widget.repository.saveProduct(id, !saved);
@@ -84,24 +138,97 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _catalogue,
-    builder: (context, _) => LayoutBuilder(
-      builder: (context, box) {
-        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final count = productColumns(box.maxWidth, scale);
-        final width = (box.maxWidth - 32 - (count - 1) * 14) / count;
-        return RefreshIndicator(
-          onRefresh: _catalogue.load,
-          child: CustomScrollView(
-            key: const PageStorageKey('buyer-search'),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.all(16),
-                sliver: SliverToBoxAdapter(
+  Widget _card(Map<String, dynamic> product) {
+    final id = (product['id'] as num).toInt();
+    final saved = (_catalogue.data?.props['savedProductIds'] as List? ?? [])
+        .contains(id);
+    return ProductCard(
+      product: product,
+      session: widget.repository.session,
+      onTap: () => _open(product),
+      saved: saved,
+      saving: _saving.contains(id),
+      saveLabel: _catalogue.user == null
+          ? 'Sign in to save'
+          : !_canSave
+          ? 'Approval required'
+          : saved
+          ? 'Remove from saved'
+          : 'Save product',
+      onSave: _catalogue.user != null && !_canSave
+          ? null
+          : () => _save(product, saved),
+    );
+  }
+
+  Widget _chips() {
+    String label(
+      List<Map<String, dynamic>> rows,
+      String field,
+      String value,
+      String title,
+    ) =>
+        rows.where((r) => r[field] == value).firstOrNull?[title]?.toString() ??
+        value;
+    final chips = <(String, SearchFilters)>[
+      if (filters.category.isNotEmpty)
+        (
+          label(_catalogue.categories, 'slug', filters.category, 'name'),
+          filters.copyWith(category: ''),
+        ),
+      if (filters.location.isNotEmpty)
+        (
+          label(_catalogue.locations, 'value', filters.location, 'label'),
+          filters.copyWith(location: ''),
+        ),
+      if (filters.minimum.isNotEmpty || filters.maximum.isNotEmpty)
+        (
+          '₱${filters.minimum.isEmpty ? '0' : filters.minimum} – ${filters.maximum.isEmpty ? 'Any' : '₱${filters.maximum}'}',
+          filters.copyWith(minimum: '', maximum: ''),
+        ),
+      if (filters.inStock) ('In stock', filters.copyWith(inStock: false)),
+      if (filters.rating.isNotEmpty)
+        ('${filters.rating}+ stars', filters.copyWith(rating: '')),
+    ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final chip in chips)
+          InputChip(
+            label: Text(chip.$1),
+            deleteButtonTooltipMessage: 'Remove ${chip.$1} filter',
+            onDeleted: () => _apply(chip.$2),
+          ),
+        if (chips.isNotEmpty || filters.sort != 'relevance')
+          TextButton(onPressed: _reset, child: const Text('Reset filters')),
+      ],
+    );
+  }
+
+  Widget _results(bool wide) => LayoutBuilder(
+    builder: (context, box) {
+      final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      final count = productColumns(box.maxWidth, scale);
+      final width = (box.maxWidth - 32 - (count - 1) * 14) / count;
+      final related =
+          !_catalogue.loading &&
+              _catalogue.error == null &&
+              _catalogue.products.isEmpty
+          ? _catalogue.related
+          : <Map<String, dynamic>>[];
+      return RefreshIndicator(
+        onRefresh: _catalogue.load,
+        child: CustomScrollView(
+          controller: _scroll,
+          key: const PageStorageKey('buyer-search'),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverToBoxAdapter(
+                child: ProductPanel(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -115,19 +242,24 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Search products across the BagooPH marketplace.',
+                        'Discover products from Bagoo shops.',
                         style: TextStyle(
                           fontSize: 13,
                           height: 1.7,
                           color: BagooTheme.muted,
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
                       TextField(
                         controller: _text,
+                        maxLength: 100,
                         textInputAction: TextInputAction.search,
-                        onSubmitted: (_) => _search(),
+                        onSubmitted: (_) {
+                          FocusScope.of(context).unfocus();
+                          _search();
+                        },
                         onChanged: (_) {
+                          setState(() {});
                           _debounce?.cancel();
                           _debounce = Timer(
                             const Duration(milliseconds: 450),
@@ -136,7 +268,8 @@ class _SearchPageState extends State<SearchPage> {
                         },
                         decoration: InputDecoration(
                           labelText: 'Search the marketplace',
-                          hintText: 'Products, brands, or something new',
+                          hintText: 'Products, shops, or departments',
+                          counterText: '',
                           prefixIcon: const Icon(Icons.search),
                           suffixIcon: IconButton(
                             tooltip: _text.text.isEmpty
@@ -154,166 +287,207 @@ class _SearchPageState extends State<SearchPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
+                      if (!wide) ...[
+                        OutlinedButton.icon(
+                          onPressed: _catalogue.data == null ? null : _filters,
+                          icon: const Icon(Icons.tune),
+                          label: Text(
+                            'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       DropdownButtonFormField<String>(
-                        initialValue: _catalogue.sort,
+                        key: ValueKey(filters.sort),
+                        initialValue: filters.sort,
                         isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Sort results',
                         ),
                         items: [
-                          for (final option in {
-                            'relevance': 'Recommended',
-                            'top_sales': 'Top sales',
-                            'newest': 'Latest',
-                            'price_asc': 'Price: low to high',
-                            'price_desc': 'Price: high to low',
-                          }.entries)
+                          for (final sort in searchSorts.entries)
                             DropdownMenuItem(
-                              value: option.key,
-                              child: Text(option.value),
+                              value: sort.key,
+                              child: Text(sort.value),
                             ),
                         ],
-                        onChanged: (value) => _catalogue.filter(order: value),
-                      ),
-                      const SizedBox(height: 16),
-                      if (_catalogue.categories.isNotEmpty)
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: ChoiceChip(
-                                  label: const Text('All departments'),
-                                  selected: _catalogue.category.isEmpty,
-                                  onSelected: (_) =>
-                                      _catalogue.filter(department: ''),
-                                ),
-                              ),
-                              for (final category in _catalogue.categories)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: ChoiceChip(
-                                    label: Text(category['name'].toString()),
-                                    selected:
-                                        _catalogue.category == category['slug'],
-                                    onSelected: (_) => _catalogue.filter(
-                                      department: category['slug'].toString(),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                        onChanged: (value) => _apply(
+                          filters.copyWith(
+                            sort: value,
+                            query: _text.text.trim(),
                           ),
                         ),
-                      const SizedBox(height: 20),
-                      if (_catalogue.loading) const LinearProgressIndicator(),
-                      if (_catalogue.error != null) ...[
-                        Notice(_catalogue.error!, error: true),
-                        TextButton(
-                          onPressed: _catalogue.load,
-                          child: const Text('Try again'),
-                        ),
-                      ] else if (!_catalogue.loading)
-                        Text(
-                          '${_catalogue.total} ${_catalogue.search.isEmpty ? 'products to discover' : 'results for “${_catalogue.search}”'}',
+                      ),
+                      const SizedBox(height: 12),
+                      _chips(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_catalogue.loading)
+                      const LinearProgressIndicator(
+                        semanticsLabel: 'Searching products',
+                      ),
+                    if (_catalogue.error != null) ...[
+                      Notice(_catalogue.error!, error: true),
+                      TextButton(
+                        onPressed: _catalogue.load,
+                        child: const Text('Try again'),
+                      ),
+                    ],
+                    if (!_catalogue.loading && _catalogue.error == null)
+                      Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          '${_catalogue.total} ${filters.query.trim().isEmpty ? 'products to discover' : 'results for “${filters.query.trim()}”'}',
                           style: const TextStyle(
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             height: 1.7,
                           ),
                         ),
-                      if (!_catalogue.loading &&
-                          _catalogue.error == null &&
-                          _catalogue.products.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 40),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.search_off,
-                                size: 48,
-                                color: BagooTheme.muted,
-                              ),
-                              SizedBox(height: 16),
-                              Text(
-                                'No matching products',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                'Try another search or department.',
-                                textAlign: TextAlign.center,
+                      ),
+                    if (!_catalogue.loading &&
+                        _catalogue.error == null &&
+                        _catalogue.products.isEmpty)
+                      ProductPanel(
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.search_off,
+                              size: 44,
+                              color: BagooTheme.muted,
+                            ),
+                            const SizedBox(height: 12),
+                            const ProductHeading('No matching products'),
+                            const Text(
+                              'Try another search or broaden your filters.',
+                              textAlign: TextAlign.center,
+                            ),
+                            if (_catalogue.suggestions.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              const Text('Did you mean?'),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final suggestion
+                                      in _catalogue.suggestions)
+                                    ActionChip(
+                                      label: Text(suggestion),
+                                      onPressed: () {
+                                        _text.text = suggestion;
+                                        _search();
+                                      },
+                                    ),
+                                ],
                               ),
                             ],
-                          ),
+                            TextButton(
+                              onPressed: () {
+                                _text.clear();
+                                _apply(const SearchFilters());
+                              },
+                              child: const Text('Browse all products'),
+                            ),
+                          ],
                         ),
-                    ],
-                  ),
+                      ),
+                    if (related.isNotEmpty)
+                      const ProductHeading('You may also like'),
+                  ],
                 ),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverGrid.builder(
-                  itemCount: _catalogue.loading
-                      ? 0
-                      : _catalogue.products.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: count,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    mainAxisExtent: width + productCardBodyHeight * scale,
-                  ),
-                  itemBuilder: (context, index) {
-                    final product = _catalogue.products[index];
-                    final id = (product['id'] as num).toInt();
-                    final saved =
-                        (_catalogue.data?.props['savedProductIds'] as List? ??
-                                [])
-                            .contains(id);
-                    return ProductCard(
-                      product: product,
-                      session: widget.repository.session,
-                      onTap: () => _open(product),
-                      saved: saved,
-                      saving: _saving.contains(id),
-                      saveLabel: _catalogue.user == null
-                          ? 'Sign in to save'
-                          : !_canSave
-                          ? 'Approval required'
-                          : saved
-                          ? 'Remove from saved'
-                          : 'Save product',
-                      onSave: _catalogue.user != null && !_canSave
-                          ? null
-                          : () => _save(product, saved),
-                    );
-                  },
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverGrid.builder(
+                itemCount: _catalogue.loading || _catalogue.error != null
+                    ? 0
+                    : related.isEmpty
+                    ? _catalogue.products.length
+                    : related.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: count,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 14,
+                  mainAxisExtent: width + productCardBodyHeight * scale,
+                ),
+                itemBuilder: (_, index) => _card(
+                  (related.isEmpty ? _catalogue.products : related)[index],
                 ),
               ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    if (_catalogue.moreError != null)
+                      Notice(_catalogue.moreError!, error: true),
+                    if (_catalogue.hasMore && _catalogue.error == null)
+                      OutlinedButton.icon(
+                        onPressed: _catalogue.loading || _catalogue.loadingMore
+                            ? null
+                            : () => _catalogue.load(more: true),
+                        icon: const Icon(Icons.expand_more),
+                        label: Text(
+                          _catalogue.loadingMore
+                              ? 'Loading…'
+                              : 'Load more products',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _catalogue,
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, box) {
+        final wide =
+            box.maxWidth >= 1050 &&
+            MediaQuery.textScalerOf(context).scale(16) < 24;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1500),
+            child: wide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (_catalogue.moreError != null)
-                        Notice(_catalogue.moreError!, error: true),
-                      if (_catalogue.hasMore)
-                        OutlinedButton(
-                          onPressed:
-                              _catalogue.loading || _catalogue.loadingMore
-                              ? null
-                              : () => _catalogue.load(more: true),
-                          child: Text(
-                            _catalogue.loadingMore
-                                ? 'Loading…'
-                                : 'Load more products',
+                      SizedBox(
+                        width: 300,
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
+                          child: ProductPanel(
+                            child: SearchFiltersForm(
+                              key: ValueKey(filters.parameters.toString()),
+                              value: filters,
+                              categories: _catalogue.categories,
+                              locations: _catalogue.locations,
+                              onApply: _apply,
+                              onReset: _reset,
+                            ),
                           ),
                         ),
+                      ),
+                      Expanded(child: _results(true)),
                     ],
-                  ),
-                ),
-              ),
-            ],
+                  )
+                : _results(false),
           ),
         );
       },

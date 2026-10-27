@@ -146,6 +146,21 @@ class BuyerRepository {
     return result;
   }
 
+  Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
+    final query = Uri(
+      queryParameters: {...filters, if (page > 1) 'page': '$page'},
+    ).query;
+    final result = await session.page(
+      '/buyer/search${query.isEmpty ? '' : '?$query'}',
+    );
+    requireNoErrors(result);
+    if (result.component != 'Buyer/Search' ||
+        result.props['products'] is! Map) {
+      throw const BackendException('Product search is unavailable. Try again.');
+    }
+    return result;
+  }
+
   Future<bool> saveProduct(int id, bool saved) async {
     final data = await session.jsonPost(
       '/buyer/saved-products/$id',
