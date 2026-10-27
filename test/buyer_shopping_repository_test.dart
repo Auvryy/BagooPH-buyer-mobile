@@ -129,6 +129,34 @@ void main() {
     },
   );
 
+  test(
+    'selected Bag quote reads the existing JSON route with array IDs',
+    () async {
+      server.listen((request) async {
+        expect(request.method, 'GET');
+        expect(request.uri.path, '/cart');
+        expect(request.uri.queryParametersAll['item_ids[]'], ['2', '7']);
+        expect(request.headers.value('Accept'), 'application/json');
+        request.response.write(
+          jsonEncode({
+            'quote': {
+              'items': [
+                {'id': 2},
+                {'id': 7},
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      final quote = await repo.bagQuote([2, 7]);
+      expect(mapsOf(mapOf(quote['quote'])['items']).map((row) => row['id']), [
+        2,
+        7,
+      ]);
+    },
+  );
+
   test('Bag PATCH and DELETE confirm the actual returned item state', () async {
     var deleted = false;
     server.listen((request) async {

@@ -231,6 +231,10 @@ class BuyerRepository {
     return page;
   }
 
+  Future<Map<String, dynamic>> bagQuote(List<int> ids) => session.jsonGet(
+    '/cart?${Uri(queryParameters: {'item_ids[]': ids.map((id) => '$id').toList()}).query}',
+  );
+
   Future<WebPage> changeBagItem(int id, int? quantity) async {
     final page = await session.submit(
       '/cart/$id',

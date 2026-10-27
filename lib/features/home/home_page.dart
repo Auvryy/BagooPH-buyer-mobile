@@ -141,7 +141,11 @@ class _HomePageState extends State<HomePage> {
               children: [
                 _marketplace(),
                 if (_visited.contains(1))
-                  BagPage(repository: widget.repository, active: _tab == 1)
+                  BagPage(
+                    repository: widget.repository,
+                    active: _tab == 1,
+                    onBrowse: () => _selectTab(2),
+                  )
                 else
                   const SizedBox.shrink(),
                 if (_visited.contains(2))
