@@ -7,6 +7,7 @@ import '../../core/widgets.dart';
 import 'campaigns.dart';
 import 'home_controller.dart';
 import 'product_card.dart';
+import 'search_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../checkout/order_result_page.dart';
@@ -35,6 +36,11 @@ class _HomePageState extends State<HomePage> {
   late final HomeController _home;
   final _search = TextEditingController();
   int _tab = 0;
+  final _visited = <int>{0};
+  void _selectTab(int tab) => setState(() {
+    _tab = tab;
+    _visited.add(tab);
+  });
   bool _signingOut = false;
   String? _logoutError;
   bool _openingOrders = false;
@@ -81,7 +87,8 @@ class _HomePageState extends State<HomePage> {
       });
     }
     if (widget.initial != null && widget.initial!.component != 'Buyer/Home') {
-      _tab = 2;
+      _tab = 3;
+      _visited.add(3);
     } else {
       _home.load();
     }
@@ -124,67 +131,73 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _home,
     builder: (context, _) => Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 72,
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Brand(size: 32),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Shopping Bag',
-            icon: const Icon(Icons.shopping_bag_outlined),
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => BagPage(repository: widget.repository),
-                ),
-              );
-              if (mounted) {
-                _home.load();
-              }
-            },
-          ),
-          if (_home.user == null)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: TextButton(
-                onPressed: widget.onLogin,
-                child: const Text('Log In'),
+      appBar: _tab == 1
+          ? null
+          : AppBar(
+              toolbarHeight: 72,
+              title: const FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Brand(size: 32),
               ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: IconButton(
-                tooltip: 'Your account',
-                onPressed: () => setState(() => _tab = 2),
-                icon: const Icon(Icons.person_outline_rounded),
+              actions: [
+                IconButton(
+                  tooltip: 'Shopping Bag',
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  onPressed: () => _selectTab(1),
+                ),
+                if (_home.user == null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: TextButton(
+                      onPressed: widget.onLogin,
+                      child: const Text('Log In'),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: IconButton(
+                      tooltip: 'Your account',
+                      onPressed: () => _selectTab(3),
+                      icon: const Icon(Icons.person_outline_rounded),
+                    ),
+                  ),
+              ],
+              bottom: const PreferredSize(
+                preferredSize: Size.fromHeight(1),
+                child: Divider(height: 1),
               ),
             ),
-        ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1),
-        ),
-      ),
       body: SafeArea(
         top: false,
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1280),
-            child: switch (_tab) {
-              1 => _departments(),
-              2 => _account(),
-              _ => _marketplace(),
-            },
+            child: IndexedStack(
+              index: _tab,
+              children: [
+                _marketplace(),
+                if (_visited.contains(1))
+                  BagPage(repository: widget.repository)
+                else
+                  const SizedBox.shrink(),
+                if (_visited.contains(2))
+                  SearchPage(repository: widget.repository)
+                else
+                  const SizedBox.shrink(),
+                if (_visited.contains(3))
+                  _account()
+                else
+                  const SizedBox.shrink(),
+              ],
+            ),
           ),
         ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (index) => setState(() => _tab = index),
+        onDestinationSelected: _selectTab,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -192,17 +205,22 @@ class _HomePageState extends State<HomePage> {
             label: 'Home',
           ),
           NavigationDestination(
-            icon: Icon(Icons.grid_view_outlined),
+            icon: Icon(Icons.shopping_bag_outlined),
             selectedIcon: Icon(
-              Icons.grid_view_rounded,
+              Icons.shopping_bag_rounded,
               color: BagooTheme.strong,
             ),
-            label: 'Departments',
+            label: 'Cart',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.search_outlined),
+            selectedIcon: Icon(Icons.search, color: BagooTheme.strong),
+            label: 'Search',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline_rounded),
             selectedIcon: Icon(Icons.person_rounded, color: BagooTheme.strong),
-            label: 'Account',
+            label: 'Profile',
           ),
         ],
       ),
@@ -269,7 +287,7 @@ class _HomePageState extends State<HomePage> {
                         error: true,
                       ),
                       TextButton(
-                        onPressed: () => setState(() => _tab = 2),
+                        onPressed: () => _selectTab(3),
                         child: const Text('View account'),
                       ),
                     ] else if (!_home.loading && _home.data != null) ...[
@@ -621,50 +639,6 @@ class _HomePageState extends State<HomePage> {
     ),
   );
 
-  Widget _departments() => ListView(
-    padding: const EdgeInsets.all(24),
-    children: [
-      const Text(
-        'Shop by department',
-        style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 8),
-      const Text(
-        'Explore the BagooPH marketplace.',
-        style: TextStyle(color: BagooTheme.muted),
-      ),
-      const SizedBox(height: 24),
-      if (_home.loading) const LinearProgressIndicator(),
-      if (_home.error != null) ...[
-        Notice(_home.error!, error: true),
-        TextButton(onPressed: _home.load, child: const Text('Try again')),
-      ],
-      for (final category in _home.categories)
-        Card(
-          elevation: 0,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            side: const BorderSide(color: BagooTheme.border),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 8,
-            ),
-            leading: ExcludeSemantics(
-              child: Icon(categoryIcon(category), color: BagooTheme.strong),
-            ),
-            title: Text(
-              category['name'].toString(),
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _selectCategory(category['slug'].toString()),
-          ),
-        ),
-    ],
-  );
   Widget _account() => ListView(
     padding: const EdgeInsets.all(24),
     children: [
