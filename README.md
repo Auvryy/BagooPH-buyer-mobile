@@ -10,13 +10,17 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Guest browsing and signed-in home with real products, departments, campaigns when configured, search, sorting, pagination, refresh, empty states, and retry.
 - Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
 - Full native product pages with gallery/zoom, options, variant prices and stock limits, Add to Bag, Buy Now, shop information, offers, specifications, descriptions, verified reviews/photos, and seller replies.
-- Native shop search/pagination/following and product chat with a text composer and private photo viewing.
+- Native shop search/pagination/following and product chat with text, photo uploads, and private photo viewing.
 - Native Shopping Bag selection, quantity changes, removal, and approved-buyer checkout with saved/new canonical Philippine addresses, delivery options, vouchers, COD or wallet, and explicit order review.
-- Server-confirmed order results, recent orders/pagination, and wallet payment review, confirmation, cancellation, and status refresh.
+- Home, Cart, Search, and Profile bottom tabs, with independent search and preserved visited tab/form state.
+- A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
+- Delivery address-book editing, demo wallet credit requests/history, and available/saved/used/expired vouchers with native Bag use.
+- Paginated purchases, order tracking, cancellation, buyer receipt confirmation, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
+- Native store/courier inbox and return/refund cases, evidence, permitted buyer actions, and authenticated image/PDF viewing.
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Shopping stays in Flutter: no browser or WebView handoff. Identity-document submission, Google OAuth, chat photo uploads, full address-book editing, and order tracking/cancellation/receipt-confirmation actions are not implemented in this pass. Registration may omit optional address and document fields. The app never creates a local account or accepts a locally generated verification code.
+Shopping and profile actions stay in Flutter with no browser or WebView handoff. Google OAuth remains outside this pass. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
@@ -26,6 +30,8 @@ The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping
 - Android SDK and a compatible JDK for Android builds.
 - macOS and Xcode for iOS builds.
 - The existing BagooPH backend, with its buyer web origin accessible from the device. Start/configure it using that repository's README. Email-code flows require working backend mail delivery.
+
+`file_selector` provides the native picker for profile photos and evidence. `pdfrx` renders private PDFs inside the app, with document links disabled. These plugins are included in the native builds; iOS targets iOS 15 or later. Private evidence is fetched through the authenticated session into memory; the app does not save a copy to disk.
 
 ## Run
 
@@ -76,10 +82,18 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Shopping Bag | `GET/POST /cart`, `PATCH/DELETE /cart/{item}` |
 | Checkout / quotes / locations | `GET/POST /checkout`, `POST /buyer/vouchers/apply`, `GET /address-locations` |
 | Saved vouchers | `POST /buyer/saved-vouchers/{revision}`, `DELETE /buyer/saved-vouchers/{saved}` |
-| Orders / wallet | `GET /buyer/orders`, `GET /wallet/payments/{id}`, `POST /wallet/payments/{id}/pay` or `/cancel` |
+| Profile / personal info / password | `GET/POST /buyer/profile`, `PUT /password`, `POST /email/verification-notification` |
+| Contact emails / identity | `/account/emails/*`, `POST /buyer/kyc/upload`, `POST /kyc/resubmit`, `/account/identity-corrections` |
+| Login activity | `GET /account/security`, `POST /account/security/code`, `POST /account/security/sessions/{id}/revoke` or `/account/security/sessions/revoke-others` |
+| Delivery addresses | `/buyer/addresses`, `/buyer/addresses/{id}`, `/buyer/addresses/{id}/default` |
+| Orders / wallet | `GET /buyer/orders`, `GET /buyer/orders/{id}`, `POST /buyer/orders/{id}/confirm`, `POST /buyer/orders/{id}/cancel`, `POST /buyer/orders/{id}/buy-again`, `POST /wallet/credits`, `/wallet/payments/{id}` and `/pay` or `/cancel` |
+| Reviews / pickup code | `POST /buyer/reviews`, `PATCH /buyer/reviews/{id}`, `POST /buyer/orders/{id}/pickup-code` |
+| Inbox / returns | `GET /buyer/messages`, `/buyer-returns`, `/buyer-returns/orders/{id}/create`, `/buyer-returns/{id}` and permitted buyer action/evidence routes |
 | Account policies | Versioned URLs supplied by `GET /register` |
 
 The adapter bootstraps CSRF and session cookies from the web page, reads Inertia props, refreshes the asset version after deployments, handles JSON validation errors, and follows redirects only within the configured origin. It never replays a failed mutation automatically. No credentials, cookies, or tokens are logged or written to disk. Sessions last only while the app process remains alive; reopening the app requires login.
+
+Profile changes use the website's existing eligibility and validation contracts. The original sign-in email and account role remain fixed. Reviewed identity changes go through the server's correction review; wallet balances and order status only change after server confirmation. Explicit retries preserve request tokens and payloads where the backend provides replay protection. Responses from an earlier cleared session are discarded.
 
 Checkout fetches server quotes and ignores stale responses. Order placement requires a separate review and confirmation. An uncertain response retains the exact payload and server submission token for an explicit retry; buyers can check recorded orders first. The server revalidates prices, stock, account eligibility, delivery, and vouchers. Wallet payment is a separate confirmed action using the server request token.
 
@@ -103,4 +117,6 @@ dart run tool/check_backend.dart '<BACKEND_ORIGIN>'
 
 The check needs at least one published product and reads home, registration requirements, policies, filtered catalogue, full product details, shop catalogue, guest Bag, and checkout location choices. It never signs in, registers users, sends emails, places orders, or accesses private conversations. Automated tests use isolated fixtures and a temporary local HTTP server. They cover auth/session boundaries, shopping confirmations, option pricing and stock, explicit checkout review, stale quotes, exact retry payloads, and phone/tablet/large-text layouts. No live order, payment, email, or chat mutations are performed by these checks.
 
-For iOS on macOS, run `flutter build ios --no-codesign`. Review the [authentication plan](docs/plans/buyer-auth-home.md) and [native product journey plan](docs/plans/buyer-products.md) for scope and verification evidence.
+The profile/navigation pass was checked with formatting, static analysis, Android/Linux compilation, and authenticated read-only inspection of the local backend contracts. Its account, wallet, order, return, and messaging mutations have not been exercised against live data. No automated tests were added or run for this pass; the existing test suite's earlier coverage does not verify the new profile flows. Device layout, native picker/PDF interaction, and accessibility checks still need manual review.
+
+For iOS on macOS, run `flutter build ios --no-codesign`; iOS compilation was not available on the Linux development host. Review the [authentication plan](docs/plans/buyer-auth-home.md), [native product journey plan](docs/plans/buyer-products.md), and [profile/navigation plan](docs/plans/buyer-profile.md) for scope and verification evidence.
