@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
@@ -9,6 +11,9 @@ import 'home_controller.dart';
 import 'product_card.dart';
 import 'search_page.dart';
 import 'search_controller.dart';
+import '../engagement/buyer_destination_router.dart';
+import '../engagement/engagement_repository.dart';
+import '../notifications/notifications_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
@@ -38,12 +43,17 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
   final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
   SearchFilters? _searchRequest;
+  int? _notificationCount;
+  Object? _notificationOwner;
+  int _notificationGeneration = 0;
+  String _profileSection = 'overview';
+  int _profileSectionRequest = 0;
   void _selectTab(int tab) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -55,7 +65,10 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
+    _home.addListener(_homeChanged);
+    _homeChanged();
     _tab = widget.initialDestination;
     _visited.add(_tab);
     if (_tab != 0) {
@@ -81,9 +94,18 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _home.removeListener(_homeChanged);
     _home.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _home.user?['id'] is num) {
+      unawaited(_refreshNotificationSummary(_home.user!['id']));
+    }
   }
 
   void _selectCategory(String slug) {
@@ -97,6 +119,110 @@ class _HomePageState extends State<HomePage> {
       _tab = 2;
       _visited.add(2);
     });
+  }
+
+  void _openSearchFilters(SearchFilters filters) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _searchRequest = filters;
+      _tab = 2;
+      _visited.add(2);
+    });
+  }
+
+  void _openProfileSection(String section) {
+    setState(() {
+      _profileSection = section;
+      _profileSectionRequest++;
+      _tab = 3;
+      _visited.add(3);
+    });
+  }
+
+  void _homeChanged() {
+    final owner = _home.user?['id'];
+    if (owner == _notificationOwner) return;
+    _notificationOwner = owner;
+    _notificationGeneration++;
+    if (owner is num) {
+      unawaited(_refreshNotificationSummary(owner));
+    } else if (mounted) {
+      setState(() => _notificationCount = null);
+    }
+  }
+
+  Future<void> _refreshNotificationSummary(Object owner) async {
+    final generation = ++_notificationGeneration;
+    try {
+      final response = await BuyerEngagementRepository(widget.repository)
+          .notificationPreview();
+      final summary = mapOf(response['summary']);
+      final count = (summary['unread'] as num).toInt();
+      if (mounted &&
+          generation == _notificationGeneration &&
+          owner == _home.user?['id']) {
+        setState(() => _notificationCount = count);
+      }
+    } on BackendException {
+      if (mounted && generation == _notificationGeneration) {
+        setState(() => _notificationCount = null);
+      }
+    }
+  }
+
+  Future<void> _openNotifications() async {
+    final user = _home.user;
+    if (user == null) {
+      widget.onLogin();
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationsPage(
+          repository: widget.repository,
+          ownerId: (user['id'] as num).toInt(),
+          onSearch: _openSearchFilters,
+          onProfileSection: _openProfileSection,
+          onSummaryChanged: (count) {
+            if (mounted && _home.user?['id'] == user['id']) {
+              setState(() => _notificationCount = count);
+            }
+          },
+        ),
+      ),
+    );
+    if (mounted && _home.user?['id'] is num) {
+      await _refreshNotificationSummary(_home.user!['id']);
+    }
+  }
+
+  void _openBanner(Map<String, dynamic> banner) {
+    unawaited(_openBannerDestination(banner));
+  }
+
+  Future<void> _openBannerDestination(Map<String, dynamic> banner) async {
+    final measurement = mapOf(banner['measurement']);
+    if (measurement.isNotEmpty) {
+      unawaited(
+        BuyerEngagementRepository(widget.repository)
+            .reportAdvertisementClick(measurement)
+            .catchError((_) {}),
+      );
+    }
+    try {
+      await BuyerDestinationRouter.openHref(
+        context,
+        widget.repository,
+        banner['href']?.toString(),
+        onSearch: _openSearchFilters,
+        onProfileSection: _openProfileSection,
+      );
+    } on BackendException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
   }
 
   @override
@@ -113,6 +239,25 @@ class _HomePageState extends State<HomePage> {
                 child: Brand(size: 32),
               ),
               actions: [
+                if (_home.user != null)
+                  IconButton(
+                    tooltip: _notificationCount == null
+                        ? 'Notifications'
+                        : _notificationCount == 0
+                        ? 'Notifications'
+                        : 'Notifications, $_notificationCount unread',
+                    onPressed: _openNotifications,
+                    icon: Badge(
+                      isLabelVisible:
+                          _notificationCount != null && _notificationCount! > 0,
+                      label: Text(
+                        _notificationCount != null && _notificationCount! > 99
+                            ? '99+'
+                            : '${_notificationCount ?? 0}',
+                      ),
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
+                  ),
                 IconButton(
                   tooltip: 'Shopping Bag',
                   icon: const Icon(Icons.shopping_bag_outlined),
@@ -174,6 +319,9 @@ class _HomePageState extends State<HomePage> {
                     user: _home.user,
                     initial: widget.initial,
                     active: _tab == 3,
+                    initialSection: _profileSection,
+                    sectionRequest: _profileSectionRequest,
+                    onSearch: _openSearchFilters,
                     onLogin: () =>
                         BuyerActions.login(context, destination: 'profile'),
                     onLogout: widget.onLogout,
@@ -185,6 +333,7 @@ class _HomePageState extends State<HomePage> {
                             'user': user,
                           };
                         });
+                        _homeChanged();
                       }
                     },
                   )
@@ -297,6 +446,7 @@ class _HomePageState extends State<HomePage> {
                         Campaigns(
                           banners: _home.banners,
                           session: widget.repository.session,
+                          onOpen: _openBanner,
                         ),
                         const SizedBox(height: 24),
                       ],

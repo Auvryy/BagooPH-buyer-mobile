@@ -6,9 +6,15 @@ import '../../core/widgets.dart';
 import 'product_card.dart';
 
 class Campaigns extends StatefulWidget {
-  const Campaigns({super.key, required this.banners, required this.session});
+  const Campaigns({
+    super.key,
+    required this.banners,
+    required this.session,
+    required this.onOpen,
+  });
   final List<Map<String, dynamic>> banners;
   final WebSession session;
+  final ValueChanged<Map<String, dynamic>> onOpen;
   @override
   State<Campaigns> createState() => _CampaignsState();
 }
@@ -82,18 +88,39 @@ class _CampaignsState extends State<Campaigns> {
               controller: _controller,
               itemCount: banners.length,
               onPageChanged: (i) => setState(() => _index = i),
-              itemBuilder: (_, i) => Semantics(
-                image: true,
-                label:
-                    banners[i]['alt_text']?.toString() ??
-                    banners[i]['title']?.toString(),
-                child: ExcludeSemantics(
-                  child: RemoteImage(
-                    uri: imageUri(widget.session, banners[i]['image']),
-                    fit: BoxFit.contain,
+              itemBuilder: (_, i) {
+                final banner = banners[i];
+                final title = banner['title']?.toString().trim();
+                final label = title == null || title.isEmpty
+                    ? banner['alt_text']?.toString() ?? 'Promotion'
+                    : 'Open promotion: $title';
+                final href = banner['href']?.toString();
+                return Semantics(
+                  button: href != null && href.isNotEmpty,
+                  label: label,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ExcludeSemantics(
+                        child: RemoteImage(
+                          uri: imageUri(widget.session, banner['image']),
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      if (href != null && href.isNotEmpty)
+                        Positioned.fill(
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => widget.onOpen(banner),
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
