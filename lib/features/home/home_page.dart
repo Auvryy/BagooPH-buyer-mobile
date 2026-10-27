@@ -8,6 +8,7 @@ import 'campaigns.dart';
 import 'home_controller.dart';
 import 'product_card.dart';
 import 'search_page.dart';
+import 'search_controller.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
@@ -42,6 +43,7 @@ class _HomePageState extends State<HomePage> {
   final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
+  SearchFilters? _searchRequest;
   void _selectTab(int tab) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -85,8 +87,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _selectCategory(String slug) {
-    setState(() => _tab = 0);
-    _home.filter(department: slug);
+    _openSearch(category: slug);
+  }
+
+  void _openSearch({String query = '', String category = ''}) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _searchRequest = SearchFilters(query: query.trim(), category: category);
+      _tab = 2;
+      _visited.add(2);
+    });
   }
 
   @override
@@ -149,7 +159,10 @@ class _HomePageState extends State<HomePage> {
                 else
                   const SizedBox.shrink(),
                 if (_visited.contains(2))
-                  SearchPage(repository: widget.repository)
+                  SearchPage(
+                    repository: widget.repository,
+                    request: _searchRequest,
+                  )
                 else
                   const SizedBox.shrink(),
                 if (_visited.contains(3))
@@ -234,17 +247,19 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     TextField(
                       controller: _search,
+                      maxLength: 100,
                       textInputAction: TextInputAction.search,
-                      onSubmitted: (value) => _home.filter(query: value),
+                      onSubmitted: (value) => _openSearch(query: value),
                       decoration: InputDecoration(
                         labelText: 'Search products',
+                        counterText: '',
                         hintText: 'What are you looking for?',
                         prefixIcon: const ExcludeSemantics(
                           child: Icon(Icons.search_rounded),
                         ),
                         suffixIcon: IconButton(
                           tooltip: 'Search marketplace',
-                          onPressed: () => _home.filter(query: _search.text),
+                          onPressed: () => _openSearch(query: _search.text),
                           icon: const Icon(Icons.arrow_forward_rounded),
                         ),
                       ),

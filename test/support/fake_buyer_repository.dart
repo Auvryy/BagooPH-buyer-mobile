@@ -49,6 +49,7 @@ class FakeBuyerRepository extends BuyerRepository {
   int validationCalls = 0;
   BackendException? loginError;
   final homeRequests = <Map<String, dynamic>>[];
+  final searchRequests = <Map<String, String>>[];
   Future<WebPage> Function(String search, int page)? homeHandler;
   int productCalls = 0;
   int bagCalls = 0;
@@ -60,6 +61,19 @@ class FakeBuyerRepository extends BuyerRepository {
   BackendException? productError;
   WebPage? productResponse;
   final savedIds = <int>{};
+  @override
+  Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
+    searchRequests.add({...filters, 'page': '$page'});
+    final home = homePage(signedIn: signedIn, page: page);
+    return WebPage('Buyer/Search', {
+      ...home.props,
+      'products': home.props['feedProducts'],
+      'locations': <Map<String, dynamic>>[],
+      'relatedProducts': [],
+      'suggestions': [],
+    });
+  }
+
   @override
   Future<WebPage> product(String slug) async {
     productCalls++;
@@ -268,7 +282,16 @@ WebPage checkoutPage() => const WebPage('Checkout/Index', {
     'shipping_discount': 0.0,
     'total': 1250.0,
     'shops': [
-      {'shop_id': 2, 'shop_name': 'Test store', 'total': 1250.0},
+      {
+        'shop_id': 2,
+        'shop_name': 'Test store',
+        'subtotal': 1200.0,
+        'shipping': 50.0,
+        'discount': 0.0,
+        'product_discount': 0.0,
+        'shipping_discount': 0.0,
+        'total': 1250.0,
+      },
     ],
     'items': [
       {
@@ -301,6 +324,24 @@ WebPage checkoutPage() => const WebPage('Checkout/Index', {
 
 class FakeSession extends WebSession {
   FakeSession() : super(Uri.parse('http://backend.test'));
+  WebPage? profileResponse;
+  @override
+  Future<WebPage> page(String path, {bool bootstrap = false}) async {
+    if (path.startsWith('/buyer/profile')) {
+      return profileResponse ??
+          const WebPage('Buyer/Profile', {
+            'auth': {'user': buyer},
+            'user': buyer,
+            'canUsePortal': true,
+            'addresses': [],
+            'orders': {'data': [], 'current_page': 1, 'last_page': 1},
+            'orderCounts': {},
+            'ordersCount': 0,
+          });
+    }
+    throw StateError('No isolated page fixture for $path');
+  }
+
   @override
   Future<Map<String, dynamic>> jsonGet(String path) async {
     if (path.startsWith('/address-locations')) {

@@ -38,6 +38,37 @@ Future<void> main(List<String> args) async {
     if (mapOf(filtered.props['filters'])['search'] != 'backpack') {
       throw StateError('The server did not retain the search filter.');
     }
+    final search = await repository.search({});
+    if (search.props['categories'] is! List ||
+        search.props['locations'] is! List ||
+        search.props['suggestions'] is! List ||
+        search.props['relatedProducts'] is! List ||
+        mapOf(search.props['products'])['data'] is! List) {
+      throw StateError(
+        'Expected dedicated search, canonical locations, suggestions and related listings.',
+      );
+    }
+    final areas = mapsOf(search.props['locations']);
+    final selection = await repository.search({
+      'search': 'backpack',
+      'min_price': '0.00',
+      'max_price': '99999999.99',
+      'in_stock': '1',
+      'rating': '1',
+      'sort': 'top_rated',
+      if (areas.isNotEmpty) 'location': areas.first['value'].toString(),
+    });
+    final selected = mapOf(selection.props['filters']);
+    if (selected['search'] != 'backpack' ||
+        selected['sort'] != 'top_rated' ||
+        selected['in_stock'] != true ||
+        selected['rating']?.toString() != '1' ||
+        selected['min_price']?.toString() != '0.00' ||
+        areas.isNotEmpty && selected['location'] != areas.first['value']) {
+      throw StateError(
+        'The server did not retain the native catalogue filters.',
+      );
+    }
     final listings = mapsOf(mapOf(home.props['feedProducts'])['data']);
     if (listings.isEmpty) {
       throw StateError(
@@ -68,7 +99,7 @@ Future<void> main(List<String> args) async {
       throw StateError('Expected canonical checkout regions.');
     }
     stdout.writeln(
-      'Buyer home, registration, policies, filtered catalogue, full product, shop, guest Bag, and checkout location contracts passed.',
+      'Buyer home, registration, policies, filtered catalogue, dedicated search/filters, full product, shop, guest Bag, and checkout location contracts passed.',
     );
     stdout.writeln(
       '${mapsOf(home.props['categories']).length} categories; ${mapOf(home.props['feedProducts'])['total']} listings.',

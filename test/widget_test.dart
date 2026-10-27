@@ -7,6 +7,7 @@ import 'support/fake_buyer_repository.dart';
 
 Future<void> press(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder.first);
+  await tester.pumpAndSettle();
   await tester.tap(finder.first);
   await tester.pumpAndSettle();
 }
@@ -59,6 +60,11 @@ void main() {
       expect(find.text('Recommended for you'), findsOneWidget);
       await press(tester, find.text('Profile'));
       expect(find.text('Test Buyer'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Log out'),
+        300,
+        scrollable: find.byType(Scrollable).last,
+      );
       await press(tester, find.text('Log out'));
       expect(find.text('You have been logged out.'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Log In'), findsOneWidget);
@@ -73,10 +79,26 @@ void main() {
       await tester.enterText(find.byType(TextField).first, 'tea & coffee');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      expect(repository.homeRequests.last['search'], 'tea & coffee');
-      await press(tester, find.text('Search'));
-      await press(tester, find.text('Electronics and Gadgets'));
-      expect(repository.homeRequests.last['category'], 'electronics');
+      expect(repository.searchRequests.last['search'], 'tea & coffee');
+      expect(input('Search the marketplace'), findsOneWidget);
+      await press(tester, find.text('Filters'));
+      final departments = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Departments',
+      );
+      await tester.ensureVisible(departments);
+      await tester.pumpAndSettle();
+      await tester.tap(departments);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Electronics and Gadgets').last);
+      await tester.pumpAndSettle();
+      final apply = find.widgetWithText(FilledButton, 'Apply filters');
+      await tester.ensureVisible(apply);
+      await tester.pumpAndSettle();
+      await tester.tap(apply);
+      await tester.pumpAndSettle();
+      expect(repository.searchRequests.last['category'], 'electronics');
+      expect(repository.searchRequests.last['search'], 'tea & coffee');
     },
   );
 
@@ -217,6 +239,15 @@ void main() {
 }
 
 class _RestrictedRepository extends FakeBuyerRepository {
+  _RestrictedRepository() {
+    (session as FakeSession).profileResponse = const WebPage(
+      'Auth/AccountStatus',
+      {
+        'auth': {'user': buyer},
+        'status': {'message': 'Your account needs review.'},
+      },
+    );
+  }
   @override
   Future<WebPage> login(String email, String password) async =>
       const WebPage('Auth/AccountStatus', {

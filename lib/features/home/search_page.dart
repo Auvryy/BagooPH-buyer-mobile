@@ -14,8 +14,9 @@ import 'search_filters.dart';
 import 'product_card.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.repository});
+  const SearchPage({super.key, required this.repository, this.request});
   final BuyerRepository repository;
+  final SearchFilters? request;
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
@@ -30,7 +31,28 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    _catalogue = CatalogueSearchController(widget.repository)..load();
+    _catalogue = CatalogueSearchController(widget.repository);
+    if (widget.request != null) {
+      _text.text = widget.request!.query;
+      _catalogue.apply(widget.request!);
+    } else {
+      _catalogue.load();
+    }
+  }
+
+  @override
+  void didUpdateWidget(SearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final request = widget.request;
+    if (request != null && request != oldWidget.request) {
+      _debounce?.cancel();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.request == request) {
+          _text.text = request.query;
+          _apply(request);
+        }
+      });
+    }
   }
 
   @override
