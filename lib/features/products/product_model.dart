@@ -91,6 +91,16 @@ class ProductSelection {
       page.user?['role'] == 'buyer' &&
       page.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(page.user?['kyc_status']);
+  bool get canChangeBag =>
+      page.user == null ||
+      page.user?['role'] == 'buyer' &&
+          ['active', 'pending_approval'].contains(page.user?['status']);
+  bool colorAvailable(String option) =>
+      !colors.any((row) => row['name'] == option && row['in_stock'] == false) &&
+      (!hasMatrix ||
+          combinations.any(
+            (row) => row['color'] == option && (amount(row['stock']) ?? 0) > 0,
+          ));
   int get totalStock => (amount(product['stock']) ?? 0).toInt();
   int get stock => hasMatrix
       ? (amount(combination['stock']) ?? (complete ? 0 : totalStock)).toInt()
@@ -98,14 +108,20 @@ class ProductSelection {
           totalStock,
           (amount(sizeOption['stock']) ?? totalStock).toInt(),
         );
-  bool sizeAvailable(String option) =>
-      !hasMatrix ||
-      combinations.any(
-        (o) =>
-            o['size'] == option &&
-            (color == null || o['color'] == color) &&
-            (amount(o['stock']) ?? 0) > 0,
-      );
+  bool sizeAvailable(String option) => !hasMatrix
+      ? (amount(
+                  sizes
+                      .where((row) => row['name'] == option)
+                      .firstOrNull?['stock'],
+                ) ??
+                totalStock) >
+            0
+      : combinations.any(
+          (o) =>
+              o['size'] == option &&
+              (color == null || o['color'] == color) &&
+              (amount(o['stock']) ?? 0) > 0,
+        );
   List<Map<String, dynamic>> get cart => mapsOf(page.props['cartQuantities']);
   int get totalInBag =>
       cart.fold(0, (n, row) => n + (amount(row['quantity']) ?? 0).toInt());

@@ -35,10 +35,15 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   bool _reminding = false;
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
+  final _scroll = ScrollController();
+  final _optionsKey = GlobalKey();
   Timer? _refresh;
   int _generation = 0;
   ProductSelection get s => _selection!;
   BuyerRepository get repo => widget.repository;
+  bool get _compact =>
+      MediaQuery.sizeOf(context).width < 950 ||
+      MediaQuery.textScalerOf(context).scale(16) >= 24;
   @override
   void initState() {
     super.initState();
@@ -106,18 +111,83 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       _feedback = text;
       _feedbackError = error;
     });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        action: error
+            ? null
+            : SnackBarAction(label: 'View Bag', onPressed: _viewBag),
+      ),
+    );
   }
 
-  void _login() => BuyerActions.login(context, productSlug: widget.slug);
-  Future<void> _save() async {
-    if (s.page.user == null) {
+  Future<void> _viewBag() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => BagPage(repository: repo)));
+    if (mounted) await _load(quiet: true);
+  }
+
+  Future<void> _options() async {
+    if (_optionsKey.currentContext == null && _scroll.hasClients) {
+      _scroll.jumpTo(0);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || _optionsKey.currentContext == null) return;
+    await Scrollable.ensureVisible(
+      _optionsKey.currentContext!,
+      alignment: .08,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 250),
+    );
+  }
+
+  void _purchase(bool buyNow) {
+    if (buyNow && s.page.user == null) {
       _login();
+      return;
+    }
+    if (!s.complete) {
+      _message('Choose each product option before continuing.', error: true);
+      _options();
+      return;
+    }
+    _add(buyNow);
+  }
+
+  void _section(String title, Widget child) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 900),
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [child],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  void _login() => BuyerActions.login(context, productSlug: widget.slug);
+  Future<void> _save([Map<String, dynamic>? item]) async {
+    if (s.page.user == null) {
+      BuyerActions.login(
+        context,
+        productSlug: (item ?? s.product)['slug'].toString(),
+      );
       return;
     }
     if (!s.approved || _saving) {
       return;
     }
-    final id = (s.product['id'] as num).toInt();
+    final id = ((item ?? s.product)['id'] as num).toInt();
     final saved = (s.page.props['savedProductIds'] as List? ?? []).contains(id);
     setState(() => _saving = true);
     try {
@@ -241,6 +311,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _refresh?.cancel();
     _quantity.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -276,9 +347,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         ),
         IconButton(
           tooltip: 'Shopping Bag',
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => BagPage(repository: repo)),
-          ),
+          onPressed: _viewBag,
           icon: const Icon(Icons.shopping_bag_outlined),
         ),
       ],
@@ -308,6 +377,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 1280),
                   child: ListView(
+                    controller: _scroll,
                     padding: const EdgeInsets.all(16),
                     children: [
                       if (_error != null) Notice(_error!, error: true),
@@ -346,6 +416,32 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                         ),
                       ),
                       _shop(),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ActionChip(
+                              avatar: const Icon(
+                                Icons.list_alt_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('Specifications'),
+                              onPressed: () => _section(
+                                'Product specifications',
+                                _specifications(),
+                              ),
+                            ),
+                            ActionChip(
+                              avatar: const Icon(Icons.star_outline, size: 18),
+                              label: const Text('Reviews & photos'),
+                              onPressed: () =>
+                                  _section('Reviews & photos', _reviews()),
+                            ),
+                          ],
+                        ),
+                      ),
                       _specifications(),
                       _reviews(),
                       if (mapsOf(s.page.props['relatedProducts']).isNotEmpty)
@@ -354,22 +450,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const ProductHeading('You may also like'),
-                              for (final p in mapsOf(
-                                s.page.props['relatedProducts'],
-                              ))
-                                ListTile(
-                                  title: Text(p['name'].toString()),
-                                  subtitle: Text(productPrice(p)),
-                                  trailing: const Icon(Icons.chevron_right),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => ProductPage(
-                                        repository: repo,
-                                        slug: p['slug'].toString(),
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              _related(),
                             ],
                           ),
                         ),
@@ -379,7 +460,150 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               ),
             ),
     ),
+    bottomNavigationBar:
+        _selection != null &&
+            _compact &&
+            MediaQuery.viewInsetsOf(context).bottom == 0
+        ? SafeArea(
+            top: false,
+            child: Material(
+              color: Colors.white,
+              elevation: 6,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * .4,
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        s.priceLabel,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          height: 1.4,
+                          fontWeight: FontWeight.w800,
+                          color: BagooTheme.strong,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _options,
+                        style: TextButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Text(
+                          s.complete
+                              ? '${s.quantity} item${s.quantity == 1 ? '' : 's'}${[s.color, s.size].whereType<String>().isEmpty ? '' : ' · ${[s.color, s.size].whereType<String>().join(' / ')}'} · Edit selection'
+                              : 'Choose product options',
+                        ),
+                      ),
+                      _purchaseButtons(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          )
+        : null,
   );
+
+  Widget _related() => LayoutBuilder(
+    builder: (context, box) {
+      final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      final columns = productColumns(box.maxWidth + 32, scale);
+      final width = (box.maxWidth - (columns - 1) * 14) / columns;
+      return Wrap(
+        spacing: 14,
+        runSpacing: 14,
+        children: [
+          for (final product in mapsOf(s.page.props['relatedProducts']))
+            SizedBox(
+              width: width,
+              height: width + productCardBodyHeight * scale,
+              child: ProductCard(
+                product: product,
+                session: repo.session,
+                saved: (s.page.props['savedProductIds'] as List? ?? [])
+                    .contains(product['id']),
+                saving: _saving,
+                saveLabel: s.page.user == null
+                    ? 'Sign in to save'
+                    : !s.approved
+                    ? 'Approval required'
+                    : (s.page.props['savedProductIds'] as List? ?? []).contains(
+                        product['id'],
+                      )
+                    ? 'Remove from saved'
+                    : 'Save product',
+                onSave: s.page.user != null && !s.approved
+                    ? null
+                    : () => _save(product),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProductPage(
+                      repository: repo,
+                      slug: product['slug'].toString(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Widget _purchaseButtons() {
+    final disabled =
+        _busy ||
+        s.vacation ||
+        s.stock <= 0 ||
+        !s.canChangeBag ||
+        s.complete && s.maxQuantity < 1;
+    final add = OutlinedButton.icon(
+      onPressed: disabled ? null : () => _purchase(false),
+      icon: const Icon(Icons.shopping_bag_outlined, size: 18),
+      label: Text(
+        _busy
+            ? 'Adding…'
+            : s.vacation
+            ? 'Shop on vacation'
+            : !s.canChangeBag
+            ? 'Account restricted'
+            : s.stock <= 0 || s.complete && s.maxQuantity < 1
+            ? 'Unavailable'
+            : 'Add to Bag',
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: BagooTheme.strong,
+        backgroundColor: BagooTheme.rose,
+        side: const BorderSide(color: BagooTheme.crimson),
+      ),
+    );
+    final buy = FilledButton(
+      onPressed: disabled ? null : () => _purchase(true),
+      child: const Text('Buy Now'),
+    );
+    return LayoutBuilder(
+      builder: (context, box) =>
+          box.maxWidth < 300 || MediaQuery.textScalerOf(context).scale(16) >= 24
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [add, const SizedBox(height: 8), buy],
+            )
+          : Row(
+              children: [
+                Expanded(child: add),
+                const SizedBox(width: 12),
+                Expanded(child: buy),
+              ],
+            ),
+    );
+  }
+
   Widget _gallery() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
@@ -401,16 +625,22 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                           s.gallery[_image],
                           s.product['name'].toString(),
                         ),
-                  child: RemoteImage(
-                    uri: s.gallery.isEmpty
-                        ? null
-                        : imageUri(repo.session, s.gallery[_image]),
+                  child: Semantics(
+                    label: s.gallery.isEmpty
+                        ? 'No product photo available'
+                        : 'Open product photo ${_image + 1} of ${s.gallery.length}',
+                    excludeSemantics: true,
+                    child: RemoteImage(
+                      uri: s.gallery.isEmpty
+                          ? null
+                          : imageUri(repo.session, s.gallery[_image]),
+                    ),
                   ),
                 ),
               ),
             ),
             Positioned(
-              top: 12,
+              bottom: 12,
               left: 12,
               child: Container(
                 padding: const EdgeInsets.all(8),
@@ -418,9 +648,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   color: BagooTheme.ink,
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: const Text(
-                  'PRODUCT PHOTOS',
-                  style: TextStyle(
+                child: Text(
+                  s.gallery.isEmpty
+                      ? 'No product photo'
+                      : 'Photo ${_image + 1} of ${s.gallery.length}',
+                  style: const TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     color: Colors.white,
@@ -428,6 +660,35 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            if (s.gallery.length > 1)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton.filled(
+                    tooltip: 'Previous product photo',
+                    onPressed: () => setState(
+                      () => _image =
+                          (_image - 1 + s.gallery.length) % s.gallery.length,
+                    ),
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                ),
+              ),
+            if (s.gallery.length > 1)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton.filled(
+                    tooltip: 'Next product photo',
+                    onPressed: () => setState(
+                      () => _image = (_image + 1) % s.gallery.length,
+                    ),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ),
+              ),
             if (s.comparison != null &&
                 s.comparison! > s.price &&
                 !(!s.complete && ProductPrice(s.product).ranged))
@@ -660,6 +921,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           ),
         ),
       _sales(),
+      SizedBox(key: _optionsKey, height: 1),
       if (s.colors.isNotEmpty) ...[
         const SizedBox(height: 20),
         Text(
@@ -677,10 +939,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   avatar: _optionAvatar(o),
                   label: Text(o['name'].toString()),
                   selectedColor: BagooTheme.rose,
-                  onSelected: _busy
+                  onSelected: _busy || !s.colorAvailable(o['name'].toString())
                       ? null
                       : (_) => setState(() {
                           s.color = o['name'].toString();
+                          if (s.size != null && !s.sizeAvailable(s.size!)) {
+                            s.size = null;
+                          }
                           if (o['image_url'] != null &&
                               s.gallery.contains(o['image_url'])) {
                             _image = s.gallery.indexOf(o['image_url']);
@@ -777,6 +1042,15 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 : '${s.maxQuantity} more available to add · ${s.totalInBag} in your Bag',
             style: const TextStyle(fontSize: 12, color: BagooTheme.muted),
           ),
+          if (s.complete && s.quantityError != null)
+            Text(
+              s.quantityError!,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.6,
+                color: Color(0xFFBE123C),
+              ),
+            ),
         ],
       ),
       if (_feedback != null)
@@ -785,36 +1059,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           child: Notice(_feedback!, error: _feedbackError),
         ),
       const SizedBox(height: 24),
-      Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          OutlinedButton.icon(
-            onPressed: _busy || s.stock <= 0 || s.vacation
-                ? null
-                : () => _add(false),
-            icon: const Icon(Icons.shopping_bag_outlined, size: 18),
-            label: Text(
-              _busy
-                  ? 'Adding…'
-                  : s.stock <= 0
-                  ? 'Out of stock'
-                  : 'Add to Bag',
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: BagooTheme.strong,
-              backgroundColor: BagooTheme.rose,
-              side: const BorderSide(color: BagooTheme.crimson, width: 2),
-            ),
-          ),
-          FilledButton(
-            onPressed: _busy || s.stock <= 0 || s.vacation
-                ? null
-                : () => _add(true),
-            child: const Text('Buy Now'),
-          ),
-        ],
-      ),
+      if (!_compact) _purchaseButtons(),
     ],
   );
   Widget? _optionAvatar(Map<String, dynamic> option) {
@@ -1201,8 +1446,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                             style: OutlinedButton.styleFrom(
                               padding: EdgeInsets.zero,
                             ),
-                            child: RemoteImage(
-                              uri: imageUri(repo.session, photo),
+                            child: Semantics(
+                              label:
+                                  'Open review photo ${(r['images'] as List).indexOf(photo) + 1}',
+                              excludeSemantics: true,
+                              child: RemoteImage(
+                                uri: imageUri(repo.session, photo),
+                              ),
                             ),
                           ),
                         ),

@@ -47,6 +47,37 @@ void main() {
   });
 
   test(
+    'search uses dedicated catalogue route and retains filter query values',
+    () async {
+      server.listen((request) async {
+        expect(request.uri.path, '/buyer/search');
+        expect(request.uri.queryParameters, {
+          'search': 'shoe & bag',
+          'location': 'test-area',
+          'min_price': '10.50',
+          'in_stock': '1',
+          'sort': 'top_rated',
+          'page': '2',
+        });
+        request.response.write(
+          page('Buyer/Search', {
+            'products': {'data': []},
+          }),
+        );
+        await request.response.close();
+      });
+      final result = await repo.search({
+        'search': 'shoe & bag',
+        'location': 'test-area',
+        'min_price': '10.50',
+        'in_stock': '1',
+        'sort': 'top_rated',
+      }, page: 2);
+      expect(result.component, 'Buyer/Search');
+    },
+  );
+
+  test(
     'add to Bag follows its product referer and verifies the line quantity',
     () async {
       var confirmed = 3;
@@ -95,6 +126,34 @@ void main() {
         throwsA(isA<BackendException>()),
       );
       expect(mutations, 2);
+    },
+  );
+
+  test(
+    'selected Bag quote reads the existing JSON route with array IDs',
+    () async {
+      server.listen((request) async {
+        expect(request.method, 'GET');
+        expect(request.uri.path, '/cart');
+        expect(request.uri.queryParametersAll['item_ids[]'], ['2', '7']);
+        expect(request.headers.value('Accept'), 'application/json');
+        request.response.write(
+          jsonEncode({
+            'quote': {
+              'items': [
+                {'id': 2},
+                {'id': 7},
+              ],
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      final quote = await repo.bagQuote([2, 7]);
+      expect(mapsOf(mapOf(quote['quote'])['items']).map((row) => row['id']), [
+        2,
+        7,
+      ]);
     },
   );
 

@@ -111,6 +111,43 @@ void main() {
     );
   });
 
+  test('quote rejection retains structured repair data without replaying the request', () async {
+    var posts = 0;
+    server.listen((request) async {
+      if (request.method == 'GET') {
+        request.response.write(markup('Auth/Login'));
+      } else {
+        posts++;
+        request.response.statusCode = 422;
+        request.response.write(
+          jsonEncode({
+            'message': 'Voucher expired',
+            'quote': {'total': 100},
+            'validSelection': {
+              'voucher_code': null,
+              'platform_voucher_revision_id': null,
+              'shop_voucher_revision_ids': [],
+            },
+            'selectionErrors': {'platform': 'Voucher expired'},
+          }),
+        );
+      }
+      await request.response.close();
+    });
+    try {
+      await repository.quote({
+        'item_ids': [1],
+      });
+      fail('Expected a structured quote rejection');
+    } on BackendException catch (e) {
+      expect(e.status, 422);
+      expect(mapOf(e.data['quote'])['total'], 100);
+      expect(mapOf(e.data['selectionErrors'])['platform'], 'Voucher expired');
+      expect(e.toString(), 'Voucher expired');
+    }
+    expect(posts, 1);
+  });
+
   test('rejects cross-origin credential redirects', () async {
     server.listen((request) async {
       if (request.method == 'GET') {

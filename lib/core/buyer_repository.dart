@@ -146,6 +146,21 @@ class BuyerRepository {
     return result;
   }
 
+  Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
+    final query = Uri(
+      queryParameters: {...filters, if (page > 1) 'page': '$page'},
+    ).query;
+    final result = await session.page(
+      '/buyer/search${query.isEmpty ? '' : '?$query'}',
+    );
+    requireNoErrors(result);
+    if (result.component != 'Buyer/Search' ||
+        result.props['products'] is! Map) {
+      throw const BackendException('Product search is unavailable. Try again.');
+    }
+    return result;
+  }
+
   Future<bool> saveProduct(int id, bool saved) async {
     final data = await session.jsonPost(
       '/buyer/saved-products/$id',
@@ -216,6 +231,10 @@ class BuyerRepository {
     return page;
   }
 
+  Future<Map<String, dynamic>> bagQuote(List<int> ids) => session.jsonGet(
+    '/cart?${Uri(queryParameters: {'item_ids[]': ids.map((id) => '$id').toList()}).query}',
+  );
+
   Future<WebPage> changeBagItem(int id, int? quantity) async {
     final page = await session.submit(
       '/cart/$id',
@@ -251,6 +270,28 @@ class BuyerRepository {
 
   Future<Map<String, dynamic>> quote(Map<String, dynamic> values) =>
       session.jsonPost('/buyer/vouchers/apply', values);
+  Future<Map<String, dynamic>> voucherChoices(
+    Map<String, dynamic> values,
+  ) async {
+    final result = await session.jsonPost('/buyer/vouchers/choices', values);
+    if (mapOf(result['offers'])['data'] is! List) {
+      throw const BackendException(
+        'Voucher choices could not load. Try again.',
+      );
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> bestVouchers(Map<String, dynamic> values) async {
+    final result = await session.jsonPost('/buyer/vouchers/best', values);
+    if (result['selection'] is! Map || result['quote'] is! Map) {
+      throw const BackendException(
+        'Voucher comparison was not confirmed. Try again.',
+      );
+    }
+    return result;
+  }
+
   Future<WebPage> placeOrder(Map<String, dynamic> values) async {
     final page = await session.submit(
       '/checkout',
