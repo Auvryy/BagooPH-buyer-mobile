@@ -29,6 +29,7 @@ class MainApp extends StatefulWidget {
 class _MainAppState extends State<MainApp> {
   final _navigator = GlobalKey<NavigatorState>();
   String? _pendingProduct;
+  int _pendingDestination = 0;
   BuyerRepository? _repository;
   String? _configurationError;
   _Screen _screen = _Screen.login;
@@ -83,6 +84,8 @@ class _MainAppState extends State<MainApp> {
     if (mounted) {
       setState(() {
         _initial = null;
+        _pendingDestination = 0;
+        _pendingProduct = null;
         _screen = _Screen.login;
         _notice = 'You have been logged out.';
       });
@@ -104,6 +107,19 @@ class _MainAppState extends State<MainApp> {
     builder: (context, child) => BuyerActions(
       signIn: (slug) {
         _pendingProduct = slug;
+        _pendingDestination = 0;
+        _navigator.currentState?.popUntil((route) => route.isFirst);
+        _go(_Screen.login);
+      },
+      signInTo: (destination) {
+        _pendingDestination = destination == 'profile'
+            ? 3
+            : destination == 'cart'
+            ? 1
+            : destination == 'search'
+            ? 2
+            : 0;
+        _pendingProduct = null;
         _navigator.currentState?.popUntil((route) => route.isFirst);
         _go(_Screen.login);
       },
@@ -139,6 +155,7 @@ class _MainAppState extends State<MainApp> {
                 onForgot: () => _go(_Screen.recovery),
                 onBrowse: () {
                   _initial = null;
+                  _pendingDestination = 0;
                   _go(_Screen.home);
                 },
               ),
@@ -147,6 +164,7 @@ class _MainAppState extends State<MainApp> {
                 onBack: () => _go(_Screen.login),
                 onBrowse: () {
                   _initial = null;
+                  _pendingDestination = 0;
                   _go(_Screen.home);
                 },
                 onComplete: (page) {
@@ -167,6 +185,7 @@ class _MainAppState extends State<MainApp> {
                 onBack: () => _go(_Screen.login),
                 onBrowse: () {
                   _initial = null;
+                  _pendingDestination = 0;
                   _go(_Screen.home);
                 },
                 onComplete: () => _go(
@@ -178,6 +197,8 @@ class _MainAppState extends State<MainApp> {
                 repository: _repository!,
                 initial: _initial,
                 initialProductSlug: _pendingProduct,
+                initialDestination: _pendingDestination,
+                onDestinationRestored: () => _pendingDestination = 0,
                 onProductRestored: () => _pendingProduct = null,
                 onLogin: () => _go(_Screen.login),
                 onLogout: _logout,

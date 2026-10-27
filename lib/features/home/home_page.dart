@@ -10,7 +10,8 @@ import 'product_card.dart';
 import 'search_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
-import '../checkout/order_result_page.dart';
+import '../profile/profile_page.dart';
+import '../../core/buyer_actions.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -21,6 +22,8 @@ class HomePage extends StatefulWidget {
     this.initial,
     this.initialProductSlug,
     this.onProductRestored,
+    this.initialDestination = 0,
+    this.onDestinationRestored,
   });
   final BuyerRepository repository;
   final VoidCallback onLogin;
@@ -28,6 +31,8 @@ class HomePage extends StatefulWidget {
   final WebPage? initial;
   final String? initialProductSlug;
   final VoidCallback? onProductRestored;
+  final int initialDestination;
+  final VoidCallback? onDestinationRestored;
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -37,47 +42,25 @@ class _HomePageState extends State<HomePage> {
   final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
-  void _selectTab(int tab) => setState(() {
-    _tab = tab;
-    _visited.add(tab);
-  });
-  bool _signingOut = false;
-  String? _logoutError;
-  bool _openingOrders = false;
-
-  Future<void> _orders() async {
-    setState(() => _openingOrders = true);
-    try {
-      final page = await widget.repository.document('/buyer/orders');
-      widget.repository.requireNoErrors(page);
-      if (page.props['orders'] is! Map) {
-        throw const BackendException(
-          'Your orders are unavailable for this account.',
-        );
-      }
-      if (!mounted) {
-        return;
-      }
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) =>
-              OrderResultPage(repository: widget.repository, initial: page),
-        ),
-      );
-    } on BackendException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } finally {
-      if (mounted) setState(() => _openingOrders = false);
-    }
+  void _selectTab(int tab) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _tab = tab;
+      _visited.add(tab);
+    });
   }
 
   @override
   void initState() {
     super.initState();
     _home = HomeController(widget.repository, initial: widget.initial);
+    _tab = widget.initialDestination;
+    _visited.add(_tab);
+    if (_tab != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onDestinationRestored?.call();
+      });
+    }
     if (widget.initialProductSlug != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -99,27 +82,6 @@ class _HomePageState extends State<HomePage> {
     _home.dispose();
     _search.dispose();
     super.dispose();
-  }
-
-  Future<void> _logout() async {
-    if (_signingOut) {
-      return;
-    }
-    setState(() {
-      _signingOut = true;
-      _logoutError = null;
-    });
-    try {
-      await widget.onLogout();
-    } on BackendException catch (e) {
-      if (mounted) {
-        setState(() => _logoutError = e.message);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _signingOut = false);
-      }
-    }
   }
 
   void _selectCategory(String slug) {
@@ -158,7 +120,7 @@ class _HomePageState extends State<HomePage> {
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: IconButton(
-                      tooltip: 'Your account',
+                      tooltip: 'Your profile',
                       onPressed: () => _selectTab(3),
                       icon: const Icon(Icons.person_outline_rounded),
                     ),
@@ -179,7 +141,7 @@ class _HomePageState extends State<HomePage> {
               children: [
                 _marketplace(),
                 if (_visited.contains(1))
-                  BagPage(repository: widget.repository)
+                  BagPage(repository: widget.repository, active: _tab == 1)
                 else
                   const SizedBox.shrink(),
                 if (_visited.contains(2))
@@ -187,7 +149,28 @@ class _HomePageState extends State<HomePage> {
                 else
                   const SizedBox.shrink(),
                 if (_visited.contains(3))
-                  _account()
+                  ProfilePage(
+                    key: ValueKey(
+                      'buyer-profile-${_home.user?['id'] ?? 'guest'}',
+                    ),
+                    repository: widget.repository,
+                    user: _home.user,
+                    initial: widget.initial,
+                    active: _tab == 3,
+                    onLogin: () =>
+                        BuyerActions.login(context, destination: 'profile'),
+                    onLogout: widget.onLogout,
+                    onUserChanged: (user) {
+                      if (mounted) {
+                        setState(() {
+                          _home.data?.props['auth'] = {
+                            ...mapOf(_home.data?.props['auth']),
+                            'user': user,
+                          };
+                        });
+                      }
+                    },
+                  )
                 else
                   const SizedBox.shrink(),
               ],
@@ -637,66 +620,6 @@ class _HomePageState extends State<HomePage> {
       selectedColor: BagooTheme.rose,
       onSelected: (_) => _selectCategory(slug),
     ),
-  );
-
-  Widget _account() => ListView(
-    padding: const EdgeInsets.all(24),
-    children: [
-      const Text(
-        'Your account',
-        style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 24),
-      if (_home.user == null) ...[
-        const Text(
-          'Log in to your buyer account to keep shopping with BagooPH.',
-          style: TextStyle(color: BagooTheme.muted, height: 1.6),
-        ),
-        const SizedBox(height: 24),
-        SubmitButton(label: 'Log In', onPressed: widget.onLogin),
-      ] else ...[
-        Text(
-          _home.user!['name']?.toString() ?? 'Buyer',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        Text(_home.user!['email']?.toString() ?? ''),
-        const SizedBox(height: 24),
-        Text(
-          'Account status: ${_home.user!['status'] ?? 'Not provided'}',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Identity review: ${(_home.user!['kyc_status']?.toString() ?? 'Not provided').replaceAll('_', ' ')}',
-        ),
-        const SizedBox(height: 24),
-        if (_home.data != null && !_home.isMarketplace) ...[
-          Notice(
-            mapOf(_home.data!.props['status'])['message']?.toString() ?? 'Your account needs attention. Review the recorded status below.',
-            error: true,
-          ),
-          const SizedBox(height: 16),
-        ],
-        const Text(
-          'Your buyer account status and identity review are managed by BagooPH. Checkout requires an active approved account.',
-          style: TextStyle(height: 1.7, color: BagooTheme.muted),
-        ),
-        const SizedBox(height: 24),
-        if (_logoutError != null) Notice(_logoutError!, error: true),
-        OutlinedButton.icon(
-          onPressed: _openingOrders ? null : _orders,
-          icon: const Icon(Icons.receipt_long_outlined),
-          label: Text(_openingOrders ? 'Loading orders…' : 'Your orders'),
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _signingOut ? null : _logout,
-          icon: const Icon(Icons.logout_rounded),
-          label: Text(_signingOut ? 'Signing out…' : 'Log out'),
-        ),
-      ],
-    ],
   );
 }
 
