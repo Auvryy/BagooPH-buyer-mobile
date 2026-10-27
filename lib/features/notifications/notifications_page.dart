@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
@@ -29,11 +31,13 @@ class NotificationsPage extends StatefulWidget {
   State<NotificationsPage> createState() => _NotificationsPageState();
 }
 
-class _NotificationsPageState extends State<NotificationsPage> {
+class _NotificationsPageState extends State<NotificationsPage>
+    with WidgetsBindingObserver {
   WebPage? _page;
   String _filter = 'all';
   int _number = 1;
   int _generation = 0;
+  int _scopeGeneration = 0;
   String? _error;
   String? _reading;
   bool _loading = true;
@@ -47,16 +51,49 @@ class _NotificationsPageState extends State<NotificationsPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
+  void didUpdateWidget(covariant NotificationsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.ownerId != widget.ownerId ||
+        !identical(oldWidget.repository, widget.repository)) {
+      _scopeGeneration++;
+      _generation++;
+      _page = null;
+      _number = 1;
+      _filter = 'all';
+      _reading = null;
+      _error = null;
+      _load();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_loading && _reading == null) {
+      unawaited(_load(page: _number));
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _scopeGeneration++;
     _generation++;
     super.dispose();
   }
 
+  bool _currentScope(int scope) => mounted && scope == _scopeGeneration;
+
+  bool _currentInbox(int scope) =>
+      _currentScope(scope) && _page?.user?['id'] == widget.ownerId;
+
   Future<void> _load({String? filter, int page = 1}) async {
+    if (!mounted) return;
+    final ownerId = widget.ownerId;
     final nextFilter = filter ?? _filter;
     final generation = ++_generation;
     setState(() {
@@ -75,7 +112,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       if (!mounted || generation != _generation) {
         return;
       }
-      if (result.user?['id'] != widget.ownerId) {
+      if (result.user?['id'] != ownerId) {
         throw const BackendException(
           'Your account changed. Sign in again to view notifications.',
           status: 401,
@@ -88,7 +125,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = e.message);
+        setState(() {
+          _error = e.message;
+          if ([401, 403, 419].contains(e.status)) _page = null;
+        });
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -97,63 +137,73 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  Future<void> _refreshSummary() async {
+  Future<void> _refreshSummary(int scope) async {
+    if (!_currentInbox(scope)) return;
     try {
       final response = await _repository.notificationPreview();
       final summary = mapOf(response['summary']);
       final count = (summary['unread'] as num).toInt();
-      if (mounted) widget.onSummaryChanged?.call(count);
+      if (_currentInbox(scope)) widget.onSummaryChanged?.call(count);
     } on BackendException {
       // The inbox stays useful when the optional toolbar badge is unavailable.
     }
   }
 
   Future<bool> _markRead(String id) async {
-    if (_reading != null) return false;
+    if (!mounted || _reading != null) return false;
+    final scope = _scopeGeneration;
     setState(() {
       _reading = id;
       _error = null;
     });
     try {
       await _repository.markNotificationRead(id);
+      if (!_currentScope(scope)) return false;
       await _load(page: _number);
-      await _refreshSummary();
-      return true;
+      if (!_currentInbox(scope)) return false;
+      await _refreshSummary(scope);
+      return _currentScope(scope);
     } on BackendException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (_currentScope(scope)) setState(() => _error = e.message);
       return false;
     } finally {
-      if (mounted) setState(() => _reading = null);
+      if (_currentScope(scope)) setState(() => _reading = null);
     }
   }
 
   Future<void> _markAllRead() async {
     final snapshot = _snapshot['id']?.toString();
-    if (_reading != null || snapshot == null || snapshot.isEmpty) return;
+    if (!mounted || _reading != null || snapshot == null || snapshot.isEmpty) {
+      return;
+    }
+    final scope = _scopeGeneration;
     setState(() {
       _reading = 'all';
       _error = null;
     });
     try {
       final count = await _repository.markNotificationSnapshotRead(snapshot);
-      if (mounted) widget.onSummaryChanged?.call(count);
+      if (!_currentScope(scope)) return;
+      widget.onSummaryChanged?.call(count);
       await _load(page: 1);
-      await _refreshSummary();
+      await _refreshSummary(scope);
     } on BackendException catch (e) {
+      if (!_currentScope(scope)) return;
       final message = e.fields['snapshot'] ?? e.message;
       await _load(page: 1);
-      await _refreshSummary();
-      if (mounted) setState(() => _error = message);
+      await _refreshSummary(scope);
+      if (_currentScope(scope)) setState(() => _error = message);
     } finally {
-      if (mounted) setState(() => _reading = null);
+      if (_currentScope(scope)) setState(() => _reading = null);
     }
   }
 
   Future<void> _openNotice(Map<String, dynamic> notice) async {
+    final scope = _scopeGeneration;
     final id = notice['id']?.toString() ?? '';
     if (_reading != null || id.isEmpty) return;
     if (notice['read_at'] == null && !await _markRead(id)) return;
-    if (!mounted) return;
+    if (!mounted || !_currentScope(scope)) return;
     final href = notice['href']?.toString();
     if (href == null || href.isEmpty) {
       _showMessage('This update has no linked buyer screen.');
