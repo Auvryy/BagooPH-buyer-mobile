@@ -14,6 +14,7 @@ import 'search_controller.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../notifications/notifications_page.dart';
+import '../tracking/parcel_tracking_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
@@ -54,6 +55,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _notificationGeneration = 0;
   String _profileSection = 'overview';
   int _profileSectionRequest = 0;
+  bool _openingTracking = false;
   void _selectTab(int tab) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -167,6 +169,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (mounted && generation == _notificationGeneration) {
         setState(() => _notificationCount = null);
       }
+    }
+  }
+
+  Future<void> _openTracking() async {
+    if (_openingTracking) return;
+    setState(() => _openingTracking = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ParcelTrackingPage(repository: widget.repository),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingTracking = false);
     }
   }
 
@@ -413,7 +429,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _openingTracking ? null : _openTracking,
+                        icon: const Icon(Icons.local_shipping_outlined),
+                        label: const Text('Track a parcel'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     if (_home.loading)
                       const Padding(
                         padding: EdgeInsets.only(bottom: 20),

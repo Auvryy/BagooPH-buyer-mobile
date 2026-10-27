@@ -24,6 +24,7 @@ import '../collections/saved_products_page.dart';
 import '../home/search_controller.dart';
 import '../notifications/notifications_page.dart';
 import '../support/support_assistant_page.dart';
+import '../tracking/parcel_tracking_page.dart';
 
 const _sections = {
   'overview': 'Profile',
@@ -78,6 +79,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _error, _message;
   bool _loading = false, _signingOut = false, _accountExpanded = true;
   bool _openingSupport = false;
+  bool _openingTracking = false;
   int _generation = 0, _activityRefresh = 0;
   Map<String, dynamic> get user =>
       _page == null ? widget.user ?? {} : mapOf(_page!.props['user']);
@@ -263,6 +265,20 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
     if (mounted) await _load();
+  }
+
+  Future<void> _openTracking() async {
+    if (_openingTracking || _signingOut) return;
+    setState(() => _openingTracking = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ParcelTrackingPage(repository: widget.repository),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingTracking = false);
+    }
   }
 
   Future<void> _openSupport() async {
@@ -560,6 +576,19 @@ class _ProfilePageState extends State<ProfilePage> {
       trailing: const Icon(Icons.chevron_right, size: 18),
       enabled: !_signingOut && !_loading && !_openingSupport && _page != null,
       onTap: _openSupport,
+    ),
+    ListTile(
+      leading: const ExcludeSemantics(
+        child: Icon(Icons.local_shipping_outlined, size: 20),
+      ),
+      title: const Text(
+        'Track a parcel',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      subtitle: const Text('Look up a waybill tracking number'),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      enabled: !_signingOut && !_openingTracking,
+      onTap: _openTracking,
     ),
     const Divider(height: 24),
     ListTile(

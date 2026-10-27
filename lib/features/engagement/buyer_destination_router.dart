@@ -10,6 +10,7 @@ import '../profile/profile_repository.dart';
 import '../profile/purchases_section.dart';
 import '../profile/returns_page.dart';
 import '../promotions/promotion_page.dart';
+import '../tracking/parcel_tracking_page.dart';
 
 class BuyerDestinationRouter {
   const BuyerDestinationRouter._();
@@ -27,6 +28,23 @@ class BuyerDestinationRouter {
     }
     final target = repository.session.resolve(href);
     final segments = target.pathSegments;
+
+    if (segments.isNotEmpty &&
+        segments.first == 'track' &&
+        segments.length <= 2) {
+      final number = segments.length == 2
+          ? segments[1]
+          : target.queryParameters['number'] ??
+                target.queryParameters['tracking_number'] ??
+                target.queryParameters['q'];
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              ParcelTrackingPage(repository: repository, initialNumber: number),
+        ),
+      );
+      return;
+    }
 
     if (segments.isEmpty) {
       _openSearch(context, target, onSearch, closeForTabDestination);
@@ -175,6 +193,22 @@ class BuyerDestinationRouter {
         ? fallbackUri
         : repository.session.resolve(page.url!);
     switch (page.component) {
+      case 'Public/Tracking':
+        final number = page.props['searchedNumber'];
+        if (number is! String) {
+          throw const BackendException(
+            'This tracking destination is unavailable.',
+          );
+        }
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ParcelTrackingPage(
+              repository: repository,
+              initialNumber: number,
+            ),
+          ),
+        );
+        return;
       case 'Buyer/Promotion':
         if (page.props['promotion'] is! Map ||
             page.props['products'] is! List) {
