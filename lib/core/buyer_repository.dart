@@ -13,6 +13,7 @@ class BuyerRepository {
     Future<WebPage> Function() fetch,
   ) async {
     final epoch = session.identityEpoch;
+    final cacheGeneration = catalogueCache.generation;
     try {
       final page = await fetch();
       if (epoch != session.identityEpoch) {
@@ -22,7 +23,7 @@ class BuyerRepository {
         );
       }
       try {
-        await catalogueCache.save(key, page);
+        await catalogueCache.save(key, page, generation: cacheGeneration);
       } catch (_) {
         /* Storage is optional. */
       }
@@ -37,7 +38,11 @@ class BuyerRepository {
       if (epoch == session.identityEpoch &&
           (e.connectionFailure || [500, 502, 503, 504].contains(e.status))) {
         final cached = await catalogueCache.read(key);
-        if (cached != null && epoch == session.identityEpoch) return cached;
+        if (cached != null &&
+            epoch == session.identityEpoch &&
+            cacheGeneration == catalogueCache.generation) {
+          return cached;
+        }
       } else {
         await catalogueCache.remove(key);
       }

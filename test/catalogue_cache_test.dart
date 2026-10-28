@@ -296,6 +296,22 @@ void main() {
   });
 
   test(
+    'clearing browsing data prevents an older network read from restoring it',
+    () async {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      final pending = Completer<WebPage>();
+      session.onPage = (_) => pending.future;
+      final repo = BuyerRepository(session);
+      final request = repo.home();
+      await repo.catalogueCache.clear();
+      pending.complete(homePage());
+      expect((await request).isCached, isFalse);
+      expect(await repo.catalogueCache.read('home:'), isNull);
+    },
+  );
+
+  test(
     'public fallback does not replace a known in-memory buyer with a guest',
     () async {
       final repo = FakeBuyerRepository();

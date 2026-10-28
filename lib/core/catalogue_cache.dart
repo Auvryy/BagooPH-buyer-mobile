@@ -23,6 +23,8 @@ class CatalogueCache {
   final _entries = <String, Map<String, dynamic>>{};
   Future<void> _tail = Future.value();
   bool _loaded = false;
+  int _generation = 0;
+  int get generation => _generation;
   String get _key => 'bagoo-buyer-catalogue-v1:${origin.origin}';
 
   Future<T> _serial<T>(Future<T> Function() action) {
@@ -101,21 +103,25 @@ class CatalogueCache {
     }
   }
 
-  Future<void> save(String key, WebPage page) => _serial(() async {
-    await _load();
-    final props = _publicProps(page);
-    if (props == null || key.length > 2048 || page.isCached) return;
-    final entry = {
-      'at': _clock().toUtc().toIso8601String(),
-      'component': page.component,
-      'props': props,
-    };
-    if (utf8.encode(jsonEncode(entry)).length > 96 * 1024) return;
-    _entries.remove(key);
-    _entries[key] = entry;
-    _prune();
-    await _persist();
-  });
+  Future<void> save(String key, WebPage page, {int? generation}) {
+    final revision = generation ?? _generation;
+    return _serial(() async {
+      await _load();
+      if (revision != _generation) return;
+      final props = _publicProps(page);
+      if (props == null || key.length > 2048 || page.isCached) return;
+      final entry = {
+        'at': _clock().toUtc().toIso8601String(),
+        'component': page.component,
+        'props': props,
+      };
+      if (utf8.encode(jsonEncode(entry)).length > 96 * 1024) return;
+      _entries.remove(key);
+      _entries[key] = entry;
+      _prune();
+      await _persist();
+    });
+  }
 
   Future<WebPage?> read(String key) => _serial(() async {
     await _load();
@@ -142,11 +148,14 @@ class CatalogueCache {
     await _persist();
   });
 
-  Future<void> clear() => _serial(() async {
-    _loaded = true;
-    _entries.clear();
-    await _persist();
-  });
+  Future<void> clear() {
+    _generation++;
+    return _serial(() async {
+      _loaded = true;
+      _entries.clear();
+      await _persist();
+    });
+  }
 }
 
 Map<String, dynamic> _scalars(dynamic value, List<String> keys) {
