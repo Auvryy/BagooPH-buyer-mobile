@@ -10,6 +10,7 @@ import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
 import '../../core/cached_catalogue_notice.dart';
+import '../../core/foreground_refresh.dart';
 import '../home/product_card.dart';
 import '../home/catalogue_loading.dart';
 import '../checkout/bag_page.dart';
@@ -43,11 +44,19 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   final _thumbnails = ScrollController();
   final _detailsKey = GlobalKey();
   final _optionsKey = GlobalKey();
-  Timer? _refresh;
+  late final ForegroundRead _updates;
+  int _reads = 0;
   int _generation = 0;
   DateTime? _verifiedAt;
   ProductSelection get s => _selection!;
   BuyerRepository get repo => widget.repository;
+  bool get _hasSale {
+    if (_selection == null) return false;
+    final offer = mapOf(s.product['sale_offer']);
+    return mapOf(offer['active']).isNotEmpty ||
+        mapOf(offer['upcoming']).isNotEmpty;
+  }
+
   bool get _compact =>
       MediaQuery.sizeOf(context).width < 950 ||
       MediaQuery.textScalerOf(context).scale(16) >= 24;
@@ -55,19 +64,33 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _updates = ForegroundRead(
+      interval: const Duration(seconds: 30),
+      refreshInitially: false,
+      read: (ticket) async {
+        if (_reads > 0 || _busy || _saving || _reminding) {
+          return ReadOutcome.success;
+        }
+        await _load(quiet: true, ticket: ticket);
+        return _error == null ? ReadOutcome.success : ReadOutcome.retry;
+      },
+    );
     _load();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
+        !_hasSale &&
+        _reads == 0 &&
         !_busy &&
         (ModalRoute.isCurrentOf(context) ?? true)) {
       _load(quiet: true);
     }
   }
 
-  Future<void> _load({bool quiet = false}) async {
+  Future<void> _load({bool quiet = false, ReadTicket? ticket}) async {
+    _reads++;
     final generation = ++_generation;
     final epoch = repo.session.identityEpoch;
     final cacheGeneration = repo.catalogueCache.generation;
@@ -95,7 +118,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         );
       }
       final page = await fresh;
-      if (!mounted || generation != _generation) {
+      if (!mounted || generation != _generation || ticket?.isCurrent == false) {
         return;
       }
       if (epoch != repo.session.identityEpoch) {
@@ -120,22 +143,12 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         _image = _image.clamp(0, (s.gallery.length - 1).clamp(0, 999));
         _error = null;
       });
-      _refresh?.cancel();
-      final offer = mapOf(s.product['sale_offer']);
-      if (offer['active'] != null || offer['upcoming'] != null) {
-        _refresh = Timer(const Duration(seconds: 30), () {
-          if (mounted && !_busy) {
-            _load(quiet: true);
-          }
-        });
-      }
     } on BackendException catch (e) {
-      if (mounted && generation == _generation) {
+      if (mounted && generation == _generation && ticket?.isCurrent != false) {
         setState(() {
           _error = e.message;
           if ([401, 403, 404, 410, 419].contains(e.status)) {
             _selection = null;
-            _refresh?.cancel();
           } else if (_selection != null) {
             s.page = WebPage(
               s.page.component,
@@ -146,6 +159,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         });
       }
     } finally {
+      _reads--;
       if (mounted && generation == _generation) {
         setState(() => _loading = false);
       }
@@ -363,7 +377,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _refresh?.cancel();
+    _updates.dispose();
     _quantity.dispose();
     _scroll.dispose();
     _thumbnails.dispose();
@@ -371,223 +385,231 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text(
-        'Product',
-        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-      ),
-      actions: [
-        IconButton(
-          tooltip: 'Share product',
-          onPressed: _selection == null
-              ? null
-              : () async {
-                  try {
-                    await shareBuyerProduct(
-                      context,
-                      repo.session.resolve(
-                        '/product/${Uri.encodeComponent(widget.slug)}',
-                      ),
-                      s.product['name']?.toString() ?? 'Bagoo product',
-                    );
-                  } on BackendException catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(SnackBar(content: Text(e.message)));
+  Widget build(BuildContext context) => ForegroundRefresh(
+    controller: _updates,
+    enabled: _hasSale && !_busy && !_saving && !_reminding,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Product',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Share product',
+            onPressed: _selection == null
+                ? null
+                : () async {
+                    try {
+                      await shareBuyerProduct(
+                        context,
+                        repo.session.resolve(
+                          '/product/${Uri.encodeComponent(widget.slug)}',
+                        ),
+                        s.product['name']?.toString() ?? 'Bagoo product',
+                      );
+                    } on BackendException catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(content: Text(e.message)));
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Sharing is unavailable. Use Copy product link.',
+                            ),
+                          ),
+                        );
+                      }
                     }
-                  } catch (_) {
+                  },
+            icon: const Icon(Icons.ios_share_outlined),
+          ),
+          IconButton(
+            tooltip: 'Copy product link',
+            onPressed: _selection == null
+                ? null
+                : () async {
+                    await Clipboard.setData(
+                      ClipboardData(
+                        text: repo.session
+                            .resolve(
+                              '/product/${Uri.encodeComponent(widget.slug)}',
+                            )
+                            .toString(),
+                      ),
+                    );
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Sharing is unavailable. Use Copy product link.',
-                          ),
-                        ),
+                        const SnackBar(content: Text('Product link copied.')),
                       );
                     }
-                  }
-                },
-          icon: const Icon(Icons.ios_share_outlined),
-        ),
-        IconButton(
-          tooltip: 'Copy product link',
-          onPressed: _selection == null
-              ? null
-              : () async {
-                  await Clipboard.setData(
-                    ClipboardData(
-                      text: repo.session
-                          .resolve(
-                            '/product/${Uri.encodeComponent(widget.slug)}',
-                          )
-                          .toString(),
-                    ),
-                  );
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Product link copied.')),
-                    );
-                  }
-                },
-          icon: const Icon(Icons.link),
-        ),
-        IconButton(
-          tooltip: 'Shopping Bag',
-          onPressed: _viewBag,
-          icon: const Icon(Icons.shopping_bag_outlined),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      child: _loading && _selection == null
-          ? const ProductLoadingPlaceholder()
-          : _selection == null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Notice(_error ?? 'Product unavailable.', error: true),
-                    TextButton(
-                      onPressed: _load,
-                      child: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1280),
-                  child: ListView(
-                    controller: _scroll,
-                    padding: const EdgeInsets.all(16),
+                  },
+            icon: const Icon(Icons.link),
+          ),
+          IconButton(
+            tooltip: 'Shopping Bag',
+            onPressed: _viewBag,
+            icon: const Icon(Icons.shopping_bag_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: _loading && _selection == null
+            ? const ProductLoadingPlaceholder()
+            : _selection == null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (s.page.cachedAt case final savedAt?)
-                        CachedCatalogueNotice(
-                          savedAt: savedAt,
-                          refreshing: _loading,
-                          onRefresh: _loading || _busy
-                              ? null
-                              : () => _load(quiet: true),
-                        ),
-                      if (_error != null) Notice(_error!, error: true),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Text(
-                          'Marketplace / ${mapOf(s.product['category'])['name'] ?? 'Catalogue'}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            height: 1.6,
-                            color: BagooTheme.muted,
+                      Notice(_error ?? 'Product unavailable.', error: true),
+                      TextButton(
+                        onPressed: _load,
+                        child: const Text('Try again'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : RefreshIndicator(
+                onRefresh: _load,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1280),
+                    child: ListView(
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        if (s.page.cachedAt case final savedAt?)
+                          CachedCatalogueNotice(
+                            savedAt: savedAt,
+                            refreshing: _loading,
+                            onRefresh: _loading || _busy
+                                ? null
+                                : () => _load(quiet: true),
+                          ),
+                        if (_error != null) Notice(_error!, error: true),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Text(
+                            'Marketplace / ${mapOf(s.product['category'])['name'] ?? 'Catalogue'}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              height: 1.6,
+                              color: BagooTheme.muted,
+                            ),
                           ),
                         ),
-                      ),
-                      ProductPanel(
-                        child: LayoutBuilder(
-                          builder: (context, box) =>
-                              box.maxWidth >= 600 &&
-                                  MediaQuery.textScalerOf(context).scale(16) <
-                                      25
-                              ? Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(flex: 5, child: _gallery()),
-                                    const SizedBox(width: 32),
-                                    Expanded(flex: 7, child: _details()),
-                                  ],
-                                )
-                              : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    _productTitle(),
-                                    const SizedBox(height: 16),
-                                    _gallery(),
-                                    const SizedBox(height: 20),
-                                    _details(showTitle: false),
-                                  ],
-                                ),
-                        ),
-                      ),
-                      _shop(),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 20),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ActionChip(
-                              avatar: const Icon(
-                                Icons.list_alt_outlined,
-                                size: 18,
-                              ),
-                              label: const Text('Specifications'),
-                              onPressed: () => _section(
-                                'Product specifications',
-                                _specifications(),
-                              ),
-                            ),
-                            ActionChip(
-                              avatar: const Icon(Icons.star_outline, size: 18),
-                              label: const Text('Reviews & photos'),
-                              onPressed: () =>
-                                  _section('Reviews & photos', _reviews()),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _specifications(),
-                      _reviews(),
-                      if (mapsOf(s.page.props['relatedProducts']).isNotEmpty)
                         ProductPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: LayoutBuilder(
+                            builder: (context, box) =>
+                                box.maxWidth >= 600 &&
+                                    MediaQuery.textScalerOf(context).scale(16) <
+                                        25
+                                ? Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(flex: 5, child: _gallery()),
+                                      const SizedBox(width: 32),
+                                      Expanded(flex: 7, child: _details()),
+                                    ],
+                                  )
+                                : Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _productTitle(),
+                                      const SizedBox(height: 16),
+                                      _gallery(),
+                                      const SizedBox(height: 20),
+                                      _details(showTitle: false),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                        _shop(),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
-                              const ProductHeading('You may also like'),
-                              _related(),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.list_alt_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('Specifications'),
+                                onPressed: () => _section(
+                                  'Product specifications',
+                                  _specifications(),
+                                ),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.star_outline,
+                                  size: 18,
+                                ),
+                                label: const Text('Reviews & photos'),
+                                onPressed: () =>
+                                    _section('Reviews & photos', _reviews()),
+                              ),
                             ],
                           ),
                         ),
-                    ],
+                        _specifications(),
+                        _reviews(),
+                        if (mapsOf(s.page.props['relatedProducts']).isNotEmpty)
+                          ProductPanel(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const ProductHeading('You may also like'),
+                                _related(),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
+      ),
+      bottomNavigationBar:
+          _selection != null &&
+              _compact &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? SafeArea(
+              top: false,
+              child: Material(
+                color: Colors.white,
+                shape: const Border(top: BorderSide(color: BagooTheme.line)),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * .4,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _purchaseSummary(),
+                        const SizedBox(height: 8),
+                        _purchaseButtons(),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
     ),
-    bottomNavigationBar:
-        _selection != null &&
-            _compact &&
-            MediaQuery.viewInsetsOf(context).bottom == 0
-        ? SafeArea(
-            top: false,
-            child: Material(
-              color: Colors.white,
-              shape: const Border(top: BorderSide(color: BagooTheme.line)),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(context).height * .4,
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _purchaseSummary(),
-                      const SizedBox(height: 8),
-                      _purchaseButtons(),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          )
-        : null,
   );
 
   Widget _purchaseSummary() {
@@ -757,6 +779,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       uri: s.gallery.isEmpty
                           ? null
                           : imageUri(repo.session, s.gallery[_image]),
+                      thumbnail: true,
                     ),
                   ),
                 ),
@@ -886,6 +909,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       child: ExcludeSemantics(
                         child: RemoteImage(
                           uri: imageUri(repo.session, s.gallery[i]),
+                          thumbnail: true,
                         ),
                       ),
                     ),
@@ -1218,7 +1242,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     if (uri != null) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(4),
-        child: RemoteImage(uri: uri),
+        child: RemoteImage(uri: uri, thumbnail: true),
       );
     }
     final hex = option['hex']?.toString().replaceFirst('#', '') ?? '';
@@ -1302,7 +1326,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           SaleClock(
             offer: offer,
             onBoundary: () {
-              if (!_busy && !_loading) _load(quiet: true);
+              if (_updates.active && _reads == 0) _updates.refresh();
             },
           ),
         ],
@@ -1323,7 +1347,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 dimension: 56,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: RemoteImage(uri: imageUri(repo.session, shop['logo'])),
+                  child: RemoteImage(
+                    uri: imageUri(repo.session, shop['logo']),
+                    thumbnail: true,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1543,6 +1570,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                         label: 'Open customer photo ${index + 1}',
                         child: RemoteImage(
                           uri: imageUri(repo.session, photos[index]),
+                          thumbnail: true,
                         ),
                       ),
                     ),
@@ -1656,6 +1684,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                               excludeSemantics: true,
                               child: RemoteImage(
                                 uri: imageUri(repo.session, photo),
+                                thumbnail: true,
                               ),
                             ),
                           ),

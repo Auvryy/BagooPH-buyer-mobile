@@ -126,7 +126,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         (ModalRoute.isCurrentOf(context) ?? true)) {
       unawaited(_home.load());
     }
-    if (state == AppLifecycleState.resumed && _home.user?['id'] is num) {
+    if (state == AppLifecycleState.resumed &&
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        _home.user?['id'] is num) {
       unawaited(_refreshNotificationSummary(_home.user!['id']));
     }
   }
@@ -411,53 +413,61 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             constraints: const BoxConstraints(maxWidth: 1280),
             child: IndexedStack(
               index: _tab,
-              children: [
-                _marketplace(),
-                if (_visited.contains(1))
-                  BagPage(
-                    repository: widget.repository,
-                    active: _tab == 1,
-                    onBrowse: () => _selectTab(2),
-                  )
-                else
-                  const SizedBox.shrink(),
-                if (_visited.contains(2))
-                  SearchPage(
-                    repository: widget.repository,
-                    request: _searchRequest,
-                  )
-                else
-                  const SizedBox.shrink(),
-                if (_visited.contains(3))
-                  ProfilePage(
-                    key: ValueKey(
-                      'buyer-profile-${_home.user?['id'] ?? 'guest'}',
-                    ),
-                    repository: widget.repository,
-                    user: _home.user,
-                    initial: widget.initial,
-                    active: _tab == 3,
-                    initialSection: _profileSection,
-                    sectionRequest: _profileSectionRequest,
-                    onSearch: _openSearchFilters,
-                    onLogin: () =>
-                        BuyerActions.login(context, destination: 'profile'),
-                    onLogout: widget.onLogout,
-                    onUserChanged: (user) {
-                      if (mounted) {
-                        setState(() {
-                          _home.data?.props['auth'] = {
-                            ...mapOf(_home.data?.props['auth']),
-                            'user': user,
-                          };
-                        });
-                        _homeChanged();
-                      }
-                    },
-                  )
-                else
-                  const SizedBox.shrink(),
-              ],
+              children:
+                  [
+                        _marketplace(),
+                        if (_visited.contains(1))
+                          BagPage(
+                            repository: widget.repository,
+                            active: _tab == 1,
+                            onBrowse: () => _selectTab(2),
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        if (_visited.contains(2))
+                          SearchPage(
+                            repository: widget.repository,
+                            request: _searchRequest,
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        if (_visited.contains(3))
+                          ProfilePage(
+                            key: ValueKey(
+                              'buyer-profile-${_home.user?['id'] ?? 'guest'}',
+                            ),
+                            repository: widget.repository,
+                            user: _home.user,
+                            initial: widget.initial,
+                            active: _tab == 3,
+                            initialSection: _profileSection,
+                            sectionRequest: _profileSectionRequest,
+                            onSearch: _openSearchFilters,
+                            onLogin: () => BuyerActions.login(
+                              context,
+                              destination: 'profile',
+                            ),
+                            onLogout: widget.onLogout,
+                            onUserChanged: (user) {
+                              if (mounted) {
+                                setState(() {
+                                  _home.data?.props['auth'] = {
+                                    ...mapOf(_home.data?.props['auth']),
+                                    'user': user,
+                                  };
+                                });
+                                _homeChanged();
+                              }
+                            },
+                          )
+                        else
+                          const SizedBox.shrink(),
+                      ].indexed
+                      .map(
+                        (tab) =>
+                            TickerMode(enabled: _tab == tab.$1, child: tab.$2),
+                      )
+                      .toList(),
             ),
           ),
         ),

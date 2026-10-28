@@ -75,6 +75,7 @@ class ProductCard extends StatelessWidget {
                       ExcludeSemantics(
                         child: RemoteImage(
                           uri: imageUri(session, product['featured_image']),
+                          thumbnail: true,
                         ),
                       ),
                       if (out || shop['vacation_mode'] == true)

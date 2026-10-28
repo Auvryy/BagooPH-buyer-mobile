@@ -368,6 +368,7 @@ class _BagPageState extends State<BagPage> {
                 child: SizedBox.square(
                   dimension: 72,
                   child: RemoteImage(
+                    thumbnail: true,
                     uri: imageUri(
                       widget.repository.session,
                       product['featured_image'],

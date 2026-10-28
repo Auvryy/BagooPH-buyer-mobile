@@ -616,6 +616,7 @@ class ChatProductCard extends StatelessWidget {
         dimension: 48,
         child: RemoteImage(
           uri: imageUri(repository.session, product['featured_image']),
+          thumbnail: true,
         ),
       ),
       title: Text(

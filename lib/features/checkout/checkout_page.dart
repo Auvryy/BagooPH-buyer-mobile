@@ -801,6 +801,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       child: SizedBox.square(
                         dimension: 56,
                         child: RemoteImage(
+                          thumbnail: true,
                           uri: imageUri(
                             widget.repository.session,
                             mapOf(item['product'])['featured_image'],

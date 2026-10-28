@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../app/theme.dart';
 
@@ -115,18 +116,55 @@ class SubmitButton extends StatelessWidget {
   );
 }
 
-class RemoteImage extends StatelessWidget {
+class RemoteImage extends StatefulWidget {
   const RemoteImage({
     super.key,
     required this.uri,
     this.fit = BoxFit.cover,
     this.headers,
     this.onReady,
+    this.thumbnail = false,
   });
   final Uri? uri;
   final BoxFit fit;
   final Map<String, String>? headers;
   final ValueChanged<bool>? onReady;
+
+  /// Decode public previews near their display size. Full-size viewers and
+  /// authenticated images keep their original decoding behavior.
+  final bool thumbnail;
+
+  @override
+  State<RemoteImage> createState() => _RemoteImageState();
+}
+
+class _RemoteImageState extends State<RemoteImage> {
+  bool? _reported;
+  int _generation = 0;
+
+  @override
+  void didUpdateWidget(covariant RemoteImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uri != widget.uri ||
+        !mapEquals(oldWidget.headers, widget.headers) ||
+        oldWidget.onReady == null && widget.onReady != null) {
+      _reported = null;
+      _generation++;
+    }
+  }
+
+  void _report(bool ready) {
+    if (widget.onReady == null || _reported == ready) return;
+    _reported = ready;
+    final generation = _generation;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && generation == _generation) widget.onReady?.call(ready);
+    });
+  }
+
+  int _decodeExtent(double logical, double ratio) =>
+      (((logical * ratio).ceil() + 63) ~/ 64 * 64).clamp(64, 1536);
+
   @override
   Widget build(BuildContext context) {
     const fallback = ColoredBox(
@@ -139,40 +177,47 @@ class RemoteImage extends StatelessWidget {
         ),
       ),
     );
-    return uri == null
+    return widget.uri == null
         ? fallback
-        : Image.network(
-            uri.toString(),
-            headers: headers,
-            fit: fit,
-            frameBuilder: (_, child, frame, synchronous) {
-              if (onReady != null) {
-                WidgetsBinding.instance.addPostFrameCallback(
-                  (_) => onReady!(synchronous || frame != null),
+        : LayoutBuilder(
+            builder: (context, box) {
+              ImageProvider provider = NetworkImage(
+                widget.uri.toString(),
+                headers: widget.headers,
+              );
+              if (widget.thumbnail &&
+                  widget.headers == null &&
+                  box.hasBoundedWidth &&
+                  box.hasBoundedHeight &&
+                  box.maxWidth > 0 &&
+                  box.maxHeight > 0) {
+                final ratio = MediaQuery.devicePixelRatioOf(context);
+                provider = ResizeImage(
+                  provider,
+                  width: _decodeExtent(box.maxWidth, ratio),
+                  height: _decodeExtent(box.maxHeight, ratio),
+                  policy: ResizeImagePolicy.fit,
                 );
               }
-              return child;
+              return Image(
+                image: provider,
+                fit: widget.fit,
+                frameBuilder: (_, child, frame, synchronous) {
+                  final ready = synchronous || frame != null;
+                  _report(ready);
+                  return ready
+                      ? child
+                      : const ColoredBox(
+                          color: Color(0xFFF1F5F9),
+                          child: Center(child: SizedBox.shrink()),
+                        );
+                },
+                errorBuilder: (_, _, _) {
+                  _report(false);
+                  return fallback;
+                },
+              );
             },
-            errorBuilder: (_, _, _) {
-              if (onReady != null) {
-                WidgetsBinding.instance.addPostFrameCallback(
-                  (_) => onReady!(false),
-                );
-              }
-              return fallback;
-            },
-            loadingBuilder: (_, child, progress) => progress == null
-                ? child
-                : const ColoredBox(
-                    color: Color(0xFFF1F5F9),
-                    child: Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  ),
           );
   }
 }

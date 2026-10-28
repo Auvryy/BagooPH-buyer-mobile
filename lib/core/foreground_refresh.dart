@@ -19,13 +19,16 @@ class ForegroundRead {
     required this.read,
     this.interval = const Duration(seconds: 15),
     this.maxBackoff = const Duration(minutes: 2),
+    this.refreshInitially = true,
   });
 
   final Future<ReadOutcome> Function(ReadTicket ticket) read;
   final Duration interval, maxBackoff;
+  final bool refreshInitially;
   Timer? _timer;
   Future<void>? _running;
   bool _active = false, _disposed = false, _halted = false, _again = false;
+  bool _activated = false;
   int _generation = 0, _failures = 0;
   bool get halted => _halted;
   bool get active => _active && !_disposed && !_halted;
@@ -36,7 +39,10 @@ class ForegroundRead {
     _generation++;
     _again = false;
     _timer?.cancel();
-    if (active) _schedule(Duration.zero);
+    if (active) {
+      _schedule(!_activated && !refreshInitially ? interval : Duration.zero);
+      _activated = true;
+    }
   }
 
   void _schedule(Duration delay) {

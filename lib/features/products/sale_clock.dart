@@ -17,30 +17,51 @@ class _SaleClockState extends State<SaleClock> with WidgetsBindingObserver {
   late DateTime _origin, _server;
   final _seen = <String>{};
   DateTime get _now => _server.add(DateTime.now().difference(_origin));
+  bool get _visible {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return (lifecycle == null || lifecycle == AppLifecycleState.resumed) &&
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        TickerMode.valuesOf(context).enabled;
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _sync();
+    _resetTime();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _schedule();
   }
 
   @override
   void didUpdateWidget(SaleClock oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.offer != widget.offer) _sync();
+    if (oldWidget.offer != widget.offer) {
+      _resetTime();
+      _schedule();
+    }
   }
 
-  void _sync() {
+  void _resetTime() {
     _origin = DateTime.now();
     _server =
         DateTime.tryParse(widget.offer['server_now']?.toString() ?? '') ??
         _origin;
+  }
+
+  void _schedule() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    if (_visible) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    }
   }
 
   void _tick() {
-    if (!mounted) return;
+    if (!mounted || !_visible) return;
     setState(() {});
     for (final value in [
       mapOf(widget.offer['active'])['ends_at'],
@@ -55,13 +76,7 @@ class _SaleClockState extends State<SaleClock> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-      _tick();
-    } else {
-      _timer?.cancel();
-    }
+    _schedule();
   }
 
   @override
