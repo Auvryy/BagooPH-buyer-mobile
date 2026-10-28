@@ -7,6 +7,7 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
+import '../../core/cached_catalogue_notice.dart';
 import 'campaigns.dart';
 import 'advertisement_exposure.dart';
 import 'home_controller.dart';
@@ -582,6 +583,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         padding: EdgeInsets.only(bottom: 20),
                         child: LinearProgressIndicator(),
                       ),
+                    if (_home.data?.cachedAt case final savedAt?)
+                      CachedCatalogueNotice(
+                        savedAt: savedAt,
+                        onRefresh: _home.loading ? null : _home.load,
+                      ),
                     if (_home.error != null) ...[
                       Notice(_home.error!, error: true),
                       Align(
@@ -957,6 +963,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                       ),
                     const SizedBox(height: 24),
+                    TextButton(
+                      onPressed: () async {
+                        await widget.repository.catalogueCache.clear();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Saved browsing data cleared from this device.',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Clear saved browsing data'),
+                    ),
                     const Text(
                       'BagooPH · Local finds, everyday value',
                       textAlign: TextAlign.center,
@@ -989,14 +1010,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       saved: saved,
       saving: _saving.contains(id),
       error: _saveErrors[id],
-      saveLabel: _home.user == null
+      saveLabel: _home.data?.isCached == true
+          ? 'Connect to save'
+          : _home.user == null
           ? 'Sign in to save'
           : !_canSave
           ? 'Approval required'
           : saved
           ? 'Remove from saved'
           : 'Save product',
-      onSave: _home.user == null
+      onSave: _home.data?.isCached == true
+          ? null
+          : _home.user == null
           ? widget.onLogin
           : !_canSave
           ? null

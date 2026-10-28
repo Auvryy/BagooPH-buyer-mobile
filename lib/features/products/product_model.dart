@@ -88,13 +88,15 @@ class ProductSelection {
       {};
   bool get vacation => mapOf(product['shop'])['vacation_mode'] == true;
   bool get approved =>
+      !page.isCached &&
       page.user?['role'] == 'buyer' &&
       page.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(page.user?['kyc_status']);
   bool get canChangeBag =>
-      page.user == null ||
-      page.user?['role'] == 'buyer' &&
-          ['active', 'pending_approval'].contains(page.user?['status']);
+      !page.isCached &&
+      (page.user == null ||
+          page.user?['role'] == 'buyer' &&
+              ['active', 'pending_approval'].contains(page.user?['status']));
   bool colorAvailable(String option) =>
       !colors.any((row) => row['name'] == option && row['in_stock'] == false) &&
       (!hasMatrix ||

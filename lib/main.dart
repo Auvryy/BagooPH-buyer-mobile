@@ -11,6 +11,7 @@ import 'core/buyer_actions.dart';
 import 'core/web_session.dart';
 import 'core/widgets.dart';
 import 'core/session_vault.dart';
+import 'core/catalogue_cache.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/recovery_page.dart';
 import 'features/auth/register_page.dart';
@@ -78,6 +79,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       }
       _repository = BuyerRepository(
         WebSession(origin, vault: const NativeSessionVault()),
+        catalogueCache: CatalogueCache(
+          origin: origin,
+          vault: const NativeSessionVault(),
+        ),
       );
       _restoring = true;
       _bindLinks();

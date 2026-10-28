@@ -1,9 +1,49 @@
 import 'web_session.dart';
 import 'uploads.dart';
+import 'catalogue_cache.dart';
 
 class BuyerRepository {
-  BuyerRepository(this.session);
+  BuyerRepository(this.session, {CatalogueCache? catalogueCache})
+    : catalogueCache = catalogueCache ?? CatalogueCache(origin: session.origin);
   final WebSession session;
+  final CatalogueCache catalogueCache;
+
+  Future<WebPage> _catalogue(
+    String key,
+    Future<WebPage> Function() fetch,
+  ) async {
+    final epoch = session.identityEpoch;
+    try {
+      final page = await fetch();
+      if (epoch != session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Refresh before continuing.',
+          status: 401,
+        );
+      }
+      try {
+        await catalogueCache.save(key, page);
+      } catch (_) {
+        /* Storage is optional. */
+      }
+      if (epoch != session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Refresh before continuing.',
+          status: 401,
+        );
+      }
+      return page;
+    } on BackendException catch (e) {
+      if (epoch == session.identityEpoch &&
+          (e.connectionFailure || [500, 502, 503, 504].contains(e.status))) {
+        final cached = await catalogueCache.read(key);
+        if (cached != null && epoch == session.identityEpoch) return cached;
+      } else {
+        await catalogueCache.remove(key);
+      }
+      rethrow;
+    }
+  }
 
   Future<WebPage> login(
     String email,
@@ -220,36 +260,48 @@ class BuyerRepository {
         if (page > 1) 'page': '$page',
       },
     ).query;
-    final result = await session.page('/${query.isNotEmpty ? '?$query' : ''}');
-    requireNoErrors(result);
-    return result;
+    return _catalogue('home:$query', () async {
+      final result = await session.page(
+        '/${query.isNotEmpty ? '?$query' : ''}',
+      );
+      requireNoErrors(result);
+      return result;
+    });
   }
 
   Future<WebPage> product(String slug) async {
-    final result = await session.page(
-      '/buyer/product/${Uri.encodeComponent(slug)}',
-    );
-    requireNoErrors(result);
-    if (result.component != 'Buyer/ProductDetail' ||
-        result.props['product'] is! Map) {
-      throw const BackendException('This product is not available.');
-    }
-    return result;
+    return _catalogue('product:$slug', () async {
+      final result = await session.page(
+        '/buyer/product/${Uri.encodeComponent(slug)}',
+      );
+      requireNoErrors(result);
+      if (result.component != 'Buyer/ProductDetail' ||
+          result.props['product'] is! Map) {
+        throw const BackendException('This product is not available.');
+      }
+      return result;
+    });
   }
 
   Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
+    final values = {...filters, if (page > 1) 'page': '$page'};
+    final keys = values.keys.toList()..sort();
     final query = Uri(
-      queryParameters: {...filters, if (page > 1) 'page': '$page'},
+      queryParameters: {for (final key in keys) key: values[key]!},
     ).query;
-    final result = await session.page(
-      '/buyer/search${query.isEmpty ? '' : '?$query'}',
-    );
-    requireNoErrors(result);
-    if (result.component != 'Buyer/Search' ||
-        result.props['products'] is! Map) {
-      throw const BackendException('Product search is unavailable. Try again.');
-    }
-    return result;
+    return _catalogue('search:$query', () async {
+      final result = await session.page(
+        '/buyer/search${query.isEmpty ? '' : '?$query'}',
+      );
+      requireNoErrors(result);
+      if (result.component != 'Buyer/Search' ||
+          result.props['products'] is! Map) {
+        throw const BackendException(
+          'Product search is unavailable. Try again.',
+        );
+      }
+      return result;
+    });
   }
 
   Future<bool> saveProduct(int id, bool saved) async {
