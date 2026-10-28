@@ -346,17 +346,22 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   if (_loading) const LinearProgressIndicator(),
                   if (_updateError != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        children: [
-                          Notice(_updateError!, error: true),
-                          if (!_accessLost)
-                            TextButton(
-                              onPressed: _updates.refresh,
-                              child: const Text('Refresh messages'),
-                            ),
-                        ],
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: box.maxHeight * .3,
+                      ),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          children: [
+                            Notice(_updateError!, error: true),
+                            if (!_accessLost)
+                              TextButton(
+                                onPressed: _updates.refresh,
+                                child: const Text('Refresh messages'),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   Expanded(

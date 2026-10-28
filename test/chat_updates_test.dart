@@ -51,6 +51,45 @@ Future<void> open(WidgetTester tester, UpdatingChat repo) async {
 }
 
 void main() {
+  testWidgets('connection feedback fits above an enlarged keyboard composer', (
+    tester,
+  ) async {
+    const size = Size(700, 375);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = size;
+    addTearDown(tester.view.reset);
+    final repo = UpdatingChat();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: size,
+            viewInsets: EdgeInsets.only(bottom: 150),
+            textScaler: TextScaler.linear(2),
+            disableAnimations: true,
+          ),
+          child: ChatPage(repository: repo, userId: 7, receiverId: 3),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Preserved landscape draft');
+    repo.read = () async => throw const BackendException(
+      'The connection is temporarily unavailable. Please check your network.',
+    );
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'Preserved landscape draft',
+    );
+    expect(find.byTooltip('Send message').hitTestable(), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('incoming messages update once without replacing the draft', (
     tester,
   ) async {
