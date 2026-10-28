@@ -4,6 +4,49 @@ import '../../app/theme.dart';
 import '../products/product_widgets.dart';
 import 'search_controller.dart';
 
+Future<SearchFilters?> showBuyerSearchFilters(
+  BuildContext context, {
+  required SearchFilters value,
+  required List<Map<String, dynamic>> categories,
+  required List<Map<String, dynamic>> locations,
+}) => showModalBottomSheet<SearchFilters>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  showDragHandle: true,
+  builder: (sheet) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+    child: SizedBox(
+      height: MediaQuery.sizeOf(sheet).height * .82,
+      child: Column(
+        children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              tooltip: 'Close filters without applying',
+              onPressed: () => Navigator.pop(sheet),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: SearchFiltersForm(
+                value: value,
+                categories: categories,
+                locations: locations,
+                onApply: (filters) => Navigator.pop(sheet, filters),
+                onReset: () =>
+                    Navigator.pop(sheet, SearchFilters(query: value.query)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
 class SearchFiltersForm extends StatefulWidget {
   const SearchFiltersForm({
     super.key,
@@ -118,6 +161,26 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
           ),
         ),
         _label('Price range'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final preset in const [
+              ('Under ₱500', '', '500'),
+              ('₱500–₱1,500', '500', '1500'),
+              ('₱1,500–₱5,000', '1500', '5000'),
+              ('₱5,000 and up', '5000', ''),
+            ])
+              ActionChip(
+                label: Text(preset.$1),
+                onPressed: () => setState(() {
+                  _min.text = preset.$2;
+                  _max.text = preset.$3;
+                }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
         TextFormField(
           controller: _min,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -166,6 +229,7 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
               '3': '3+ stars',
               '4': '4+ stars',
               '4.5': '4.5+ stars',
+              '5': '5 stars',
             }.entries)
               ChoiceChip(
                 label: Text(rating.value),

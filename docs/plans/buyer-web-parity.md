@@ -22,26 +22,26 @@ The website working tree is evolving independently. Recheck relevant controller/
 | P06 | Optional identity upload during registration | Pending |
 | P07 | Live registration email availability | Pending |
 | P08 | Full account status, restriction review requests and decisions | Pending |
-| P09 | Home application entry, correction and status refresh | Pending |
-| P10 | Home active-shipment summary and order destination | Pending |
-| P11 | Home recommendations and related products alongside search matches | Pending |
-| P12 | Home advanced filters, price presets and exact five-star option | Pending |
-| P13 | Catalogue page selection/range and shop previous navigation | Pending |
-| P14 | Shop departments, nested store categories, sorting and reset | Pending |
-| P15 | Storefront voucher offers and actions | Pending |
-| P16 | Shop address, followers, reply rate and opened date | Pending |
-| P17 | Native product sharing beyond clipboard | Pending |
-| P18 | Sale countdown, precise times and boundary refresh | Pending |
-| P19 | Delivered-reminder acknowledgement and disabled resubscribe | Pending |
-| P20 | Combined review photos and seller reply update time | Pending |
+| P09 | Home application entry, correction and status refresh | Home entry/refresh implemented; full status destination remains |
+| P10 | Home active-shipment summary and order destination | Implemented; isolated discovery checks pass |
+| P11 | Home recommendations and related products alongside search matches | Implemented; isolated discovery checks pass |
+| P12 | Home advanced filters, price presets and exact five-star option | Implemented; isolated discovery checks pass |
+| P13 | Catalogue page selection/range and shop previous navigation | Implemented; isolated discovery checks pass |
+| P14 | Shop departments, nested store categories, sorting and reset | Implemented; isolated discovery checks pass |
+| P15 | Storefront voucher offers and actions | Implemented; isolated discovery checks pass |
+| P16 | Shop address, followers, reply rate and opened date | Implemented; isolated discovery checks pass |
+| P17 | Native product sharing beyond clipboard | Implemented; isolated discovery checks pass |
+| P18 | Sale countdown, precise times and boundary refresh | Implemented; isolated discovery checks pass |
+| P19 | Delivered-reminder acknowledgement and disabled resubscribe | Implemented; isolated discovery checks pass |
+| P20 | Combined review photos and seller reply update time | Implemented; isolated discovery checks pass |
 | P21 | Logistics-company choice and company-filtered collection hubs | Implemented; checkout/Bag regression checks pass |
 | P22 | Company/postal/barangay-aware quotes and stale-choice repair | Implemented; checkout/Bag regression checks pass |
 | P23 | Shipping weights, tariff, route and measurement fallback | Implemented; checkout/Bag regression checks pass |
 | P24 | Native GPS, manual coordinates and saved coordinate preservation | Implemented; checkout/Bag regression checks pass |
 | P25 | Mixed promotional price segments in Bag and final review | Implemented; checkout/Bag regression checks pass |
 | P26 | Per-voucher checkout allocations and saved order receipt | Checkout allocations implemented; saved receipt remains |
-| P27 | Voucher issuer, capped benefits and eligible-product navigation | Pending |
-| P28 | Correct promotion percent and shipping offer summaries | Pending |
+| P27 | Voucher issuer, capped benefits and eligible-product navigation | Implemented; isolated discovery checks pass |
+| P28 | Correct promotion percent and shipping offer summaries | Implemented; isolated discovery checks pass |
 | P29 | Complete wallet receipt, refund evidence and deadline transitions | Pending |
 | P30 | Order milestones and observed/custody timestamps | Pending |
 | P31 | Order-linked updates, unread state and explicit acknowledgement | Pending |
@@ -53,10 +53,10 @@ The website working tree is evolving independently. Recheck relevant controller/
 | P37 | Rich tappable chat product cards and message timestamps | Pending |
 | P38 | Product inquiry action and editable quick questions | Pending |
 | P39 | Compact notification preview, displayed snapshot and read times | Pending |
-| P40 | Native support entry while shopping | Pending |
+| P40 | Native support entry while shopping | Implemented; isolated discovery checks pass |
 | P41 | Native incoming links and missing internal destinations/anchors | Pending; owner domain association needed |
 | P42 | Advertisement impression measurement | Pending |
-| P43 | Native platform information equivalent to Overview/About | Pending |
+| P43 | Native platform information equivalent to Overview/About | Implemented; isolated discovery checks pass |
 
 Partner/admin portal sign-in and merchant branding edits are separate products. Native sharing uses the operating system's app chooser. A buyer role remains fixed. Public website SEO is represented by native links rather than copied browser metadata.
 
@@ -84,3 +84,7 @@ Implementation started. Website/backend handoff expansion and checkout integrati
 ### Checkout slice verification
 
 Formatting and static analysis pass. All 17 focused checkout/logistics/Bag tests pass, including unavailable and stale company replies, quote context, saved coordinate submission, a late location result after manual edits, voucher repair and exact order retries. Native plugin compilation and physical location/share interaction remain for combined verification. No live backend data was mutated.
+
+### Discovery slice verification
+
+All 38 focused discovery, product, search, Home and authentication baseline tests pass. New checks exercise direct-page races, related products alongside matches, nested shop categories and sorting across pages at 200% text, capped voucher benefits with native eligible-product URLs, and one-time sale boundary refresh. Home filters use the same native filter sheet and open the filtered Search tab. Sharing retains Copy link for the Linux preview; Android/iOS share interaction is still a device acceptance check.

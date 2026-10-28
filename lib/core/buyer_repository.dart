@@ -314,11 +314,21 @@ class BuyerRepository {
     return page;
   }
 
-  Future<WebPage> shop(String slug, {int page = 1, String search = ''}) async {
+  Future<WebPage> shop(
+    String slug, {
+    int page = 1,
+    String search = '',
+    String category = '',
+    String storeCategory = 'all',
+    String sort = 'relevance',
+  }) async {
     final query = Uri(
       queryParameters: {
         'page': '$page',
         if (search.isNotEmpty) 'search': search,
+        if (category.isNotEmpty) 'category': category,
+        if (storeCategory != 'all') 'store_category': storeCategory,
+        if (sort != 'relevance') 'sort': sort,
       },
     ).query;
     final data = await session.page(

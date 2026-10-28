@@ -81,6 +81,7 @@ class CatalogueSearchController extends ChangeNotifier {
   bool loading = false, loadingMore = false, _disposed = false;
   String? error, moreError;
   int currentPage = 1, lastPage = 1, total = 0, _generation = 0;
+  int? from, to;
   bool get hasMore => currentPage < lastPage;
   List<Map<String, dynamic>> get categories =>
       mapsOf(data?.props['categories']);
@@ -96,7 +97,7 @@ class CatalogueSearchController extends ChangeNotifier {
   }
 
   Future<void> reset() => apply(SearchFilters(query: filters.query));
-  Future<void> load({bool more = false}) async {
+  Future<void> load({bool more = false, int? pageNumber}) async {
     if (_disposed || more && (loading || loadingMore || !hasMore)) return;
     final generation = ++_generation;
     if (more) {
@@ -112,7 +113,7 @@ class CatalogueSearchController extends ChangeNotifier {
     try {
       final page = await repository.search(
         filters.parameters,
-        page: more ? currentPage + 1 : 1,
+        page: more ? currentPage + 1 : pageNumber ?? 1,
       );
       if (_disposed || generation != _generation) return;
       final feed = mapOf(page.props['products']);
@@ -127,6 +128,10 @@ class CatalogueSearchController extends ChangeNotifier {
       currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
       lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
       total = (feed['total'] as num?)?.toInt() ?? products.length;
+      from = more
+          ? from ?? (feed['from'] as num?)?.toInt()
+          : (feed['from'] as num?)?.toInt();
+      to = (feed['to'] as num?)?.toInt();
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) return;
       if (more) {

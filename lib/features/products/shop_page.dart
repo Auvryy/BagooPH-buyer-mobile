@@ -5,15 +5,24 @@ import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/catalogue_pages.dart';
+import '../home/search_controller.dart';
+import '../checkout/bag_page.dart';
 import '../home/product_card.dart';
 import 'product_model.dart';
 import 'product_page.dart';
 import 'product_widgets.dart';
 
 class ShopPage extends StatefulWidget {
-  const ShopPage({super.key, required this.repository, required this.slug});
+  const ShopPage({
+    super.key,
+    required this.repository,
+    required this.slug,
+    this.storeCategory = 'all',
+  });
   final BuyerRepository repository;
   final String slug;
+  final String storeCategory;
   @override
   State<ShopPage> createState() => _ShopPageState();
 }
@@ -29,13 +38,17 @@ class _ShopPageState extends State<ShopPage> {
   int _number = 1;
   int _last = 1;
   int _generation = 0;
+  int _total = 0;
+  int? _from, _to;
+  String _category = '', _storeCategory = 'all', _sort = 'relevance';
   @override
   void initState() {
     super.initState();
+    _storeCategory = widget.storeCategory;
     _load();
   }
 
-  Future<void> _load({bool more = false}) async {
+  Future<void> _load({bool more = false, int? number}) async {
     final generation = ++_generation;
     setState(() {
       _busy = true;
@@ -44,8 +57,11 @@ class _ShopPageState extends State<ShopPage> {
     try {
       final page = await widget.repository.shop(
         widget.slug,
-        page: more ? _number + 1 : 1,
+        page: more ? _number + 1 : number ?? 1,
         search: _search.text.trim(),
+        category: _category,
+        storeCategory: _storeCategory,
+        sort: _sort,
       );
       if (!mounted || generation != _generation) {
         return;
@@ -59,6 +75,11 @@ class _ShopPageState extends State<ShopPage> {
         _products.addAll(mapsOf(feed['data']));
         _number = (feed['current_page'] as num?)?.toInt() ?? 1;
         _last = (feed['last_page'] as num?)?.toInt() ?? 1;
+        _total = (feed['total'] as num?)?.toInt() ?? _products.length;
+        _from = more
+            ? _from ?? (feed['from'] as num?)?.toInt()
+            : (feed['from'] as num?)?.toInt();
+        _to = (feed['to'] as num?)?.toInt();
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
@@ -96,7 +117,12 @@ class _ShopPageState extends State<ShopPage> {
         throw const BackendException('The follow change was not confirmed.');
       }
       if (mounted) {
-        setState(() => _page?.props['isFollowing'] = next);
+        setState(() {
+          _page?.props['isFollowing'] = next;
+          if (result['followers'] is num) {
+            _page?.props['followerCount'] = result['followers'];
+          }
+        });
       }
     } on BackendException catch (e) {
       if (mounted) {
@@ -180,11 +206,39 @@ class _ShopPageState extends State<ShopPage> {
                                   ),
                                 ),
                                 Text(
-                                  shop['city']?.toString() ??
-                                      'Location unavailable',
+                                  [
+                                            shop['address'],
+                                            shop['barangay'],
+                                            shop['city'],
+                                            shop['province'],
+                                            shop['postal_code'],
+                                          ]
+                                          .whereType<String>()
+                                          .where((value) => value.isNotEmpty)
+                                          .join(', ')
+                                          .isNotEmpty
+                                      ? [
+                                              shop['address'],
+                                              shop['barangay'],
+                                              shop['city'],
+                                              shop['province'],
+                                              shop['postal_code'],
+                                            ]
+                                            .whereType<String>()
+                                            .where((value) => value.isNotEmpty)
+                                            .join(', ')
+                                      : 'Location unavailable',
                                 ),
                                 Text(
-                                  'Rating ${ratingLabel(stats['rating'])} · ${stats['products_count'] ?? _products.length} products',
+                                  'Rating ${ratingLabel(stats['rating'])} · ${shop['products_count'] ?? _total} products',
+                                ),
+                                Text(
+                                  '${_page?.props['followerCount'] ?? 0} followers · ${stats['review_count'] ?? 0} reviews',
+                                  style: const TextStyle(height: 1.7),
+                                ),
+                                Text(
+                                  'Reply rate: ${stats['response_rate'] ?? 'Not available'} · Opened: ${stats['joined'] == null ? 'Not available' : readableDate(stats['joined'])}',
+                                  style: const TextStyle(height: 1.7),
                                 ),
                                 TextButton.icon(
                                   onPressed:
@@ -204,6 +258,23 @@ class _ShopPageState extends State<ShopPage> {
                               ],
                             ),
                           ),
+                        for (final offer in mapsOf(_page?.props['shopOffers']))
+                          OfferTile(
+                            offer: offer,
+                            repository: widget.repository,
+                            canSave: _page?.user == null || _eligible,
+                            onSignIn: _page?.user == null
+                                ? () => BuyerActions.login(context)
+                                : null,
+                            onUse: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => BagPage(
+                                  repository: widget.repository,
+                                  voucherCode: offer['code']?.toString(),
+                                ),
+                              ),
+                            ),
+                          ),
                         TextField(
                           controller: _search,
                           onSubmitted: (_) => _load(),
@@ -217,6 +288,47 @@ class _ShopPageState extends State<ShopPage> {
                           ),
                         ),
                         const SizedBox(height: 16),
+                        if (_page != null) ...[
+                          _filter('Department', _category, {
+                            '': 'All departments',
+                            for (final row in mapsOf(
+                              _page?.props['categories'],
+                            ))
+                              row['slug'].toString(): row['name'].toString(),
+                          }, (value) => _category = value),
+                          _filter('Store category', _storeCategory, {
+                            'all': 'All products',
+                            'uncategorized': 'Uncategorized',
+                            for (final root in mapsOf(
+                              _page?.props['storeCategories'],
+                            ).where((row) => row['parent_id'] == null)) ...{
+                              root['id'].toString(): root['name'].toString(),
+                              for (final child in mapsOf(
+                                _page?.props['storeCategories'],
+                              ).where((row) => row['parent_id'] == root['id']))
+                                child['id'].toString(): '  ${child['name']}',
+                            },
+                          }, (value) => _storeCategory = value),
+                          _filter(
+                            'Sort products',
+                            _sort,
+                            searchSorts,
+                            (value) => _sort = value,
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () {
+                                _search.clear();
+                                _category = '';
+                                _storeCategory = 'all';
+                                _sort = 'relevance';
+                                _load();
+                              },
+                              child: const Text('Reset shop filters'),
+                            ),
+                          ),
+                        ],
                         if (!_busy && _page != null && _products.isEmpty)
                           const Text('No products match your search.'),
                       ],
@@ -304,12 +416,24 @@ class _ShopPageState extends State<ShopPage> {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: _number < _last
-                        ? OutlinedButton(
+                    child: Column(
+                      children: [
+                        CataloguePages(
+                          current: _number,
+                          last: _last,
+                          total: _total,
+                          from: _from,
+                          to: _to,
+                          busy: _busy,
+                          onPage: (number) => _load(number: number),
+                        ),
+                        if (_number < _last)
+                          OutlinedButton(
                             onPressed: _busy ? null : () => _load(more: true),
                             child: const Text('Load more products'),
-                          )
-                        : const SizedBox.shrink(),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -319,4 +443,38 @@ class _ShopPageState extends State<ShopPage> {
       ),
     );
   }
+
+  Widget _filter(
+    String label,
+    String value,
+    Map<String, String> choices,
+    ValueChanged<String> change,
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: DropdownButtonFormField<String>(
+      key: ValueKey('$label-$value-${choices.keys.join(',')}'),
+      initialValue: choices.containsKey(value) ? value : null,
+      isExpanded: true,
+      itemHeight: null,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        for (final row in choices.entries)
+          DropdownMenuItem(
+            value: row.key,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(row.value),
+            ),
+          ),
+      ],
+      onChanged: _busy
+          ? null
+          : (value) {
+              if (value != null) {
+                change(value);
+                _load();
+              }
+            },
+    ),
+  );
 }
