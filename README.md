@@ -9,12 +9,12 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Password recovery with email-code verification or an emailed reset link rendered as a native password form.
 - Guest browsing and signed-in home with real products, active delivery and application summaries, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
 - Tappable campaign banners with native promotion details and native product, shop, and search destinations.
-- Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
+- Responsive, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and independent save controls.
 - Full native product pages with gallery navigation/zoom, stock-aware options, variant prices and limits, persistent mobile Add to Bag/Buy Now controls, shop information, offers, focused specifications/review views, related product cards, descriptions, precise sale countdowns/reminder state, native sharing, a combined customer photo gallery, verified reviews/photos, and timestamped seller replies.
 - Native shop search, department and nested store categories, sorting/reset, page selection, public shop information, offers and following. Product chat supports text, photo uploads, and private photo viewing.
 - Native Shopping Bag shop groups, search/sorting/selection filters, stock-aware quantity changes, confirmed removal, selected-item quotes, per-shop delivery estimates, and responsive summaries.
 - Approved-buyer checkout with saved/new canonical Philippine addresses, delivery/payment choice cards, native paginated voucher selection and server comparison, recovery of valid voucher slots, COD or wallet, serving logistics-company and collection-hub choices, optional recipient coordinates/GPS, detailed server shipping weights/routes/tariffs and voucher allocations, and explicit order review. Wide windows use a sidebar payment summary; phones keep the review action within reach.
-- Home, Cart, Search, and Profile bottom tabs, with independent search and preserved visited tab/form state.
+- Home, Bag, Search, and Profile bottom tabs, with independent search and preserved visited tab/form state.
 - A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
 - Native paginated Saved Products and Followed Shops collections, with confirmed remove/unfollow actions and native product/shop pages.
 - A native notification preview with explicit reads limited to displayed notices, plus a full Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
@@ -133,6 +133,10 @@ Previously loaded Home/Search pages and product details are available as read-on
 
 Use **Home → Track a parcel** or the Profile shortcut to look up a waybill number without signing in. Tracking accepts up to 64 ASCII letters/numbers, hyphens, and underscores, starting with a letter/number. Its timeline uses the website's public labels and recorded events; recipient fields remain masked. A refresh failure clearly labels the previous confirmed lookup. Changing the input invalidates older pending results. Internal `/track` links open this native screen. Order changes and buyer receipt confirmation remain in the owned order flow.
 
+Home and Search use one native sort menu, stable initial placeholders, and visible progress while retaining previous results and scroll position. Exact saved public pages can appear while a fresh request is pending; they remain read-only and show their saved time. A valid initial Home response is reused, identical pending catalogue reads share one request within the current account/submission scope, and successful online pages no longer wait for optional cache writes. Account changes, cache removal and newer queries invalidate earlier previews.
+
+Public image previews decode near their displayed physical size, with bounded resolution and preserved proportions. Full-size viewing and authenticated media keep their original providers. Static image placeholders avoid per-photo progress spinners and per-byte rebuilds. Sale reads run every 30 seconds only on a visible foreground product route, back off after failures, and refresh on return. Their first scheduled read waits after the initial product response; countdowns and hidden Home-tab tickers pause when covered. These client changes reduce avoidable work and waits; server response time and source image download sizes still depend on the backend.
+
 ## Verification
 
 ```sh
@@ -142,6 +146,14 @@ flutter test
 flutter build apk --debug
 flutter build linux --debug
 ```
+
+The [buyer design and loading review](docs/plans/buyer-design-loading-polish.md) records the design decisions, loading regressions and verification matrix. To export the optional off-screen native fixture renders without opening an app or browser window:
+
+```sh
+flutter test --no-pub --dart-define=BAGOO_RENDER_REVIEW=true --dart-define=BAGOO_REVIEW_PHASE=review test/design_review_test.dart test/buyer_journeys_design_test.dart
+```
+
+These synthetic-data artifacts are machine-local in `.git/buyer-design/review/`. They cover fifteen representative screens at narrow/regular phone, tablet and landscape sizes, including keyboard insets, 200% text and reduced motion. They supplement regression checks; physical-device, screen-reader and iOS acceptance remain separate checks.
 
 Run the optional read-only backend contract check against your running buyer origin:
 
