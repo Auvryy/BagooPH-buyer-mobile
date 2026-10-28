@@ -7,6 +7,7 @@ import '../../core/buyer_repository.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/catalogue_pages.dart';
 import '../products/product_page.dart';
 import '../products/product_widgets.dart';
 import 'search_controller.dart';
@@ -74,48 +75,13 @@ class _SearchPageState extends State<SearchPage> {
   void _reset() => _apply(SearchFilters(query: _text.text.trim()));
   Future<void> _filters() async {
     _debounce?.cancel();
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheet) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheet).height * .82,
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  tooltip: 'Close filters without applying',
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(sheet),
-                ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                  child: SearchFiltersForm(
-                    value: filters.copyWith(query: _text.text.trim()),
-                    categories: _catalogue.categories,
-                    locations: _catalogue.locations,
-                    onApply: (value) {
-                      Navigator.pop(sheet);
-                      _apply(value);
-                    },
-                    onReset: () {
-                      Navigator.pop(sheet);
-                      _reset();
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final selected = await showBuyerSearchFilters(
+      context,
+      value: filters.copyWith(query: _text.text.trim()),
+      categories: _catalogue.categories,
+      locations: _catalogue.locations,
     );
+    if (mounted && selected != null) _apply(selected);
   }
 
   Future<void> _open(Map<String, dynamic> product) async {
@@ -233,10 +199,7 @@ class _SearchPageState extends State<SearchPage> {
       final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
       final count = productColumns(box.maxWidth, scale);
       final width = (box.maxWidth - 32 - (count - 1) * 14) / count;
-      final related =
-          !_catalogue.loading &&
-              _catalogue.error == null &&
-              _catalogue.products.isEmpty
+      final related = !_catalogue.loading && _catalogue.error == null
           ? _catalogue.related
           : <Map<String, dynamic>>[];
       return RefreshIndicator(
@@ -422,8 +385,6 @@ class _SearchPageState extends State<SearchPage> {
                           ],
                         ),
                       ),
-                    if (related.isNotEmpty)
-                      const ProductHeading('You may also like'),
                   ],
                 ),
               ),
@@ -433,18 +394,14 @@ class _SearchPageState extends State<SearchPage> {
               sliver: SliverGrid.builder(
                 itemCount: _catalogue.loading || _catalogue.error != null
                     ? 0
-                    : related.isEmpty
-                    ? _catalogue.products.length
-                    : related.length,
+                    : _catalogue.products.length,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: count,
                   crossAxisSpacing: 14,
                   mainAxisSpacing: 14,
                   mainAxisExtent: width + productCardBodyHeight * scale,
                 ),
-                itemBuilder: (_, index) => _card(
-                  (related.isEmpty ? _catalogue.products : related)[index],
-                ),
+                itemBuilder: (_, index) => _card(_catalogue.products[index]),
               ),
             ),
             SliverToBoxAdapter(
@@ -454,6 +411,20 @@ class _SearchPageState extends State<SearchPage> {
                   children: [
                     if (_catalogue.moreError != null)
                       Notice(_catalogue.moreError!, error: true),
+                    if (!_catalogue.loading && _catalogue.error == null)
+                      CataloguePages(
+                        current: _catalogue.currentPage,
+                        last: _catalogue.lastPage,
+                        total: _catalogue.total,
+                        from: _catalogue.from,
+                        to: _catalogue.to,
+                        busy: _catalogue.loadingMore,
+                        onPage: (number) {
+                          _catalogue.load(pageNumber: number);
+                          if (_scroll.hasClients) _scroll.jumpTo(0);
+                        },
+                      ),
+                    const SizedBox(height: 12),
                     if (_catalogue.hasMore && _catalogue.error == null)
                       OutlinedButton.icon(
                         onPressed: _catalogue.loading || _catalogue.loadingMore
@@ -470,6 +441,27 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
+            if (related.isNotEmpty) ...[
+              const SliverPadding(
+                padding: EdgeInsets.all(16),
+                sliver: SliverToBoxAdapter(
+                  child: ProductHeading('You may also like'),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverGrid.builder(
+                  itemCount: related.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: count,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 14,
+                    mainAxisExtent: width + productCardBodyHeight * scale,
+                  ),
+                  itemBuilder: (_, index) => _card(related[index]),
+                ),
+              ),
+            ],
           ],
         ),
       );

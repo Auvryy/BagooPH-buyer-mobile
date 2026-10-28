@@ -7,6 +7,7 @@ import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/device_actions.dart';
 import '../products/product_widgets.dart';
 import 'location_picker.dart';
 import 'order_result_page.dart';
@@ -15,6 +16,7 @@ import 'checkout_widgets.dart';
 import 'purchase_quote.dart';
 import 'voucher_selection.dart';
 import 'voucher_picker.dart';
+import 'commerce_details.dart';
 
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({
@@ -22,10 +24,12 @@ class CheckoutPage extends StatefulWidget {
     required this.repository,
     required this.initial,
     this.voucherCode,
+    this.captureLocation = captureBuyerLocation,
   });
   final BuyerRepository repository;
   final WebPage initial;
   final String? voucherCode;
+  final Future<BuyerLocation> Function() captureLocation;
   @override
   State<CheckoutPage> createState() => _CheckoutPageState();
 }
@@ -48,6 +52,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       'landmark',
       'notes',
       'voucher_code',
+      'shipping_latitude',
+      'shipping_longitude',
     ])
       k: TextEditingController(),
   };
@@ -66,6 +72,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
   String _payment = 'cod';
   String _address = 'new';
   String? _hub;
+  int? _company;
+  bool _hasCompanyContract = false;
+  List<Map<String, dynamic>> _companies = [];
+  bool _locating = false;
+  String? _locationFeedback;
   int? _platformVoucher;
   final _shopVouchers = <String, int>{};
   bool _saveAddress = false;
@@ -84,6 +95,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   void initState() {
     super.initState();
     _page = widget.initial;
+    _hasCompanyContract = _page.props.containsKey('logisticsCompanies');
     _quote = mapOf(_page.props['quote']);
     _offers = mapsOf(_page.props['availableVouchers']);
     _fields['voucher_code']!.text = widget.voucherCode ?? '';
@@ -94,6 +106,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
         _addresses.where((a) => a['is_default'] == true).firstOrNull ??
         _addresses.firstOrNull;
     _applyAddress(address, notify: false);
+    try {
+      _readCompanies(_page.props);
+    } on BackendException catch (e) {
+      _error = e.message;
+    }
     _updateQuote();
   }
 
@@ -108,6 +125,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     'shipping_city': _location['city'],
     'shipping_province': _location['province'],
     'destination_barangay': _location['barangay'],
+    if (_hasCompanyContract) 'logistics_company_id': _company,
     'delivery_type': _delivery,
     'pickup_hub_id': _delivery == 'hub_self_pickup'
         ? int.tryParse(_hub ?? '')
@@ -126,6 +144,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
         : null,
     'shipping_city': _location['city'],
     'shipping_province': _location['province'],
+    'shipping_postal_code': _fields['shipping_postal_code']!.text.trim(),
+    'destination_barangay': _location['barangay'],
+    if (_hasCompanyContract) 'logistics_company_id': _company,
     'code': _fields['voucher_code']!.text.trim().toUpperCase(),
     'platform_voucher_revision_id': _platformVoucher,
     'shop_voucher_revision_ids': Map.of(_shopVouchers),
@@ -146,6 +167,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
         user['postal_code']?.toString() ??
         '';
     _fields['landmark']!.text = address?['landmark']?.toString() ?? '';
+    _fields['shipping_latitude']!.text = address?['latitude']?.toString() ?? '';
+    _fields['shipping_longitude']!.text =
+        address?['longitude']?.toString() ?? '';
+    _locationFeedback = null;
+    _hub = null;
     _location = {
       for (final k in ['region', 'province', 'city', 'barangay'])
         k: address?[k]?.toString() ?? user[k]?.toString() ?? '',
@@ -168,6 +194,81 @@ class _CheckoutPageState extends State<CheckoutPage> {
     });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), _updateQuote);
+  }
+
+  void _readCompanies(Map<String, dynamic> data) {
+    final raw = data['logisticsCompanies'];
+    if (raw == null) return;
+    final rows = mapsOf(raw);
+    if (raw is! List ||
+        rows.length != raw.length ||
+        rows.any(
+          (row) =>
+              row['id'] is! num ||
+              !(row['id'] as num).isFinite ||
+              row['id'] <= 0 ||
+              row['id'] != (row['id'] as num).toInt() ||
+              row['name'] is! String ||
+              (row['name'] as String).trim().isEmpty,
+        ) ||
+        rows.map((row) => row['id']).toSet().length != rows.length) {
+      throw const BackendException(
+        'Delivery choices could not be confirmed. Refresh checkout.',
+      );
+    }
+    _companies = rows;
+    _hasCompanyContract = true;
+    if (_fields['shipping_postal_code']!.text.trim().length == 4 &&
+        !_companies.any((row) => row['id'] == _company)) {
+      _company = null;
+      _hub = null;
+    }
+    if (_company == null && _companies.length == 1) {
+      _company = (_companies.single['id'] as num).toInt();
+    }
+  }
+
+  String get _locationDraft => jsonEncode([
+    _fields['shipping_address']!.text,
+    _location,
+    _fields['shipping_latitude']!.text,
+    _fields['shipping_longitude']!.text,
+  ]);
+
+  Future<void> _captureLocation() async {
+    if (_locating || _frozen || _submitting) return;
+    final address = _locationDraft;
+    setState(() {
+      _locating = true;
+      _locationFeedback = null;
+    });
+    try {
+      final position = await widget.captureLocation();
+      if (!mounted || _frozen || address != _locationDraft) {
+        return;
+      }
+      setState(() {
+        _fields['shipping_latitude']!.text = position.latitude.toStringAsFixed(
+          6,
+        );
+        _fields['shipping_longitude']!.text = position.longitude
+            .toStringAsFixed(6);
+        _locationFeedback =
+            'Location pinned. Reported accuracy: ${position.accuracy.round()} m. Check that this is the recipient’s location.';
+      });
+      _edit();
+    } on BackendException catch (e) {
+      if (mounted) setState(() => _locationFeedback = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _locationFeedback =
+              'Location is unavailable. You can enter coordinates manually.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
   }
 
   VoucherSelection get _vouchers => VoucherSelection(
@@ -204,6 +305,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
       try {
         data = await widget.repository.quote(body);
       } on BackendException catch (e) {
+        if (mounted && generation == _generation) {
+          setState(() => _readCompanies(e.data));
+        }
         if (e.status != 422 ||
             e.data['quote'] is! Map ||
             e.data['validSelection'] is! Map) {
@@ -212,6 +316,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         data = e.data;
       }
       if (!mounted || generation != _generation) return false;
+      setState(() => _readCompanies(data));
       final quote = checkedPurchaseQuote(data['quote'], itemIds: _ids);
       final errors = mapOf(data['selectionErrors']);
       if (data['validSelection'] is Map) {
@@ -244,9 +349,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
       setState(() {
         _quote = quote;
         _offers = mapsOf(data['availableVouchers']);
-        _ready = true;
+        _ready = !_hasCompanyContract || _company != null;
+        if (!_ready) {
+          _error =
+              'Choose a serving logistics company before reviewing this order.';
+        }
       });
-      return true;
+      return _ready;
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -360,7 +469,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
         );
       }
       if (mounted) {
-        setState(() => _page = fresh);
+        setState(() {
+          _page = fresh;
+          _hasCompanyContract = fresh.props.containsKey('logisticsCompanies');
+          _readCompanies(fresh.props);
+        });
         await _updateQuote();
       }
     } on BackendException catch (e) {
@@ -438,9 +551,22 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ].join(', '),
                   ),
                   const SizedBox(height: 16),
-                  for (final item in _items)
+                  for (final item in _items) ...[
                     Text(
                       '${mapOf(item['product'])['name']} × ${mapOf(payload['item_quantities'])[item['id'].toString()] ?? item['quantity']}',
+                    ),
+                    PriceSegments(
+                      segments: mapsOf(
+                        mapsOf(_quote['items'])
+                            .where((row) => row['id'] == item['id'])
+                            .firstOrNull?['price_segments'],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (_hasCompanyContract)
+                    Text(
+                      'Logistics: ${_companies.where((row) => row['id'] == payload['logistics_company_id']).firstOrNull?['name'] ?? 'Recorded company'}',
                     ),
                   const SizedBox(height: 12),
                   Text(
@@ -449,6 +575,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                         : 'Doorstep delivery',
                   ),
                   const SizedBox(height: 12),
+                  CheckoutDiscounts(quote: _quote),
                   Text(
                     'Total: ${pesos(_quote['total'])}',
                     style: const TextStyle(
@@ -551,6 +678,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
       enabled: !_submitting && !_frozen,
       onChanged: (_) {
         if (key == 'voucher_code') _voucherFeedback = null;
+        if (key == 'shipping_address') {
+          _fields['shipping_latitude']!.clear();
+          _fields['shipping_longitude']!.clear();
+          _locationFeedback = null;
+        }
         _edit();
       },
       maxLength: {
@@ -569,6 +701,27 @@ class _CheckoutPageState extends State<CheckoutPage> {
       ),
       validator: (v) {
         final value = v?.trim() ?? '';
+        if (key == 'shipping_latitude' || key == 'shipping_longitude') {
+          final other =
+              _fields[key == 'shipping_latitude'
+                      ? 'shipping_longitude'
+                      : 'shipping_latitude']!
+                  .text
+                  .trim();
+          if (value.isEmpty && other.isNotEmpty) {
+            return 'Enter both coordinates or clear both.';
+          }
+          if (value.isEmpty) return null;
+          final coordinate = double.tryParse(value);
+          final limit = key == 'shipping_latitude' ? 90 : 180;
+          if (!RegExp(r'^-?[0-9]{1,3}(\.[0-9]{1,6})?$').hasMatch(value) ||
+              coordinate == null ||
+              !coordinate.isFinite ||
+              coordinate.abs() > limit) {
+            return 'Use a coordinate from -$limit to $limit, up to six decimal places.';
+          }
+          return null;
+        }
         if (required && value.isEmpty) return 'Enter ${label.toLowerCase()}.';
         if (value.isEmpty) return null;
         final minimum =
@@ -620,7 +773,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
         : 'Review order',
     busy: _submitting,
     onPressed:
-        _choosingBest || _quoting || (!_ready && !_frozen) || _locationLoading
+        _choosingBest ||
+            _quoting ||
+            (!_ready && !_frozen) ||
+            _locationLoading ||
+            _locating
         ? null
         : _review,
   );
@@ -699,19 +856,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     style: TextStyle(fontSize: 12),
                   )
                 else
-                  for (final segment in mapsOf(
-                    mapsOf(_quote['items'])
-                        .where((row) => row['id'] == item['id'])
-                        .firstOrNull?['price_segments'],
-                  ))
-                    Text(
-                      '${segment['quantity']} × ${pesos(segment['unit_price'])} = ${pesos(segment['subtotal'])}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        height: 1.7,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  PriceSegments(
+                    segments: mapsOf(
+                      mapsOf(_quote['items'])
+                          .where((row) => row['id'] == item['id'])
+                          .firstOrNull?['price_segments'],
                     ),
+                  ),
               ],
             ),
           ),
@@ -910,6 +1061,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
             semanticsLabel: 'Updating checkout quote',
           ),
         _money('Subtotal', _quote['subtotal']),
+        if (_ready) CheckoutDiscounts(quote: _quote),
         _money('Delivery', _quote['shipping_fee']),
         if ((amount(_quote['discount']) ?? 0) >
             (amount(_quote['shipping_discount']) ?? 0))
@@ -946,6 +1098,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ),
                   ),
                   _money('Shop subtotal', shop['subtotal']),
+                  ShippingCalculation(
+                    calculation: mapOf(shop['shipping_quote']),
+                    selfPickup: _delivery == 'hub_self_pickup',
+                  ),
+                  CheckoutDiscounts(quote: _quote, shopId: shop['shop_id']),
                   _money('Shop delivery', shop['shipping']),
                   if ((amount(shop['discount']) ?? 0) > 0)
                     _money('Shop savings', shop['discount'], discount: true),
@@ -1009,6 +1166,60 @@ class _CheckoutPageState extends State<CheckoutPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const ProductHeading('Delivery method'),
+        const SizedBox(height: 12),
+        if (_hasCompanyContract) ...[
+          DropdownButtonFormField<int>(
+            key: ValueKey(
+              'company-$_company-${_companies.map((row) => row['id']).join('-')}',
+            ),
+            initialValue: _companies.any((row) => row['id'] == _company)
+                ? _company
+                : null,
+            isExpanded: true,
+            itemHeight: null,
+            decoration: InputDecoration(
+              labelText: 'Logistics company',
+              errorText: _fieldErrors['logistics_company_id'],
+            ),
+            items: [
+              for (final company in _companies)
+                DropdownMenuItem(
+                  value: (company['id'] as num).toInt(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(company['name'].toString()),
+                  ),
+                ),
+            ],
+            onChanged: _frozen || _submitting
+                ? null
+                : (value) {
+                    setState(() {
+                      _company = value;
+                      _hub = null;
+                    });
+                    _edit();
+                  },
+            validator: (_) =>
+                _company == null ? 'Choose a serving logistics company.' : null,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              _companies.isEmpty
+                  ? 'No company choices are currently available. Complete or review the address and refresh the quote.'
+                  : 'Companies must serve both seller and recipient. Shipping uses the greater of actual and volumetric weight.',
+              style: const TextStyle(fontSize: 12, height: 1.7),
+            ),
+          ),
+        ] else
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Your delivery partner and fees are assigned by Bagoo and confirmed in the quote.',
+              style: TextStyle(fontSize: 12, height: 1.7),
+            ),
+          ),
         CheckoutChoice(
           title: 'Doorstep delivery',
           description: 'Delivered to your recipient address. Shipping is calculated separately for each shop.',
@@ -1032,11 +1243,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
         if (_delivery == 'hub_self_pickup') ...[
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            key: ValueKey('hub-$_company-$_hub'),
             initialValue: _hub,
             isExpanded: true,
             itemHeight: null,
             decoration: const InputDecoration(labelText: 'Pickup Bayan Hub'),
             items: mapsOf(_page.props['pickupHubs'])
+                .where(
+                  (hub) =>
+                      !_hasCompanyContract ||
+                      hub['logistics_company_id'] == _company,
+                )
                 .map(
                   (h) => DropdownMenuItem(
                     value: h['id'].toString(),
@@ -1125,6 +1342,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
             final changed = jsonEncode(_location) != jsonEncode(value);
             setState(() => _location = value);
             if (changed) {
+              _fields['shipping_latitude']!.clear();
+              _fields['shipping_longitude']!.clear();
+              _locationFeedback = null;
+              _hub = null;
               _edit();
             }
           },
@@ -1136,6 +1357,50 @@ class _CheckoutPageState extends State<CheckoutPage> {
           keyboard: TextInputType.number,
         ),
         _field('landmark', 'Landmark (optional)', required: false),
+        const Text(
+          'Delivery coordinates (optional)',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'Pin the recipient’s location only. The address and available delivery route are checked separately.',
+            style: TextStyle(fontSize: 12, height: 1.7),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _locating || _frozen || _submitting
+              ? null
+              : _captureLocation,
+          icon: const Icon(Icons.my_location_outlined),
+          label: Text(_locating ? 'Finding location…' : 'Use current location'),
+        ),
+        if (_locationFeedback != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              _locationFeedback!,
+              style: const TextStyle(fontSize: 12, height: 1.7),
+            ),
+          ),
+        _field(
+          'shipping_latitude',
+          'Latitude',
+          required: false,
+          keyboard: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
+        ),
+        _field(
+          'shipping_longitude',
+          'Longitude',
+          required: false,
+          keyboard: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
+        ),
         _field('notes', 'Delivery notes (optional)', required: false),
         if (_address == 'new')
           CheckboxListTile(

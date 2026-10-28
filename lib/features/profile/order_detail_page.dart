@@ -12,6 +12,9 @@ import 'profile_widgets.dart';
 import 'profile_repository.dart';
 import 'purchases_section.dart';
 import 'returns_page.dart';
+import 'order_journey.dart';
+import '../checkout/commerce_details.dart';
+import '../engagement/engagement_repository.dart';
 
 class OrderDetailPage extends StatefulWidget {
   const OrderDetailPage({
@@ -58,7 +61,8 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     widget.repository.buyer.requireNoErrors(page);
     if (page.component != 'Buyer/OrderDetail' ||
         mapOf(page.props['order'])['id'] != widget.orderId ||
-        page.user?['role'] != 'buyer') {
+        page.user?['role'] != 'buyer' ||
+        _page != null && _page!.user?['id'] != page.user?['id']) {
       throw const BackendException(
         'This order could not be confirmed for your account.',
       );
@@ -392,6 +396,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                             OrderItemSummary(
                               item: item,
                               session: widget.repository.session,
+                              repository: widget.repository.buyer,
                             ),
                             if (item['review'] is Map)
                               Padding(
@@ -441,6 +446,51 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                         ],
                       ),
                     ),
+                    if (order['voucher_receipt'] is Map)
+                      ProfilePanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const ProductHeading('Original voucher receipt'),
+                            VoucherReceipt(
+                              receipt: mapOf(order['voucher_receipt']),
+                              paymentMethod:
+                                  order['payment_method']?.toString() ?? 'cod',
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (order['delivery'] is Map)
+                      ProfilePanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const ProductHeading('Package details'),
+                            for (final entry in const {
+                              'tracking_number': 'Tracking number',
+                              'logistics_partner': 'Logistics partner',
+                              'pickup_store_name': 'Pickup shop',
+                              'pickup_address': 'Pickup address',
+                              'delivery_recipient_name': 'Recipient',
+                              'delivery_address': 'Delivery address',
+                              'courier_notes': 'Courier notes',
+                            }.entries)
+                              if (mapOf(order['delivery'])[entry.key] != null)
+                                Text(
+                                  '${entry.value}: ${mapOf(order['delivery'])[entry.key]}',
+                                  style: const TextStyle(height: 1.7),
+                                ),
+                            if (mapOf(
+                                  mapOf(order['delivery'])['courier'],
+                                )['name'] !=
+                                null)
+                              Text(
+                                'Courier: ${mapOf(mapOf(order['delivery'])['courier'])['name']}',
+                                style: const TextStyle(height: 1.7),
+                              ),
+                          ],
+                        ),
+                      ),
                     ProfilePanel(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -487,59 +537,19 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                         ),
                       ),
                     ProfilePanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const ProfileHeading(
-                            'Recorded parcel journey',
-                            '',
-                            Icons.route_outlined,
-                          ),
-                          if (mapsOf(tracking['history']).isEmpty)
-                            const Text(
-                              'No journey checkpoints are recorded yet.',
-                            ),
-                          for (final event in mapsOf(tracking['history']))
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 20),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const ExcludeSemantics(
-                                    child: Icon(
-                                      Icons.check_circle_outline,
-                                      size: 20,
-                                      color: BagooTheme.strong,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          event['label']?.toString() ??
-                                              'Recorded checkpoint',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            height: 1.6,
-                                          ),
-                                        ),
-                                        Text(
-                                          '${event['location'] ?? ''}\n${readableDateTime(event['created_at'])}',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            height: 1.7,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+                      child: OrderJourney(
+                        order: order,
+                        notices: mapsOf(_page!.props['orderNotices']),
+                        busy: busy,
+                        onRead: (id) => perform(() async {
+                          await BuyerEngagementRepository(
+                            widget.repository.buyer,
+                          ).markNotificationRead(id);
+                          _accept(
+                            await widget.repository.order(widget.orderId),
+                          );
+                          return 'Order update marked read.';
+                        }, validate: false),
                       ),
                     ),
                   ],
@@ -709,6 +719,7 @@ class _ReviewPageState extends ProfileFormState<_ReviewPage> {
               OrderItemSummary(
                 item: widget.item,
                 session: widget.repository.session,
+                repository: widget.repository.buyer,
               ),
               Wrap(
                 spacing: 4,

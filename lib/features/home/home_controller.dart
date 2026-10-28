@@ -18,6 +18,7 @@ class HomeController extends ChangeNotifier {
   int currentPage = 1;
   int lastPage = 1;
   int total = 0;
+  int? from, to;
   int _generation = 0;
   bool _disposed = false;
   List<Map<String, dynamic>> get categories =>
@@ -29,7 +30,7 @@ class HomeController extends ChangeNotifier {
   bool get hasFilters =>
       search.isNotEmpty || category.isNotEmpty || sort != 'relevance';
 
-  Future<void> load({bool more = false}) async {
+  Future<void> load({bool more = false, int? pageNumber}) async {
     if (more && (loading || loadingMore || !hasMore)) {
       return;
     }
@@ -49,7 +50,7 @@ class HomeController extends ChangeNotifier {
         search: search,
         category: category,
         sort: sort,
-        page: more ? currentPage + 1 : 1,
+        page: more ? currentPage + 1 : pageNumber ?? 1,
       );
       if (_disposed || generation != _generation) {
         return;
@@ -70,6 +71,10 @@ class HomeController extends ChangeNotifier {
       currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
       lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
       total = (feed['total'] as num?)?.toInt() ?? products.length;
+      from = more
+          ? from ?? (feed['from'] as num?)?.toInt()
+          : (feed['from'] as num?)?.toInt();
+      to = (feed['to'] as num?)?.toInt();
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) {
         return;

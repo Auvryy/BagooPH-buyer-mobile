@@ -4,6 +4,7 @@ import '../../app/theme.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'product_card.dart';
+import 'advertisement_exposure.dart';
 
 class Campaigns extends StatefulWidget {
   const Campaigns({
@@ -11,10 +12,14 @@ class Campaigns extends StatefulWidget {
     required this.banners,
     required this.session,
     required this.onOpen,
+    this.onImpression,
+    this.active = true,
   });
   final List<Map<String, dynamic>> banners;
   final WebSession session;
   final ValueChanged<Map<String, dynamic>> onOpen;
+  final ValueChanged<Map<String, dynamic>>? onImpression;
+  final bool active;
   @override
   State<Campaigns> createState() => _CampaignsState();
 }
@@ -102,9 +107,17 @@ class _CampaignsState extends State<Campaigns> {
                     fit: StackFit.expand,
                     children: [
                       ExcludeSemantics(
-                        child: RemoteImage(
-                          uri: imageUri(widget.session, banner['image']),
-                          fit: BoxFit.contain,
+                        child: AdvertisementExposure(
+                          key: ValueKey(
+                            '${banner['id']}-${mapOf(banner['measurement'])['revision_id']}-${banner['image']}',
+                          ),
+                          active: widget.active && _index == i,
+                          onImpression: () => widget.onImpression?.call(banner),
+                          builder: (context, ready) => RemoteImage(
+                            uri: imageUri(widget.session, banner['image']),
+                            fit: BoxFit.contain,
+                            onReady: ready,
+                          ),
                         ),
                       ),
                       if (href != null && href.isNotEmpty)

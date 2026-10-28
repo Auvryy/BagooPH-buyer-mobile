@@ -264,7 +264,9 @@ class _OfferPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final type = offer['discount_type']?.toString();
-    final value = type == 'percentage'
+    final value = type == 'free_shipping'
+        ? 'Shipping discount'
+        : type == 'percent'
         ? '${((amount(offer['percentage_bps']) ?? 0) / 100).toStringAsFixed(0)}% off'
         : '${_pesoCents(offer['value_cents'])} off';
     final minimum = amount(offer['minimum_cents']);

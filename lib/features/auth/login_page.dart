@@ -32,8 +32,16 @@ class _LoginPageState extends State<LoginPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
+  bool _remember = false;
   String? _error;
   Map<String, String> _errors = {};
+  @override
+  void initState() {
+    super.initState();
+    _email.text = widget.repository.session.rememberedEmail ?? '';
+    _remember = widget.repository.session.remembersLogin;
+  }
+
   Future<void> _submit() async {
     if (_busy) {
       return;
@@ -48,11 +56,24 @@ class _LoginPageState extends State<LoginPage> {
     FocusScope.of(context).unfocus();
     setState(() => _busy = true);
     try {
-      final page = await widget.repository.login(_email.text, _password.text);
+      final page = await widget.repository.login(
+        _email.text,
+        _password.text,
+        remember: _remember,
+      );
       if (!mounted) {
         return;
       }
       TextInput.finishAutofillContext();
+      if (_remember && !widget.repository.session.persistenceAvailable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'You are signed in. This device could not save your session; sign in again after closing the app.',
+            ),
+          ),
+        );
+      }
       widget.onAuthenticated(page);
     } on BackendException catch (error) {
       if (!mounted) {
@@ -135,6 +156,15 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: _busy ? null : widget.onForgot,
               child: const Text('Forgot password?'),
             ),
+          ),
+          CheckboxListTile(
+            value: _remember,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Remember me on this device'),
+            onChanged: _busy
+                ? null
+                : (value) => setState(() => _remember = value ?? false),
           ),
           const SizedBox(height: 12),
           SubmitButton(

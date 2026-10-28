@@ -249,9 +249,12 @@ class _RestrictedRepository extends FakeBuyerRepository {
     );
   }
   @override
-  Future<WebPage> login(String email, String password) async =>
-      const WebPage('Auth/AccountStatus', {
-        'auth': {'user': buyer},
-        'status': {'message': 'Your account needs review.'},
-      });
+  Future<WebPage> login(
+    String email,
+    String password, {
+    bool remember = false,
+  }) async => const WebPage('Auth/AccountStatus', {
+    'auth': {'user': buyer},
+    'status': {'message': 'Your account needs review.'},
+  });
 }

@@ -121,10 +121,12 @@ class RemoteImage extends StatelessWidget {
     required this.uri,
     this.fit = BoxFit.cover,
     this.headers,
+    this.onReady,
   });
   final Uri? uri;
   final BoxFit fit;
   final Map<String, String>? headers;
+  final ValueChanged<bool>? onReady;
   @override
   Widget build(BuildContext context) {
     const fallback = ColoredBox(
@@ -143,7 +145,22 @@ class RemoteImage extends StatelessWidget {
             uri.toString(),
             headers: headers,
             fit: fit,
-            errorBuilder: (_, _, _) => fallback,
+            frameBuilder: (_, child, frame, synchronous) {
+              if (onReady != null) {
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => onReady!(synchronous || frame != null),
+                );
+              }
+              return child;
+            },
+            errorBuilder: (_, _, _) {
+              if (onReady != null) {
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => onReady!(false),
+                );
+              }
+              return fallback;
+            },
             loadingBuilder: (_, child, progress) => progress == null
                 ? child
                 : const ColoredBox(

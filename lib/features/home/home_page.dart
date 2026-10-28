@@ -6,14 +6,21 @@ import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/catalogue_pages.dart';
 import 'campaigns.dart';
+import 'advertisement_exposure.dart';
 import 'home_controller.dart';
 import 'product_card.dart';
 import 'search_page.dart';
 import 'search_controller.dart';
+import 'search_filters.dart';
+import 'about_page.dart';
+import '../products/product_widgets.dart';
+import '../support/support_assistant_page.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../notifications/notifications_page.dart';
+import '../notifications/notification_preview.dart';
 import '../tracking/parcel_tracking_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
@@ -46,6 +53,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
+  late final BuyerAdvertisementSession _advertisements;
   final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
@@ -56,6 +64,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _profileSection = 'overview';
   int _profileSectionRequest = 0;
   bool _openingTracking = false;
+  bool _openingFilters = false;
   void _selectTab(int tab) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -69,6 +78,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
+    _advertisements = BuyerAdvertisementSession(
+      BuyerEngagementRepository(widget.repository).reportAdvertisement,
+    );
     _home.addListener(_homeChanged);
     _homeChanged();
     _tab = widget.initialDestination;
@@ -105,8 +117,55 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_home.loading) {
+      unawaited(_home.load());
+    }
     if (state == AppLifecycleState.resumed && _home.user?['id'] is num) {
       unawaited(_refreshNotificationSummary(_home.user!['id']));
+    }
+  }
+
+  Future<void> _advancedFilters() async {
+    if (_openingFilters) return;
+    setState(() => _openingFilters = true);
+    try {
+      final page = await widget.repository.search(const {});
+      if (!mounted) return;
+      final filters = await showBuyerSearchFilters(
+        context,
+        value: SearchFilters(
+          query: _search.text.trim(),
+          category: _home.category,
+          sort: _home.sort,
+        ),
+        categories: mapsOf(page.props['categories']),
+        locations: mapsOf(page.props['locations']),
+      );
+      if (mounted && filters != null) _openSearchFilters(filters);
+    } on BackendException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _openingFilters = false);
+    }
+  }
+
+  Future<void> _openBuyerHref(String href) async {
+    try {
+      await BuyerDestinationRouter.openHref(
+        context,
+        widget.repository,
+        href,
+        onSearch: _openSearchFilters,
+        onProfileSection: _openProfileSection,
+      );
+    } on BackendException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -192,13 +251,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       widget.onLogin();
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => NotificationsPage(
+    FocusManager.instance.primaryFocus?.unfocus();
+    final selection = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheet) => SizedBox(
+        height: MediaQuery.sizeOf(sheet).height * .82,
+        child: NotificationPreview(
           repository: widget.repository,
           ownerId: (user['id'] as num).toInt(),
-          onSearch: _openSearchFilters,
-          onProfileSection: _openProfileSection,
+          isCurrentOwner: () => mounted && _home.user?['id'] == user['id'],
           onSummaryChanged: (count) {
             if (mounted && _home.user?['id'] == user['id']) {
               setState(() => _notificationCount = count);
@@ -207,6 +271,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       ),
     );
+    if (!mounted || _home.user?['id'] != user['id']) return;
+    if (selection?['notice'] is Map) {
+      try {
+        await BuyerDestinationRouter.openNotification(
+          context,
+          widget.repository,
+          mapOf(selection!['notice'])['id'].toString(),
+          (user['id'] as num).toInt(),
+          onSearch: _openSearchFilters,
+          onProfileSection: _openProfileSection,
+          isCurrent: () => mounted && _home.user?['id'] == user['id'],
+        );
+      } on BackendException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      }
+    }
+    if (selection?['all'] == true && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => NotificationsPage(
+            repository: widget.repository,
+            ownerId: (user['id'] as num).toInt(),
+            onSearch: _openSearchFilters,
+            onProfileSection: _openProfileSection,
+            onSummaryChanged: (count) {
+              if (mounted && _home.user?['id'] == user['id']) {
+                setState(() => _notificationCount = count);
+              }
+            },
+          ),
+        ),
+      );
+    }
     if (mounted && _home.user?['id'] is num) {
       await _refreshNotificationSummary(_home.user!['id']);
     }
@@ -219,11 +319,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _openBannerDestination(Map<String, dynamic> banner) async {
     final measurement = mapOf(banner['measurement']);
     if (measurement.isNotEmpty) {
-      unawaited(
-        BuyerEngagementRepository(widget.repository)
-            .reportAdvertisementClick(measurement)
-            .catchError((_) {}),
-      );
+      _advertisements.record(measurement, 'click');
     }
     try {
       await BuyerDestinationRouter.openHref(
@@ -430,13 +526,55 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _openingTracking ? null : _openTracking,
-                        icon: const Icon(Icons.local_shipping_outlined),
-                        label: const Text('Track a parcel'),
+                    OutlinedButton.icon(
+                      onPressed: _openingFilters ? null : _advancedFilters,
+                      icon: const Icon(Icons.tune),
+                      label: Text(
+                        _openingFilters
+                            ? 'Loading filters…'
+                            : 'Filter products',
                       ),
+                    ),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _openingTracking ? null : _openTracking,
+                          icon: const Icon(Icons.local_shipping_outlined),
+                          label: const Text('Track a parcel'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            final user = _home.user;
+                            if (user == null) {
+                              widget.onLogin();
+                              return;
+                            }
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => SupportAssistantPage(
+                                  repository: widget.repository,
+                                  user: user,
+                                  available: _canSave,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.help_outline),
+                          label: const Text('Help & Support'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  AboutBagooPage(repository: widget.repository),
+                            ),
+                          ),
+                          child: const Text('About BagooPH'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     if (_home.loading)
@@ -472,6 +610,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           banners: _home.banners,
                           session: widget.repository.session,
                           onOpen: _openBanner,
+                          active:
+                              _tab == 0 &&
+                              (ModalRoute.of(context)?.isCurrent ?? true),
+                          onImpression: (banner) => _advertisements.record(
+                            mapOf(banner['measurement']),
+                            'impression',
+                          ),
                         ),
                         const SizedBox(height: 24),
                       ],
@@ -505,11 +650,72 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         const SizedBox(height: 24),
                       ],
                       if (_home.data!.props['buyerApplication'] != null) ...[
-                        const Notice(
-                          'You can browse while your account is being reviewed. Checkout requires an approved account.',
-                        ),
+                        if (mapOf(
+                              _home.data!.props['buyerApplication'],
+                            )['can_use_portal'] !=
+                            true)
+                          ProductPanel(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Application: ${mapOf(mapOf(_home.data!.props['buyerApplication'])['user'])['kyc_status']?.toString().replaceAll('_', ' ') ?? 'Under review'}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  mapOf(
+                                        mapOf(
+                                          _home.data!.props['buyerApplication'],
+                                        )['user'],
+                                      )['kyc_feedback']?.toString() ??
+                                      'Browse and use your Bag while approval is pending. Checkout requires approval.',
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      _openProfileSection('identity'),
+                                  child: const Text(
+                                    'Review or correct application',
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      _openBuyerHref('/account/status'),
+                                  child: const Text('View account status'),
+                                ),
+                              ],
+                            ),
+                          ),
                         const SizedBox(height: 20),
                       ],
+                      if (mapOf(_home.data!.props['activeShipment']).isNotEmpty)
+                        ProductPanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const ProductHeading('Your delivery'),
+                              Text(
+                                'Order ${mapOf(_home.data!.props['activeShipment'])['order_number']} · ${mapOf(_home.data!.props['activeShipment'])['item_name']}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                '${mapOf(_home.data!.props['activeShipment'])['status']?.toString().replaceAll('_', ' ')} · ${mapOf(_home.data!.props['activeShipment'])['courier_name'] ?? 'Courier to be assigned'}',
+                              ),
+                              Text(
+                                'Estimated arrival: ${mapOf(_home.data!.props['activeShipment'])['estimated_delivery'] ?? 'Not yet available'}',
+                              ),
+                              TextButton(
+                                onPressed: () => _openBuyerHref(
+                                  '/buyer/orders/${mapOf(_home.data!.props['activeShipment'])['order_id']}',
+                                ),
+                                child: const Text('View delivery'),
+                              ),
+                            ],
+                          ),
+                        ),
                       const Text(
                         'DAILY DISCOVER',
                         style: TextStyle(
@@ -683,6 +889,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   },
                 ),
               ),
+            if (!_home.loading &&
+                _home.error == null &&
+                _home.isMarketplace &&
+                mapsOf(_home.data?.props['relatedProducts']).isNotEmpty) ...[
+              const SliverPadding(
+                padding: EdgeInsets.all(16),
+                sliver: SliverToBoxAdapter(
+                  child: ProductHeading('You may also like'),
+                ),
+              ),
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: horizontal),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) => SliverGrid.builder(
+                    itemCount: mapsOf(_home.data?.props['relatedProducts'])
+                        .length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: count,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
+                      mainAxisExtent:
+                          (constraints.crossAxisExtent - (count - 1) * 14) /
+                              count +
+                          productCardBodyHeight * scaled,
+                    ),
+                    itemBuilder: (_, index) => _card(
+                      mapsOf(_home.data?.props['relatedProducts'])[index],
+                    ),
+                  ),
+                ),
+              ),
+            ],
             SliverPadding(
               padding: EdgeInsets.fromLTRB(horizontal, 8, horizontal, 32),
               sliver: SliverToBoxAdapter(
@@ -690,6 +928,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   children: [
                     if (_home.moreError != null)
                       Notice(_home.moreError!, error: true),
+                    if (!_home.loading &&
+                        _home.error == null &&
+                        _home.isMarketplace)
+                      CataloguePages(
+                        current: _home.currentPage,
+                        last: _home.lastPage,
+                        total: _home.total,
+                        from: _home.from,
+                        to: _home.to,
+                        busy: _home.loadingMore,
+                        onPage: (number) => _home.load(pageNumber: number),
+                      ),
                     if (_home.hasMore &&
                         !_home.loading &&
                         _home.error == null &&

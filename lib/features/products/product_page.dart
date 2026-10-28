@@ -8,6 +8,7 @@ import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/device_actions.dart';
 import '../home/product_card.dart';
 import '../checkout/bag_page.dart';
 import '../checkout/checkout_page.dart';
@@ -15,6 +16,7 @@ import 'product_model.dart';
 import 'product_widgets.dart';
 import 'shop_page.dart';
 import 'chat_page.dart';
+import 'sale_clock.dart';
 
 class ProductPage extends StatefulWidget {
   const ProductPage({super.key, required this.repository, required this.slug});
@@ -285,6 +287,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     }
     final upcoming = mapOf(mapOf(s.product['sale_offer'])['upcoming']);
     final state = mapOf(s.page.props['saleReminder']);
+    if (upcoming['id'] is! num ||
+        state['delivered'] == true && state['subscribed'] != true) {
+      return;
+    }
     setState(() => _reminding = true);
     try {
       final data = await repo.reminder(
@@ -324,6 +330,38 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       ),
       actions: [
         IconButton(
+          tooltip: 'Share product',
+          onPressed: _selection == null
+              ? null
+              : () async {
+                  try {
+                    await shareBuyerProduct(
+                      context,
+                      repo.session.resolve(
+                        '/product/${Uri.encodeComponent(widget.slug)}',
+                      ),
+                      s.product['name']?.toString() ?? 'Bagoo product',
+                    );
+                  } on BackendException catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(e.message)));
+                    }
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Sharing is unavailable. Use Copy product link.',
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                },
+          icon: const Icon(Icons.ios_share_outlined),
+        ),
+        IconButton(
           tooltip: 'Copy product link',
           onPressed: _selection == null
               ? null
@@ -343,7 +381,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                     );
                   }
                 },
-          icon: const Icon(Icons.ios_share_outlined),
+          icon: const Icon(Icons.link),
         ),
         IconButton(
           tooltip: 'Shopping Bag',
@@ -1111,7 +1149,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               ),
             ),
             Text(
-              'Ends ${readableDate(active['ends_at'])} · Philippine time',
+              'Ends ${readableDateTime(active['ends_at'])}',
               style: const TextStyle(fontSize: 12),
             ),
             if (active['kind'] == 'flash')
@@ -1125,21 +1163,34 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               upcoming['name']?.toString() ?? 'Upcoming sale',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            Text(
-              'Starts ${readableDate(upcoming['starts_at'])} · Philippine time',
-            ),
+            Text('Starts ${readableDateTime(upcoming['starts_at'])}'),
             TextButton.icon(
-              onPressed: _reminding ? null : _reminder,
+              onPressed:
+                  _reminding ||
+                      mapOf(s.page.props['saleReminder'])['delivered'] ==
+                              true &&
+                          mapOf(s.page.props['saleReminder'])['subscribed'] !=
+                              true
+                  ? null
+                  : _reminder,
               icon: const Icon(Icons.notifications_outlined),
               label: Text(
                 _reminding
                     ? 'Saving…'
                     : mapOf(s.page.props['saleReminder'])['subscribed'] == true
                     ? 'Remove reminder'
+                    : mapOf(s.page.props['saleReminder'])['delivered'] == true
+                    ? 'Reminder sent'
                     : 'Remind me',
               ),
             ),
           ],
+          SaleClock(
+            offer: offer,
+            onBoundary: () {
+              if (!_busy && !_loading) _load(quiet: true);
+            },
+          ),
         ],
       ),
     );
@@ -1342,11 +1393,48 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   Widget _reviews() {
     final reviews = mapsOf(s.product['reviews']);
+    final photos = reviews
+        .expand(
+          (review) => (review['images'] as List? ?? []).whereType<String>(),
+        )
+        .toList();
     return ProductPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const ProductHeading('Customer Reviews & Photos'),
+          if (photos.isNotEmpty) ...[
+            const Text(
+              'Customer photo gallery',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var index = 0; index < photos.length; index++)
+                  SizedBox.square(
+                    dimension: 72,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => viewImage(
+                        context,
+                        repo.session,
+                        photos[index],
+                        'Customer photo ${index + 1} of ${photos.length}',
+                      ),
+                      child: Semantics(
+                        label: 'Open customer photo ${index + 1}',
+                        child: RemoteImage(
+                          uri: imageUri(repo.session, photos[index]),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           Wrap(
             spacing: 12,
             runSpacing: 8,
@@ -1483,9 +1571,16 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                             style: const TextStyle(fontSize: 12, height: 1.6),
                           ),
                           Text(
-                            readableDate(mapOf(r['reply'])['created_at']),
+                            'Posted ${readableDateTime(mapOf(r['reply'])['created_at'])}',
                             style: const TextStyle(fontSize: 11),
                           ),
+                          if (mapOf(r['reply'])['updated_at'] != null &&
+                              mapOf(r['reply'])['updated_at'] !=
+                                  mapOf(r['reply'])['created_at'])
+                            Text(
+                              'Updated ${readableDateTime(mapOf(r['reply'])['updated_at'])}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
                         ],
                       ),
                     ),

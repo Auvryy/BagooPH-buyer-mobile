@@ -41,7 +41,7 @@ Keep work direct, scoped, and concise. Inspect existing code before changing it;
 - Buyers may browse, use their own profile/history, and view their Bag before approval; active or pending buyers may change Bag items. Checkout requires an active approved account. New buyer registrations require a real birth date proving age 18 or older. Confirm enforcement against the backend before wiring these flows.
 - Preserve the original registration/sign-in email. Recovery/contact changes and reviewed identity corrections must follow the backend's documented verification and review processes.
 - Canonical order flow: `PLACED -> CONFIRMED -> PREPARING -> READY_FOR_PICKUP -> PICKED_UP -> AT_SORTING_CENTER -> SORTED -> ASSIGNED_TO_RIDER -> OUT_FOR_DELIVERY -> DELIVERED -> COMPLETED`.
-- Failure branch: `DELIVERY_FAILED -> RETURNED` or documented rescheduling. Only the buyer's receipt confirmation advances `DELIVERED` to `COMPLETED`; do not advance it automatically in the app.
+- Failure branch: `DELIVERY_FAILED -> RETURNED` or documented rescheduling. Historical version-one orders may require buyer receipt confirmation. Current version-two orders can complete on the server after evidenced handover and payment gates. Render the server status and `canConfirmReceipt` eligibility; never advance completion locally. Consult the executable versioned backend contract when older prose conflicts with it.
 - Display server-authoritative order, payment, shipping, and refund information. Do not infer successful payment or completed delivery from a local navigation event.
 
 ## Product Language and UI

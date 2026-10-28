@@ -11,6 +11,7 @@ import '../home/product_card.dart';
 import '../products/product_widgets.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
+import 'return_codes.dart';
 
 class ReturnsPage extends StatefulWidget {
   const ReturnsPage({
@@ -331,6 +332,12 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
         style: const TextStyle(height: 1.7),
       ),
       const SizedBox(height: 16),
+      const ProductHeading('What happens next?'),
+      Text(
+        returnNextStep(item['status']?.toString()),
+        style: const TextStyle(height: 1.7),
+      ),
+      const SizedBox(height: 16),
       for (final line in mapsOf(item['items']))
         Text(
           '${mapOf(line['purchase'])['name'] ?? 'Purchased item'} × ${line['quantity']}\n${[mapOf(line['purchase'])['color'], mapOf(line['purchase'])['size']].whereType<String>().join(' · ')}',
@@ -346,7 +353,9 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
                   'Private return evidence',
                 ),
           icon: const Icon(Icons.image_outlined),
-          label: const Text('View private return photo'),
+          label: Text(
+            'View ${returnEvidencePurpose(evidence['purpose']?.toString())} photo',
+          ),
         ),
       for (final deadline in {
         'request_until': 'Request deadline',
@@ -376,6 +385,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
           style: const TextStyle(height: 1.7),
         ),
         if (custody['barcode'] != null) ...[
+          ReturnCodes(code: custody['barcode'].toString()),
           const SizedBox(height: 12),
           SelectableText(
             'Return barcode: ${custody['barcode']}',
@@ -389,6 +399,17 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
             label: const Text('Copy return code'),
           ),
         ],
+        Text(
+          custody['weight_grams'] is num
+              ? 'Recorded weight: ${((custody['weight_grams'] as num) / 1000).toStringAsFixed(3)} kg'
+              : 'Packed weight has not been recorded.',
+          style: const TextStyle(height: 1.7),
+        ),
+        if (custody['manifest_reference'] != null)
+          Text(
+            'Transport manifest: ${custody['manifest_reference']}',
+            style: const TextStyle(height: 1.7),
+          ),
         if (mapOf(custody['custody'])['kind'] == 'buyer')
           Text(
             custody['can_dropoff'] == true
@@ -396,11 +417,11 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
                 : 'No current drop-off authority is available. Review the saved decision and deadlines before bringing a parcel.',
             style: const TextStyle(height: 1.7),
           ),
-        for (final hub in mapsOf(custody['hubs']))
+        for (final (index, hub) in mapsOf(custody['hubs']).indexed)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
-              '${hub['name']} · ${hub['code']}\n${hub['address']}\n${hub['operating_hours'] ?? 'Contact the hub for operating hours.'}',
+              '${index == custody['position'] ? 'Current route stop · ' : ''}${hub['name']} · ${hub['code']}\n${hub['address']}\n${hub['operating_hours'] ?? 'Contact the hub for operating hours.'}',
               style: const TextStyle(height: 1.7),
             ),
           ),
@@ -529,7 +550,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
         Padding(
           padding: const EdgeInsets.only(bottom: 20),
           child: Text(
-            '${event['event_type'].toString().replaceAll('-', ' ')} · ${readableDateTime(event['created_at'])}\n${event['reason']}',
+            '${event['event_type'].toString().replaceAll('-', ' ')} · ${readableDateTime(event['created_at'])}\n${event['actor_role']?.toString().replaceAll('_', ' ') ?? 'Bagoo'}${event['target_status'] == null ? '' : ' · ${event['target_status'].toString().replaceAll('_', ' ')}'}\n${event['reason'] ?? ''}',
             style: const TextStyle(height: 1.7),
           ),
         ),

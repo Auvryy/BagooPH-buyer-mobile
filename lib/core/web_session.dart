@@ -4,13 +4,14 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'uploads.dart';
+import 'session_vault.dart';
 
 import 'package:html/parser.dart' as html;
 
 /// The buyer backend currently exposes Laravel web sessions and Inertia pages.
-/// Cookies stay in memory and are never written to disk or logged.
+/// Optional persistence uses the native secure store; credentials are never saved.
 class WebSession {
-  WebSession(this.origin, {HttpClient? client})
+  WebSession(this.origin, {HttpClient? client, this._vault})
     : _client = client ?? HttpClient() {
     if (!['http', 'https'].contains(origin.scheme) ||
         origin.host.isEmpty ||
@@ -29,6 +30,129 @@ class WebSession {
   String? _version;
   String? _csrf;
   int _sessionEpoch = 0;
+  int get identityEpoch => _sessionEpoch;
+  final SessionVault? _vault;
+  Future<void> _vaultTail = Future<void>.value();
+  bool _persistCookies = true, _rememberLogin = false;
+  bool persistenceAvailable = true;
+  String? rememberedEmail;
+  bool get remembersLogin => _rememberLogin;
+  String get _vaultKey => 'bagoo-buyer-session-v1:${origin.origin}';
+
+  Future<void> _vaultOperation(Future<void> Function(SessionVault) action) {
+    final vault = _vault;
+    if (vault == null) return Future.value();
+    _vaultTail = _vaultTail.then((_) async {
+      try {
+        await action(vault);
+        persistenceAvailable = true;
+      } catch (_) {
+        persistenceAvailable = false;
+      }
+    });
+    return _vaultTail;
+  }
+
+  Future<void> restoreSavedSession() async {
+    final vault = _vault;
+    if (vault == null) return;
+    final epoch = _sessionEpoch;
+    try {
+      final raw = await vault.read(_vaultKey);
+      if (raw == null || epoch != _sessionEpoch) return;
+      if (raw.length > 65536) throw const FormatException();
+      final data = jsonDecode(raw);
+      if (data is! Map ||
+          data['origin'] != origin.origin ||
+          data['remember'] is! bool ||
+          data['cookies'] is! List ||
+          (data['cookies'] as List).length > 64) {
+        throw const FormatException();
+      }
+      final restored = <String, _SessionCookie>{};
+      final now = DateTime.now();
+      for (final row in data['cookies']) {
+        if (row is! Map ||
+            row['header'] is! String ||
+            row['expires'] != null && row['expires'] is! String) {
+          throw const FormatException();
+        }
+        final cookie = Cookie.fromSetCookieValue(row['header']);
+        final domain = cookie.domain?.replaceFirst(RegExp(r'^\.'), '');
+        if (domain != null &&
+            domain.isNotEmpty &&
+            origin.host != domain &&
+            !origin.host.endsWith('.$domain')) {
+          throw const FormatException();
+        }
+        final expiry = row['expires'] == null
+            ? null
+            : DateTime.parse(row['expires']);
+        if (expiry != null && !expiry.isAfter(now)) continue;
+        restored['${cookie.name}|${cookie.path ?? '/'}'] = _SessionCookie(
+          cookie,
+          expiry,
+        );
+      }
+      if (epoch != _sessionEpoch) return;
+      _cookies.addAll(restored);
+      _rememberLogin = data['remember'] as bool;
+      rememberedEmail =
+          _rememberLogin &&
+              data['email'] is String &&
+              (data['email'] as String).length <= 254
+          ? data['email']
+          : null;
+    } catch (_) {
+      if (epoch == _sessionEpoch) {
+        await _vaultOperation((vault) => vault.delete(_vaultKey));
+      }
+    }
+  }
+
+  Future<void> _saveSession() {
+    if (!_persistCookies || _vault == null) return Future.value();
+    final epoch = _sessionEpoch;
+    final now = DateTime.now();
+    final payload = jsonEncode({
+      'origin': origin.origin,
+      'remember': _rememberLogin,
+      'email': rememberedEmail,
+      'cookies': [
+        for (final row in _cookies.values)
+          if (row.expires == null || row.expires!.isAfter(now))
+            {
+              'header': row.cookie.toString(),
+              'expires': row.expires?.toIso8601String(),
+            },
+      ],
+    });
+    return _vaultOperation((vault) async {
+      if (epoch == _sessionEpoch && _persistCookies) {
+        await vault.write(_vaultKey, payload);
+      }
+    });
+  }
+
+  Future<void> prepareAuthentication() async {
+    _sessionEpoch++;
+    _persistCookies = false;
+    _rememberLogin = false;
+    rememberedEmail = null;
+    await _vaultOperation((vault) => vault.delete(_vaultKey));
+  }
+
+  Future<void> rememberAuthentication(bool remember, String email) async {
+    _rememberLogin = remember;
+    _persistCookies = remember;
+    rememberedEmail = remember ? email.trim().toLowerCase() : null;
+    if (remember) await _saveSession();
+  }
+
+  Future<void> clearSavedSession() async {
+    clear();
+    await _vaultTail;
+  }
 
   Uri resolve(String path) {
     final target = origin.resolve(path);
@@ -296,6 +420,7 @@ class WebSession {
               : cookie.expires,
         );
       }
+      await _saveSession();
       final chunks = BytesBuilder(copy: false);
       await for (final bytes in response.timeout(const Duration(seconds: 25))) {
         chunks.add(bytes);
@@ -441,15 +566,21 @@ class WebSession {
     );
   }
 
-  void clear() {
+  void clear({bool eraseSaved = true}) {
     _sessionEpoch++;
     _cookies.clear();
     _csrf = null;
     _version = null;
+    _rememberLogin = false;
+    rememberedEmail = null;
+    _persistCookies = true;
+    if (eraseSaved) {
+      unawaited(_vaultOperation((vault) => vault.delete(_vaultKey)));
+    }
   }
 
   void close() {
-    clear();
+    clear(eraseSaved: false);
     _client.close(force: true);
   }
 }

@@ -5,17 +5,51 @@ class BuyerRepository {
   BuyerRepository(this.session);
   final WebSession session;
 
-  Future<WebPage> login(String email, String password) async {
+  Future<WebPage> login(
+    String email,
+    String password, {
+    bool remember = false,
+  }) async {
+    await session.prepareAuthentication();
     final page = await session.submit('/login', {
       'email': email.trim().toLowerCase(),
       'password': password,
       'role': 'buyer',
-      'remember': false,
+      'remember': remember,
     });
     requireNoErrors(page);
     if (page.user == null || page.user?['role'] != 'buyer') {
       throw const BackendException(
         'We could not sign in to your buyer account. Please try again.',
+      );
+    }
+    await session.rememberAuthentication(remember, email);
+    return page;
+  }
+
+  Future<WebPage?> currentSession() async {
+    final status = await session.jsonGet('/auth/session');
+    if (status['authenticated'] == false) return null;
+    if (status['authenticated'] != true || status['redirect'] is! String) {
+      throw const BackendException(
+        'Your current session could not be confirmed.',
+      );
+    }
+    final target = session.resolve(status['redirect']);
+    if (target.path != '/' &&
+        target.path != '/account/status' &&
+        target.path != '/buyer/orders' &&
+        !RegExp(r'^/buyer/orders/[0-9]+$').hasMatch(target.path)) {
+      throw const BackendException(
+        'This session belongs to another Bagoo account type. Use a buyer account.',
+      );
+    }
+    final page = await document(target.toString());
+    requireNoErrors(page);
+    if (page.user?['role'] != 'buyer' || page.user?['id'] is! num) {
+      throw const BackendException(
+        'Your buyer session is no longer available.',
+        status: 401,
       );
     }
     return page;
@@ -29,28 +63,33 @@ class BuyerRepository {
         'We could not confirm logout. Please try again.',
       );
     }
-    session.clear();
+    await session.clearSavedSession();
   }
 
   Future<WebPage> registration() => session.page('/register');
   Future<void> validateRegistration(
     Map<String, dynamic> values, {
     int? step,
+    List<UploadPart>? files,
   }) async {
-    final data = await session.jsonPost('/register/validate', {
-      ...values,
-      'role': 'buyer',
-      'step': ?step,
-    });
+    final body = {...values, 'role': 'buyer', 'step': ?step};
+    final data = files != null && files.isNotEmpty
+        ? await session.uploadJson('/register/validate', body, files)
+        : await session.jsonPost('/register/validate', body);
     _requireConfirmation(data, 'valid');
   }
 
-  Future<WebPage> register(Map<String, dynamic> values, String token) async {
+  Future<WebPage> register(
+    Map<String, dynamic> values,
+    String token, {
+    List<UploadPart>? files,
+  }) async {
+    await session.prepareAuthentication();
     final page = await session.submit('/register', {
       ...values,
       'role': 'buyer',
       'otp_token': token,
-    });
+    }, files: files);
     requireNoErrors(page);
     final status = page.props['status'];
     if (page.user == null && (status is! String || status.isEmpty)) {
@@ -59,6 +98,58 @@ class BuyerRepository {
       );
     }
     return page;
+  }
+
+  Future<bool> registrationEmailAvailable(String email) async {
+    final normalized = email.trim().toLowerCase();
+    final data = await session.jsonPost('/register/email/validate', {
+      'email': normalized,
+      'role': 'buyer',
+    });
+    if (data['email'] != normalized ||
+        data['role'] != 'buyer' ||
+        data['available'] is! bool) {
+      throw const BackendException(
+        'Email availability could not be confirmed.',
+      );
+    }
+    return data['available'] as bool;
+  }
+
+  Future<void> sendPasswordLink(String email) async {
+    final page = await session.submit('/forgot-password', {
+      'email': email.trim().toLowerCase(),
+      'role': 'buyer',
+    }, referer: '/forgot-password?role=buyer');
+    requireNoErrors(page);
+    if (page.component != 'Auth/ForgotPassword' ||
+        page.props['status'] is! String ||
+        (page.props['status'] as String).isEmpty) {
+      throw const BackendException(
+        'The password reset email was not confirmed.',
+      );
+    }
+  }
+
+  Future<void> resetPasswordLink(
+    String email,
+    String token,
+    String password,
+    String confirmation,
+  ) async {
+    final page = await session.submit('/reset-password', {
+      'email': email.trim().toLowerCase(),
+      'role': 'buyer',
+      'token': token,
+      'password': password,
+      'password_confirmation': confirmation,
+    });
+    requireNoErrors(page);
+    if (page.component != 'Auth/Login' ||
+        page.props['status'] is! String ||
+        (page.props['status'] as String).isEmpty) {
+      throw const BackendException('The password reset was not confirmed.');
+    }
   }
 
   Future<Map<String, dynamic>> sendCode(
@@ -314,11 +405,21 @@ class BuyerRepository {
     return page;
   }
 
-  Future<WebPage> shop(String slug, {int page = 1, String search = ''}) async {
+  Future<WebPage> shop(
+    String slug, {
+    int page = 1,
+    String search = '',
+    String category = '',
+    String storeCategory = 'all',
+    String sort = 'relevance',
+  }) async {
     final query = Uri(
       queryParameters: {
         'page': '$page',
         if (search.isNotEmpty) 'search': search,
+        if (category.isNotEmpty) 'category': category,
+        if (storeCategory != 'all') 'store_category': storeCategory,
+        if (sort != 'relevance') 'sort': sort,
       },
     ).query;
     final data = await session.page(

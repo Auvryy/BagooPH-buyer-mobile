@@ -27,6 +27,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["buyerLinkHost"] = providers.gradleProperty("BAGOO_LINK_HOST").orElse("buyer.example.invalid").get()
     }
 
     buildTypes {

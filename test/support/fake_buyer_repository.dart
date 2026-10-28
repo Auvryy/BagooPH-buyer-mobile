@@ -1,5 +1,6 @@
 import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/uploads.dart';
 
 const buyer = {
   'id': 7,
@@ -139,7 +140,11 @@ class FakeBuyerRepository extends BuyerRepository {
   }
 
   @override
-  Future<WebPage> login(String email, String password) async {
+  Future<WebPage> login(
+    String email,
+    String password, {
+    bool remember = false,
+  }) async {
     loginCalls++;
     if (loginError != null) {
       throw loginError!;
@@ -147,6 +152,11 @@ class FakeBuyerRepository extends BuyerRepository {
     signedIn = true;
     return homePage(signedIn: true);
   }
+
+  @override
+  Future<WebPage?> currentSession() async => null;
+  @override
+  Future<bool> registrationEmailAvailable(String email) async => true;
 
   @override
   Future<void> logout() async {
@@ -185,6 +195,7 @@ class FakeBuyerRepository extends BuyerRepository {
   Future<void> validateRegistration(
     Map<String, dynamic> values, {
     int? step,
+    List<UploadPart>? files,
   }) async {
     validationCalls++;
   }
@@ -208,7 +219,11 @@ class FakeBuyerRepository extends BuyerRepository {
   }
 
   @override
-  Future<WebPage> register(Map<String, dynamic> values, String token) async {
+  Future<WebPage> register(
+    Map<String, dynamic> values,
+    String token, {
+    List<UploadPart>? files,
+  }) async {
     registerCalls++;
     signedIn = true;
     return homePage(signedIn: true);
@@ -262,6 +277,9 @@ WebPage productPage({bool signedIn = false, Map<String, dynamic>? override}) =>
       'shopOffers': [],
     });
 WebPage checkoutPage() => const WebPage('Checkout/Index', {
+  'logisticsCompanies': [
+    {'id': 41, 'name': 'Test delivery company'},
+  ],
   'checkoutToken': 'test-checkout-token',
   'auth': {'user': buyer},
   'user': buyer,

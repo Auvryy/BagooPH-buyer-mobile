@@ -6,6 +6,7 @@ import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
 import 'product_model.dart';
+import 'product_page.dart';
 
 class ProductPanel extends StatelessWidget {
   const ProductPanel({super.key, required this.child});
@@ -167,6 +168,23 @@ class _OfferTileState extends State<OfferTile> {
   bool _busy = false;
   dynamic _saved;
   String? _error;
+  String? _eligibleSlug(Map<String, dynamic> product) {
+    try {
+      final url = product['url'];
+      if (url is! String) return null;
+      final parts = widget.repository.session.resolve(url).pathSegments;
+      if (parts.length == 2 && parts.first == 'product' ||
+          parts.length == 3 &&
+              parts.first == 'buyer' &&
+              parts[1] == 'product') {
+        return parts.last;
+      }
+    } on BackendException {
+      return null;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -216,11 +234,18 @@ class _OfferTileState extends State<OfferTile> {
   @override
   Widget build(BuildContext context) {
     final o = widget.offer;
+    final value = amount(o['discount_value']) ?? 0;
+    final cap = amount(o['max_discount']);
+    final effective = cap == null ? value : (value > cap ? cap : value);
     final discount = o['discount_type'] == 'free_shipping'
-        ? 'Shipping discount'
+        ? effective > 0
+              ? 'Shipping discount up to ${pesos(effective)}'
+              : cap != null && cap > 0
+              ? 'Shipping discount up to ${pesos(cap)}'
+              : 'Shipping discount'
         : o['discount_type'] == 'percent'
         ? '${o['discount_value']}% off'
-        : '${pesos(o['discount_value'])} off';
+        : '${pesos(effective)} off';
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -234,6 +259,12 @@ class _OfferTileState extends State<OfferTile> {
           Text(
             o['name']?.toString() ?? discount,
             style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          Text(
+            o['issuer'] == 'shop'
+                ? 'Offered by ${o['shop_name'] ?? 'this shop'}'
+                : 'Offered by Bagoo',
+            style: const TextStyle(fontSize: 12, height: 1.7),
           ),
           const SizedBox(height: 8),
           Text(
@@ -268,7 +299,22 @@ class _OfferTileState extends State<OfferTile> {
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
             for (final p in mapsOf(o['eligible_products']))
-              Text(p['name'].toString(), style: const TextStyle(fontSize: 12)),
+              TextButton(
+                onPressed: _eligibleSlug(p) != null
+                    ? () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProductPage(
+                            repository: widget.repository,
+                            slug: _eligibleSlug(p)!,
+                          ),
+                        ),
+                      )
+                    : null,
+                child: Text(
+                  p['name'].toString(),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
           ],
           Text(
             o['code']?.toString() ?? '',
