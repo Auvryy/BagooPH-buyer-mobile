@@ -7,22 +7,22 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Buyer email/password login and server-confirmed logout.
 - Two-step registration, live email availability, optional canonical address and government ID, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
 - Password recovery with email-code verification or an emailed reset link rendered as a native password form.
-- Guest browsing and signed-in home with real products, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
+- Guest browsing and signed-in home with real products, active delivery and application summaries, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
 - Tappable campaign banners with native promotion details and native product, shop, and search destinations.
 - Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
-- Full native product pages with gallery navigation/zoom, stock-aware options, variant prices and limits, persistent mobile Add to Bag/Buy Now controls, shop information, offers, focused specifications/review views, related product cards, descriptions, verified reviews/photos, and seller replies.
-- Native shop search/pagination/following and product chat with text, photo uploads, and private photo viewing.
+- Full native product pages with gallery navigation/zoom, stock-aware options, variant prices and limits, persistent mobile Add to Bag/Buy Now controls, shop information, offers, focused specifications/review views, related product cards, descriptions, precise sale countdowns/reminder state, native sharing, a combined customer photo gallery, verified reviews/photos, and timestamped seller replies.
+- Native shop search, department and nested store categories, sorting/reset, page selection, public shop information, offers and following. Product chat supports text, photo uploads, and private photo viewing.
 - Native Shopping Bag shop groups, search/sorting/selection filters, stock-aware quantity changes, confirmed removal, selected-item quotes, per-shop delivery estimates, and responsive summaries.
-- Approved-buyer checkout with saved/new canonical Philippine addresses, delivery/payment choice cards, native paginated voucher selection and server comparison, recovery of valid voucher slots, COD or wallet, and explicit order review. Wide windows use a sidebar payment summary; phones keep the review action within reach.
+- Approved-buyer checkout with saved/new canonical Philippine addresses, delivery/payment choice cards, native paginated voucher selection and server comparison, recovery of valid voucher slots, COD or wallet, serving logistics-company and collection-hub choices, optional recipient coordinates/GPS, detailed server shipping weights/routes/tariffs and voucher allocations, and explicit order review. Wide windows use a sidebar payment summary; phones keep the review action within reach.
 - Home, Cart, Search, and Profile bottom tabs, with independent search and preserved visited tab/form state.
 - A responsive native profile matching the buyer website's crimson/slate design: personal info/avatar, verified contact emails, password, identity evidence/corrections, and login activity with confirmed session revocation.
 - Native paginated Saved Products and Followed Shops collections, with confirmed remove/unfollow actions and native product/shop pages.
-- A native Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
+- A native notification preview with explicit reads limited to displayed notices, plus a full Notifications center with an unread Home badge, All/Unread filters, paging, confirmed read actions, and native buyer destinations.
 - Native Help & Support using the existing Bagoo assistant and Customer Care chat, with editable suggested questions, retained drafts and explicit retry, server validation feedback, and keyboard/large-text layouts.
 - Native public parcel tracking from Home or Profile, available to guests and buyers: tracking-number lookup, masked recipient details, server-labeled milestones, Philippine times, refresh/retry, and copy-number feedback.
 - Delivery address-book editing, demo wallet credit requests/history, and available/saved/used/expired vouchers with native Bag use.
-- Paginated purchases, order tracking, cancellation, buyer receipt confirmation, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
-- Native store/courier inbox and return/refund cases, evidence, permitted buyer actions, and authenticated image/PDF viewing.
+- Paginated purchases, order tracking, cancellation, server-authorized buyer receipt confirmation, recorded milestones and owned order notices, original voucher receipts, Buy Again, review editing/photos, pickup-code handling, and wallet payment review/confirmation/cancellation.
+- Native store/courier inbox with rich product references, timestamps and editable inquiry questions, plus return/refund cases with separate barcode/QR labels, route/weight details, evidence purposes, permitted buyer actions, and authenticated image/PDF viewing.
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
@@ -69,7 +69,17 @@ The Linux preview opens in a resizable 430 × 860 window. Widen it to inspect th
 flutter run -d linux --dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'
 ```
 
-Linux builds require Clang, CMake, Ninja, pkg-config, and GTK 3 development libraries. Build without opening a window with `flutter build linux --debug`.
+Linux builds require Clang, CMake, Ninja, pkg-config, GTK 3, libsecret and jsoncpp development libraries. Persistent sessions also need a working desktop Secret Service; ordinary login remains usable if secure storage is unavailable. Build without opening a window with `flutter build linux --debug`.
+
+## Native link setup
+
+Incoming links stay in Flutter and are accepted only for the configured buyer origin and supported buyer paths. Private destinations wait for buyer sign-in; links cannot automatically pay, cancel, confirm receipt or mark notices read. Signed email verification requires a separate confirmation, and an already signed-in buyer must explicitly sign out before password-link recovery. Recovery secrets stay in memory.
+
+The default association hostname is the non-production placeholder `buyer.example.invalid`. To enable installed-app HTTPS links, the owner must configure the actual hostname and publish the association files described in [the website AI handoff](docs/integrations/website-ai-handoff.md).
+
+- Android reads the Gradle property `BAGOO_LINK_HOST`. For an owner build, supply it with `ORG_GRADLE_PROJECT_BAGOO_LINK_HOST='<BUYER_HOST>'` alongside `--dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'`. Use approved release signing; the current template still has development release signing.
+- iOS reads the Xcode build setting `BAGOO_LINK_HOST`. Set it for the applicable build configurations and provision Associated Domains and Keychain capabilities. `Runner.entitlements` is shared by Debug, Profile and Release.
+- Match the hostname to the buyer base origin. Domain association, release signing, physical devices and iOS/Xcode acceptance require owner setup. Linux preview supports the native screens and clipboard fallback; no desktop URL registration is installed by this task.
 
 ## Backend integration
 
@@ -77,16 +87,16 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 
 | Purpose | Existing routes |
 | --- | --- |
-| Login / logout | `POST /login`, `POST /logout` |
-| Registration requirements / validation / creation | `GET /register`, `POST /register/validate`, `POST /register` |
+| Session recognition / login / logout | `GET /auth/session`, `POST /login`, `POST /logout` |
+| Registration requirements / validation / creation | `GET /register`, `POST /register/email/validate`, `POST /register/validate`, `POST /register` |
 | Send / resend / verify email codes | `POST /otp/send`, `POST /otp/resend`, `POST /otp/verify` |
-| Set recovered password | `POST /password/reset-otp` |
+| Password recovery | Existing email-code routes and `POST /password/reset-otp`; link requests use `POST /forgot-password` and native link reset uses `POST /reset-password` |
 | Marketplace | `GET /` with search, category, sort, and page parameters |
 | Campaigns / promotion details | `GET /` campaign data, internal `GET /advertisement/{slug}` visit route, and `GET /promotions/{slug}` |
 | Dedicated catalogue search | `GET /buyer/search` with search/category/location/price/stock/rating/sort/page filters |
 | Full product / saved products | `GET /buyer/product/{slug}`, `GET /buyer/saved-products`, `POST/DELETE /buyer/saved-products/{id}` |
 | Shop / followed shops / sale reminders | `GET /shop/{slug}`, `GET /buyer/followed-shops`, `POST/DELETE /buyer/followed-shops/{id}`, `POST/DELETE /buyer/sale-reminders/{id}` |
-| Notifications | `GET /notifications/preview`, `GET /notifications`, `PATCH /notifications/{uuid}/read`, and `PATCH /notifications/read-all` using the server-issued read snapshot |
+| Notifications | `GET /notifications/preview`, `GET /notifications`, `PATCH /notifications/{uuid}/read`, `PATCH /notifications/read-displayed`, and `PATCH /notifications/read-all` using the server-issued read snapshot |
 | Help & Support | `POST /buyer/support/assistant`, existing Customer Care conversation at `GET /chat/messages/2` and `POST /chat/send` |
 | Public parcel tracking | `GET /track?number=...` through the existing `Public/Tracking` page contract |
 | Product conversation | `GET /chat/messages/{receiver}`, `POST /chat/send`, private `GET /chat/attachments/{message}` |
@@ -146,3 +156,7 @@ The [mobile-only support review](docs/plans/mobile-only-support-review.md) passe
 The [native public tracking pass](docs/plans/native-public-parcel-tracking.md) passed the full 129-test suite, static analysis, formatting, and Android/Linux debug builds. Its tracking tests cover real local HTML/Inertia transport, public response validation, input limits, labels/timezones, stale lookups, native navigation, clipboard feedback, and phone/landscape/tablet layouts with keyboard insets and 200% text. Tests use isolated data and do not look up real parcels. iOS and physical-device checks remain unverified.
 
 For iOS on macOS, run `flutter build ios --no-codesign`; iOS compilation was not available on the Linux development host. Review the [authentication plan](docs/plans/buyer-auth-home.md), [native product journey plan](docs/plans/buyer-products.md), [profile/navigation plan](docs/plans/buyer-profile.md), and [shopping polish plan](docs/plans/buyer-shopping-polish.md) for scope and verification evidence.
+
+The [buyer web parity pass](docs/plans/buyer-web-parity.md) implements the audited native controls against existing contracts. Checkout detects whether the backend supplies logistics-company choices: earlier contracts keep their original server-quoted flow, while an explicit empty serving-company list blocks checkout. The website worktree was evolving during inspection, so this does not prove its newest logistics contracts are deployed. Google identity exchange and installed-app domain association require the separate [website handoff](docs/integrations/website-ai-handoff.md).
+
+This parity branch passed all **179 isolated tests**, formatting, static analysis, and Android/Linux debug compilation. Checks include remembered sessions and cookie-clear races, quote and company changes, old-contract compatibility, native link ownership/confirmation, notification visibility and account boundaries, message retries, payment deadlines, and responsive layouts. No live account, email, order, payment, chat or backend database mutation was used for verification. iOS compilation, physical-device GPS/sharing/scanning, screen readers, domain association and production signing remain manual owner acceptance checks.

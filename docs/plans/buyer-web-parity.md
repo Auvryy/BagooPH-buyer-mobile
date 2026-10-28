@@ -10,9 +10,9 @@ The website working tree is evolving independently. Recheck relevant controller/
 
 ## Complete audit checklist
 
-`Pending` means implementation remains. `Dependency` means an exact prerequisite must be handed to the website maintainer. Update each row with delivered behavior and verification before handoff.
+`Implemented` records the native implementation and relevant isolated checks, not production deployment or physical-device certification. `Dependency` records a prerequisite handed to the website maintainer. The combined verification and owner limits are recorded below.
 
-| ID | Audit requirement | Initial status |
+| ID | Audit requirement | Delivery status |
 | --- | --- | --- |
 | P01 | Native Google authentication and registration | Dependency: native identity exchange |
 | P02 | Remembered login/email and guest session continuity | Implemented; isolated account/session checks pass |
@@ -54,7 +54,7 @@ The website working tree is evolving independently. Recheck relevant controller/
 | P38 | Product inquiry action and editable quick questions | Implemented; isolated post-purchase checks pass |
 | P39 | Compact notification preview, displayed snapshot and read times | Implemented; visibility, ownership and failure checks pass |
 | P40 | Native support entry while shopping | Implemented; isolated discovery checks pass |
-| P41 | Native incoming links and missing internal destinations/anchors | Pending; owner domain association needed |
+| P41 | Native incoming links and missing internal destinations/anchors | Implemented and isolated routing checks pass; owner association/signing required for installed-app HTTPS links |
 | P42 | Advertisement impression measurement | Implemented; visibility, ownership and failure checks pass |
 | P43 | Native platform information equivalent to Overview/About | Implemented; isolated discovery checks pass |
 
@@ -79,7 +79,7 @@ Partner/admin portal sign-in and merchant branding edits are separate products. 
 
 ## Status
 
-Implementation started. Website/backend handoff expansion and checkout integration are the first slice. No website edits, migrations or publications are part of this work.
+All mobile slices supported by the existing contracts are implemented and verified locally. The full 179-test suite, formatting, static analysis, and Android/Linux debug builds pass. Native Google requires the documented external contract. Installed-app link association requires owner domain/signing setup. No website edits, migrations or publications are part of this work.
 
 ### Checkout slice verification
 
@@ -100,3 +100,20 @@ Six new isolated checks pass for repeated checkpoint/notice merging, missing mil
 ### Notifications and measurements verification
 
 Five new checks pass for server-resolved owned notification destinations, explicit preview reads limited to actually displayed IDs, late account-change acknowledgements, loaded/visible one-second impressions, event deduplication and reporting failure isolation. All 24 existing notification lifecycle and public tracking widget checks pass. The preview never automatically acknowledges a notice; its button sends only the displayed owned IDs. Impression attempts are scoped to a mounted Home and revision, without a persistent visitor identifier.
+
+### Native link and compatibility verification
+
+All 48 focused link, account, notification lifecycle and public tracking checks pass. Incoming links reject foreign origins, other portals, malformed IDs and action URLs; private destinations resume after native sign-in. Signed email links retain their exact query and require explicit confirmation. Password recovery requires explicit logout when another buyer session exists. Incoming navigation waits while a route blocks leaving for a current action. Android/iOS association settings use placeholder owner configuration. Separate checkout checks preserve absent-contract compatibility while rejecting an explicit empty serving-company list.
+
+### Combined verification and remaining ownership
+
+- `dart format --output=none --set-exit-if-changed lib test tool`: passed, 105 files already formatted.
+- `flutter analyze --no-pub`: passed with no issues.
+- `flutter test --no-pub --reporter expanded`: all 179 tests passed. Temporary HTTP servers and controlled repositories were used; no live account, message, email, order, payment or database was mutated.
+- `flutter build apk --debug --no-pub`: passed; `build/app/outputs/flutter-apk/app-debug.apk` exists.
+- `flutter build linux --debug --no-pub`: passed; `build/linux/x64/debug/bundle/bagoo_buyer_mobile` exists.
+- Android merged manifest confirms the placeholder association host, disabled backup and foreground location permissions with no background location permission. iOS property lists parse and all three Runner configurations reference the capabilities file; iOS compilation was unavailable on Linux.
+- Native Google remains a dependency with no fake control or assumed endpoint. Website/provider work and acceptance fixtures are specified in `docs/integrations/website-ai-handoff.md`. The configured-domain association files and approved release signing must be supplied by the owner before installed-app HTTPS links can be accepted on devices.
+- Physical-device location, sharing, QR/barcode scanning, native pickers, screen readers, signed-email delivery and iOS/Xcode acceptance remain unverified. The evolving website source is not proof of deployment.
+
+All repository changes and commits are mobile-only. The branch remains local and unpushed; the separate combined PR description is saved in `.git/PR_BUYER_WEB_PARITY.md`. No GitHub PR was published. The README and website handoff describe setup and compatibility; no sibling source, documentation, dependencies, database or Git state was changed.
