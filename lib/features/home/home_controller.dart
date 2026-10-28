@@ -4,8 +4,13 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 
 class HomeController extends ChangeNotifier {
-  HomeController(this.repository, {WebPage? initial}) : data = initial;
+  HomeController(this.repository, {WebPage? initial})
+    : data = initial,
+      _knownUser = initial?.user,
+      _knownEpoch = repository.session.identityEpoch;
   final BuyerRepository repository;
+  Map<String, dynamic>? _knownUser;
+  int _knownEpoch;
   WebPage? data;
   List<Map<String, dynamic>> products = [];
   bool loading = false;
@@ -24,8 +29,11 @@ class HomeController extends ChangeNotifier {
   List<Map<String, dynamic>> get categories =>
       mapsOf(data?.props['categories']);
   List<Map<String, dynamic>> get banners => mapsOf(data?.props['banners']);
-  Map<String, dynamic>? get user => data?.user;
-  bool get hasMore => currentPage < lastPage;
+  Map<String, dynamic>? get user =>
+      _knownEpoch == repository.session.identityEpoch
+      ? data?.user ?? (data?.isCached == true ? _knownUser : null)
+      : null;
+  bool get hasMore => data?.isCached != true && currentPage < lastPage;
   bool get isMarketplace => data?.component == 'Buyer/Home';
   bool get hasFilters =>
       search.isNotEmpty || category.isNotEmpty || sort != 'relevance';
@@ -56,6 +64,10 @@ class HomeController extends ChangeNotifier {
         return;
       }
       data = page;
+      if (!page.isCached) {
+        _knownUser = page.user;
+        _knownEpoch = repository.session.identityEpoch;
+      }
       if (page.component != 'Buyer/Home') {
         products = [];
         return;
@@ -83,6 +95,11 @@ class HomeController extends ChangeNotifier {
         moreError = e.message;
       } else {
         error = e.message;
+      }
+      if ([401, 403, 404, 419].contains(e.status)) {
+        data = null;
+        products = [];
+        _knownUser = null;
       }
     } finally {
       if (!_disposed && generation == _generation) {

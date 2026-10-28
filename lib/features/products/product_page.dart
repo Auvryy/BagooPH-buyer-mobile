@@ -9,6 +9,7 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
+import '../../core/cached_catalogue_notice.dart';
 import '../home/product_card.dart';
 import '../checkout/bag_page.dart';
 import '../checkout/checkout_page.dart';
@@ -41,6 +42,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   final _optionsKey = GlobalKey();
   Timer? _refresh;
   int _generation = 0;
+  DateTime? _verifiedAt;
   ProductSelection get s => _selection!;
   BuyerRepository get repo => widget.repository;
   bool get _compact =>
@@ -74,6 +76,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         return;
       }
       setState(() {
+        if (!page.isCached) _verifiedAt = DateTime.now();
         if (_selection == null) {
           _selection = ProductSelection(page);
         } else {
@@ -99,7 +102,19 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       }
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = e.message);
+        setState(() {
+          _error = e.message;
+          if ([401, 403, 404, 410, 419].contains(e.status)) {
+            _selection = null;
+            _refresh?.cancel();
+          } else if (_selection != null) {
+            s.page = WebPage(
+              s.page.component,
+              s.page.props,
+              cachedAt: s.page.cachedAt ?? _verifiedAt,
+            );
+          }
+        });
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -146,6 +161,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   void _purchase(bool buyNow) {
+    if (s.page.isCached) return;
     if (buyNow && s.page.user == null) {
       _login();
       return;
@@ -179,6 +195,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   void _login() => BuyerActions.login(context, productSlug: widget.slug);
   Future<void> _save([Map<String, dynamic>? item]) async {
+    if (s.page.isCached) return;
     if (s.page.user == null) {
       BuyerActions.login(
         context,
@@ -214,6 +231,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   Future<void> _add(bool buyNow) async {
+    if (s.page.isCached) return;
     if (_busy) {
       return;
     }
@@ -278,6 +296,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   Future<void> _reminder() async {
+    if (s.page.isCached) return;
     if (s.page.user == null) {
       _login();
       return;
@@ -418,6 +437,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                     controller: _scroll,
                     padding: const EdgeInsets.all(16),
                     children: [
+                      if (s.page.cachedAt case final savedAt?)
+                        CachedCatalogueNotice(
+                          savedAt: savedAt,
+                          onRefresh: _loading || _busy
+                              ? null
+                              : () => _load(quiet: true),
+                        ),
                       if (_error != null) Notice(_error!, error: true),
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -567,7 +593,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 saved: (s.page.props['savedProductIds'] as List? ?? [])
                     .contains(product['id']),
                 saving: _saving,
-                saveLabel: s.page.user == null
+                saveLabel: s.page.isCached
+                    ? 'Connect to save'
+                    : s.page.user == null
                     ? 'Sign in to save'
                     : !s.approved
                     ? 'Approval required'
@@ -576,7 +604,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       )
                     ? 'Remove from saved'
                     : 'Save product',
-                onSave: s.page.user != null && !s.approved
+                onSave: s.page.isCached || s.page.user != null && !s.approved
                     ? null
                     : () => _save(product),
                 onTap: () => Navigator.of(context).push(
@@ -596,6 +624,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   Widget _purchaseButtons() {
     final disabled =
+        s.page.isCached ||
         _busy ||
         s.vacation ||
         s.stock <= 0 ||
@@ -605,7 +634,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       onPressed: disabled ? null : () => _purchase(false),
       icon: const Icon(Icons.shopping_bag_outlined, size: 18),
       label: Text(
-        _busy
+        s.page.isCached
+            ? 'Connect to shop'
+            : _busy
             ? 'Adding…'
             : s.vacation
             ? 'Shop on vacation'
@@ -792,7 +823,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           OutlinedButton.icon(
-            onPressed: s.page.user != null && !s.approved || _saving
+            onPressed:
+                s.page.isCached || s.page.user != null && !s.approved || _saving
                 ? null
                 : _save,
             icon: Icon(
@@ -804,7 +836,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               size: 18,
             ),
             label: Text(
-              _saving
+              s.page.isCached
+                  ? 'Connect to save'
+                  : _saving
                   ? 'Saving…'
                   : s.page.user == null
                   ? 'Sign in to save'
@@ -1166,7 +1200,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             Text('Starts ${readableDateTime(upcoming['starts_at'])}'),
             TextButton.icon(
               onPressed:
-                  _reminding ||
+                  s.page.isCached ||
+                      _reminding ||
                       mapOf(s.page.props['saleReminder'])['delivered'] ==
                               true &&
                           mapOf(s.page.props['saleReminder'])['subscribed'] !=
@@ -1255,26 +1290,28 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 child: const Text('View Shop'),
               ),
               FilledButton.icon(
-                onPressed: () {
-                  if (s.page.user == null) {
-                    _login();
-                  } else if (!s.approved) {
-                    _message(
-                      'Chat requires an approved buyer account.',
-                      error: true,
-                    );
-                  } else {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ChatPage(
-                          repository: repo,
-                          product: s.product,
-                          userId: s.page.user!['id'] as int,
-                        ),
-                      ),
-                    );
-                  }
-                },
+                onPressed: s.page.isCached
+                    ? null
+                    : () {
+                        if (s.page.user == null) {
+                          _login();
+                        } else if (!s.approved) {
+                          _message(
+                            'Chat requires an approved buyer account.',
+                            error: true,
+                          );
+                        } else {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => ChatPage(
+                                repository: repo,
+                                product: s.product,
+                                userId: s.page.user!['id'] as int,
+                              ),
+                            ),
+                          );
+                        }
+                      },
                 icon: const Icon(Icons.chat_bubble_outline, size: 18),
                 label: const Text('Chat Now'),
               ),

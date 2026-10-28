@@ -2,6 +2,8 @@
 
 For the current parity work, give the website AI [website-ai-handoff.md](website-ai-handoff.md). It records the current existing contracts, owner link setup, versioned logistics documentation and concrete website prerequisites. The older baseline below is historical verification evidence.
 
+The cumulative handoff also records the implemented foreground conversation/inbox/order refresh and read-only catalogue cache. Its sections 6–7 identify future pagination, separate chat read acknowledgements, conditional reads and public cache metadata. Those improvements are proposals, not endpoints called by mobile today.
+
 These are recommendations for the website maintainer. This document lives in the mobile repository. No website code, routes, migrations, dependencies, or deployment configuration are part of this mobile review.
 
 ## Existing contracts retained by mobile

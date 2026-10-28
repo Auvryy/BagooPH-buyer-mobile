@@ -82,7 +82,7 @@ class CatalogueSearchController extends ChangeNotifier {
   String? error, moreError;
   int currentPage = 1, lastPage = 1, total = 0, _generation = 0;
   int? from, to;
-  bool get hasMore => currentPage < lastPage;
+  bool get hasMore => data?.isCached != true && currentPage < lastPage;
   List<Map<String, dynamic>> get categories =>
       mapsOf(data?.props['categories']);
   List<Map<String, dynamic>> get locations => mapsOf(data?.props['locations']);
@@ -139,7 +139,7 @@ class CatalogueSearchController extends ChangeNotifier {
       } else {
         error = e.fields.isEmpty ? e.message : e.fields.values.join('\n');
       }
-      if (e.status == 401 || e.status == 419) {
+      if ([401, 403, 404, 410, 419].contains(e.status)) {
         products = [];
         data = null;
       }

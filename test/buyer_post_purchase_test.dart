@@ -25,6 +25,7 @@ class ChatRepository extends FakeBuyerRepository {
     {
       'id': 1,
       'sender_id': 3,
+      'receiver_id': 7,
       'message': 'Hello',
       'product': product(1),
       'created_at': '2026-10-28T00:00:00Z',
@@ -40,6 +41,7 @@ class ChatRepository extends FakeBuyerRepository {
     return {
       'id': 2,
       'sender_id': 7,
+      'receiver_id': 3,
       'message': values['message'],
       'created_at': '2026-10-28T00:01:00Z',
     };
@@ -238,6 +240,7 @@ void main() {
       await tester.tap(find.text('Everyday bag 1').first);
       await tester.pumpAndSettle();
       expect(find.byType(ProductPage), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
@@ -275,6 +278,7 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 }

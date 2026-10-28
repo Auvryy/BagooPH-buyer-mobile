@@ -8,6 +8,7 @@ import '../../core/buyer_actions.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
+import '../../core/cached_catalogue_notice.dart';
 import '../products/product_page.dart';
 import '../products/product_widgets.dart';
 import 'search_controller.dart';
@@ -101,6 +102,7 @@ class _SearchPageState extends State<SearchPage> {
       _catalogue.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(_catalogue.user?['kyc_status']);
   Future<void> _save(Map<String, dynamic> product, bool saved) async {
+    if (_catalogue.data?.isCached == true) return;
     if (_catalogue.user == null) {
       BuyerActions.login(context, productSlug: product['slug'].toString());
       return;
@@ -136,14 +138,18 @@ class _SearchPageState extends State<SearchPage> {
       onTap: () => _open(product),
       saved: saved,
       saving: _saving.contains(id),
-      saveLabel: _catalogue.user == null
+      saveLabel: _catalogue.data?.isCached == true
+          ? 'Connect to save'
+          : _catalogue.user == null
           ? 'Sign in to save'
           : !_canSave
           ? 'Approval required'
           : saved
           ? 'Remove from saved'
           : 'Save product',
-      onSave: _catalogue.user != null && !_canSave
+      onSave:
+          _catalogue.data?.isCached == true ||
+              _catalogue.user != null && !_canSave
           ? null
           : () => _save(product, saved),
     );
@@ -320,6 +326,11 @@ class _SearchPageState extends State<SearchPage> {
                     if (_catalogue.loading)
                       const LinearProgressIndicator(
                         semanticsLabel: 'Searching products',
+                      ),
+                    if (_catalogue.data?.cachedAt case final savedAt?)
+                      CachedCatalogueNotice(
+                        savedAt: savedAt,
+                        onRefresh: _catalogue.loading ? null : _catalogue.load,
                       ),
                     if (_catalogue.error != null) ...[
                       Notice(_catalogue.error!, error: true),

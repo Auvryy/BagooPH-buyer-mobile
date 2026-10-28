@@ -498,18 +498,22 @@ class WebSession {
     } on SocketException {
       throw const BackendException(
         'Cannot reach BagooPH. Check your connection and try again.',
+        connectionFailure: true,
       );
     } on TimeoutException {
       throw const BackendException(
         'The connection timed out. Please try again.',
+        connectionFailure: true,
       );
     } on HandshakeException {
       throw const BackendException(
         'A secure connection could not be established.',
+        connectionFailure: true,
       );
     } on HttpException {
       throw const BackendException(
         'The connection was interrupted. Please try again.',
+        connectionFailure: true,
       );
     }
   }
@@ -586,8 +590,10 @@ class WebSession {
 }
 
 class WebPage {
-  const WebPage(this.component, this.props, {this.url});
+  const WebPage(this.component, this.props, {this.url, this.cachedAt});
   final String? url;
+  final DateTime? cachedAt;
+  bool get isCached => cachedAt != null;
   final String component;
   final Map<String, dynamic> props;
   Map<String, dynamic>? get user {
@@ -616,11 +622,13 @@ class BackendException implements Exception {
     this.fields = const {},
     this.status,
     this.data = const {},
+    this.connectionFailure = false,
   });
   final String message;
   final Map<String, String> fields;
   final int? status;
   final Map<String, dynamic> data;
+  final bool connectionFailure;
   @override
   String toString() => message;
 }
