@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/web_session.dart';
+import '../../core/buyer_repository.dart';
+import '../products/product_page.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
 import '../checkout/bag_page.dart';
@@ -186,6 +188,7 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
                 OrderItemSummary(
                   item: item,
                   session: widget.repository.session,
+                  repository: widget.repository.buyer,
                 ),
               if (order['delivery'] != null)
                 Padding(
@@ -311,7 +314,9 @@ class OrderItemSummary extends StatelessWidget {
     super.key,
     required this.item,
     required this.session,
+    this.repository,
   });
+  final BuyerRepository? repository;
   final Map<String, dynamic> item;
   final WebSession session;
   @override
@@ -346,6 +351,18 @@ class OrderItemSummary extends StatelessWidget {
                     height: 1.5,
                   ),
                 ),
+                if (repository != null && product['slug'] is String)
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ProductPage(
+                          repository: repository!,
+                          slug: product['slug'],
+                        ),
+                      ),
+                    ),
+                    child: const Text('View product'),
+                  ),
                 if (item['color'] != null || item['size'] != null)
                   Text(
                     [

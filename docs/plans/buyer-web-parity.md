@@ -39,19 +39,19 @@ The website working tree is evolving independently. Recheck relevant controller/
 | P23 | Shipping weights, tariff, route and measurement fallback | Implemented; checkout/Bag regression checks pass |
 | P24 | Native GPS, manual coordinates and saved coordinate preservation | Implemented; checkout/Bag regression checks pass |
 | P25 | Mixed promotional price segments in Bag and final review | Implemented; checkout/Bag regression checks pass |
-| P26 | Per-voucher checkout allocations and saved order receipt | Checkout allocations implemented; saved receipt remains |
+| P26 | Per-voucher checkout allocations and saved order receipt | Implemented: checkout allocations and immutable order voucher receipt |
 | P27 | Voucher issuer, capped benefits and eligible-product navigation | Implemented; isolated discovery checks pass |
 | P28 | Correct promotion percent and shipping offer summaries | Implemented; isolated discovery checks pass |
-| P29 | Complete wallet receipt, refund evidence and deadline transitions | Pending |
-| P30 | Order milestones and observed/custody timestamps | Pending |
-| P31 | Order-linked updates, unread state and explicit acknowledgement | Pending |
-| P32 | Package partner, pickup, rider, notes and tracking information | Pending |
-| P33 | Checkout/payment/order/product navigation shortcuts | Pending |
-| P34 | Scannable return barcode and QR | Pending |
-| P35 | Return weight, route position and manifest reference | Pending |
-| P36 | Return next steps, photo purposes and decision/actor labels | Pending |
-| P37 | Rich tappable chat product cards and message timestamps | Pending |
-| P38 | Product inquiry action and editable quick questions | Pending |
+| P29 | Complete wallet receipt, refund evidence and deadline transitions | Implemented; isolated post-purchase checks pass |
+| P30 | Order milestones and observed/custody timestamps | Implemented; isolated post-purchase checks pass |
+| P31 | Order-linked updates, unread state and explicit acknowledgement | Implemented; isolated post-purchase checks pass |
+| P32 | Package partner, pickup, rider, notes and tracking information | Implemented; isolated post-purchase checks pass |
+| P33 | Checkout/payment/order/product navigation shortcuts | Implemented; isolated post-purchase checks pass |
+| P34 | Scannable return barcode and QR | Implemented; isolated post-purchase checks pass |
+| P35 | Return weight, route position and manifest reference | Implemented; isolated post-purchase checks pass |
+| P36 | Return next steps, photo purposes and decision/actor labels | Implemented; isolated post-purchase checks pass |
+| P37 | Rich tappable chat product cards and message timestamps | Implemented; isolated post-purchase checks pass |
+| P38 | Product inquiry action and editable quick questions | Implemented; isolated post-purchase checks pass |
 | P39 | Compact notification preview, displayed snapshot and read times | Pending |
 | P40 | Native support entry while shopping | Implemented; isolated discovery checks pass |
 | P41 | Native incoming links and missing internal destinations/anchors | Pending; owner domain association needed |
@@ -92,3 +92,7 @@ All 38 focused discovery, product, search, Home and authentication baseline test
 ### Account slice verification
 
 The 28 session, transport and authentication baseline tests pass. New account checks cover session recognition, stale email-availability responses, restriction-review conflict tokens and retained drafts, owner changes, optional registration multipart inputs, and explicit native password-link submission and foreign-link rejection. Remembered cookies use native secure storage; passwords and reset/verification tokens remain in memory. Guest cookies survive restarts, unremembered login cookies do not, and queued writes cannot resurrect a cleared session. Native keychain/provisioning and incoming OS links remain for platform verification.
+
+### Purchase follow-up slice verification
+
+Six new isolated checks pass for repeated checkpoint/notice merging, missing milestone evidence, separate return barcode/QR payloads, payment expiry while its refresh is pending, editable chat questions with exact retry keys, and keyboard/200% chat layouts. The six existing checkout widget checks also pass, and static analysis is clean. Payment expiry only disables a local action and fetches recorded status; it never marks a payment expired or successful locally. Scanning printed/device codes and real repayment/parcel actions remain manual acceptance work.
