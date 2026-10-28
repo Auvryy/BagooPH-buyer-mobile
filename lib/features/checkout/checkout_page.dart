@@ -1176,11 +1176,26 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 ? _company
                 : null,
             isExpanded: true,
+            isDense: false,
             itemHeight: null,
             decoration: InputDecoration(
               labelText: 'Logistics company',
               errorText: _fieldErrors['logistics_company_id'],
             ),
+            selectedItemBuilder: (_) => [
+              for (final company in _companies)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Tooltip(
+                    message: company['name'].toString(),
+                    child: Text(
+                      company['name'].toString(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+            ],
             items: [
               for (final company in _companies)
                 DropdownMenuItem(
@@ -1446,7 +1461,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Finalize checkout',
+                          'Checkout details',
                           style: TextStyle(
                             fontSize: 25,
                             fontWeight: FontWeight.w800,
@@ -1455,7 +1470,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                         ),
                         SizedBox(height: 12),
                         Text(
-                          'Verify your delivery destination, selected items, vouchers and payment before the final review.',
+                          'Choose delivery and payment. You’ll review everything before placing your order.',
                           style: TextStyle(
                             fontSize: 13,
                             height: 1.7,
@@ -1467,9 +1482,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
                           spacing: 12,
                           runSpacing: 8,
                           children: [
-                            Chip(label: Text('1 · Delivery')),
-                            Chip(label: Text('2 · Payment')),
-                            Chip(label: Text('3 · Review')),
+                            Chip(
+                              label: Text('1 · Details'),
+                              backgroundColor: BagooTheme.rose,
+                            ),
+                            ExcludeSemantics(
+                              child: Icon(
+                                Icons.chevron_right_rounded,
+                                color: BagooTheme.muted,
+                              ),
+                            ),
+                            Chip(label: Text('2 · Review')),
                           ],
                         ),
                       ],
@@ -1539,7 +1562,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               top: false,
               child: Material(
                 color: Colors.white,
-                elevation: 6,
+                shape: const Border(top: BorderSide(color: BagooTheme.line)),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     maxHeight: MediaQuery.sizeOf(context).height * .4,

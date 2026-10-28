@@ -11,6 +11,7 @@ import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
 import '../../core/cached_catalogue_notice.dart';
 import '../home/product_card.dart';
+import '../home/catalogue_loading.dart';
 import '../checkout/bag_page.dart';
 import '../checkout/checkout_page.dart';
 import 'product_model.dart';
@@ -39,6 +40,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
   final _scroll = ScrollController();
+  final _thumbnails = ScrollController();
+  final _detailsKey = GlobalKey();
   final _optionsKey = GlobalKey();
   Timer? _refresh;
   int _generation = 0;
@@ -363,6 +366,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     _refresh?.cancel();
     _quantity.dispose();
     _scroll.dispose();
+    _thumbnails.dispose();
     super.dispose();
   }
 
@@ -437,7 +441,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     ),
     body: SafeArea(
       child: _loading && _selection == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const ProductLoadingPlaceholder()
           : _selection == null
           ? Center(
               child: Padding(
@@ -475,7 +479,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: Text(
-                          'Marketplace / ${mapOf(s.product['category'])['name'] ?? 'Catalogue'} / ${s.product['name']}',
+                          'Marketplace / ${mapOf(s.product['category'])['name'] ?? 'Catalogue'}',
                           style: const TextStyle(
                             fontSize: 12,
                             height: 1.6,
@@ -486,7 +490,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       ProductPanel(
                         child: LayoutBuilder(
                           builder: (context, box) =>
-                              box.maxWidth >= 850 &&
+                              box.maxWidth >= 600 &&
                                   MediaQuery.textScalerOf(context).scale(16) <
                                       25
                               ? Row(
@@ -498,10 +502,14 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                                   ],
                                 )
                               : Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   children: [
+                                    _productTitle(),
+                                    const SizedBox(height: 16),
                                     _gallery(),
-                                    const SizedBox(height: 24),
-                                    _details(),
+                                    const SizedBox(height: 20),
+                                    _details(showTitle: false),
                                   ],
                                 ),
                         ),
@@ -559,7 +567,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             top: false,
             child: Material(
               color: Colors.white,
-              elevation: 6,
+              shape: const Border(top: BorderSide(color: BagooTheme.line)),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.sizeOf(context).height * .4,
@@ -570,27 +578,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        s.priceLabel,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          height: 1.4,
-                          fontWeight: FontWeight.w800,
-                          color: BagooTheme.strong,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: _options,
-                        style: TextButton.styleFrom(
-                          alignment: Alignment.centerLeft,
-                          padding: EdgeInsets.zero,
-                        ),
-                        child: Text(
-                          s.complete
-                              ? '${s.quantity} item${s.quantity == 1 ? '' : 's'}${[s.color, s.size].whereType<String>().isEmpty ? '' : ' · ${[s.color, s.size].whereType<String>().join(' / ')}'} · Edit selection'
-                              : 'Choose product options',
-                        ),
-                      ),
+                      _purchaseSummary(),
+                      const SizedBox(height: 8),
                       _purchaseButtons(),
                     ],
                   ),
@@ -600,6 +589,44 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           )
         : null,
   );
+
+  Widget _purchaseSummary() {
+    final selection = s.complete
+        ? '${s.quantity} item${s.quantity == 1 ? '' : 's'}${[s.color, s.size].whereType<String>().isEmpty ? '' : ' · ${[s.color, s.size].whereType<String>().join(' / ')}'} · Edit selection'
+        : 'Choose product options';
+    final price = Text(
+      s.priceLabel,
+      style: const TextStyle(
+        fontSize: 22,
+        height: 1.4,
+        fontWeight: FontWeight.w800,
+        color: BagooTheme.strong,
+      ),
+    );
+    final edit = TextButton(
+      onPressed: _options,
+      style: TextButton.styleFrom(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
+      child: Text(selection),
+    );
+    return LayoutBuilder(
+      builder: (context, box) =>
+          box.maxWidth >= 300 && MediaQuery.textScalerOf(context).scale(16) < 24
+          ? Row(
+              children: [
+                Expanded(child: price),
+                const SizedBox(width: 12),
+                Expanded(child: edit),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [price, edit],
+            ),
+    );
+  }
 
   Widget _related() => LayoutBuilder(
     builder: (context, box) {
@@ -756,6 +783,31 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton.filledTonal(
+                tooltip: _saveLabel,
+                onPressed:
+                    s.page.isCached ||
+                        s.page.user != null && !s.approved ||
+                        _saving
+                    ? null
+                    : _save,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  backgroundColor: Colors.white,
+                  foregroundColor: BagooTheme.strong,
+                ),
+                icon: Icon(
+                  (s.page.props['savedProductIds'] as List? ?? []).contains(
+                        s.product['id'],
+                      )
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                ),
+              ),
+            ),
             if (s.gallery.length > 1)
               Align(
                 alignment: Alignment.centerLeft,
@@ -763,10 +815,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   padding: const EdgeInsets.all(8),
                   child: IconButton.filled(
                     tooltip: 'Previous product photo',
-                    onPressed: () => setState(
-                      () => _image =
-                          (_image - 1 + s.gallery.length) % s.gallery.length,
-                    ),
+                    onPressed: () =>
+                        _selectImage(_image - 1 + s.gallery.length),
                     icon: const Icon(Icons.chevron_left),
                   ),
                 ),
@@ -778,9 +828,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   padding: const EdgeInsets.all(8),
                   child: IconButton.filled(
                     tooltip: 'Next product photo',
-                    onPressed: () => setState(
-                      () => _image = (_image + 1) % s.gallery.length,
-                    ),
+                    onPressed: () => _selectImage(_image + 1),
                     icon: const Icon(Icons.chevron_right),
                   ),
                 ),
@@ -789,8 +837,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 s.comparison! > s.price &&
                 !(!s.complete && ProductPrice(s.product).ranged))
               Positioned(
-                top: 12,
-                right: 12,
+                top: 8,
+                left: 8,
                 child: Chip(
                   backgroundColor: BagooTheme.crimson,
                   label: Text(
@@ -806,93 +854,106 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           ],
         ),
       ),
-      const SizedBox(height: 12),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (int i = 0; i < s.gallery.length; i++)
-            Semantics(
+      if (s.gallery.length > 1) ...[
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 72,
+          child: ListView.separated(
+            controller: _thumbnails,
+            scrollDirection: Axis.horizontal,
+            itemCount: s.gallery.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, i) => Semantics(
               selected: _image == i,
               button: true,
               label: 'Product photo ${i + 1}',
-              child: SizedBox.square(
-                dimension: 64,
-                child: OutlinedButton(
-                  onPressed: () => setState(() => _image = i),
-                  style: OutlinedButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    side: BorderSide(
-                      color: _image == i
-                          ? BagooTheme.crimson
-                          : BagooTheme.border,
-                      width: 2,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 64,
+                  child: OutlinedButton(
+                    onPressed: () => _selectImage(i),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      side: BorderSide(
+                        color: _image == i
+                            ? BagooTheme.crimson
+                            : BagooTheme.border,
+                        width: 2,
+                      ),
                     ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: ExcludeSemantics(
-                      child: RemoteImage(
-                        uri: imageUri(repo.session, s.gallery[i]),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: ExcludeSemantics(
+                        child: RemoteImage(
+                          uri: imageUri(repo.session, s.gallery[i]),
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-        ],
-      ),
-      const Divider(height: 28),
-      Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        spacing: 12,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          OutlinedButton.icon(
-            onPressed:
-                s.page.isCached || s.page.user != null && !s.approved || _saving
-                ? null
-                : _save,
-            icon: Icon(
-              (s.page.props['savedProductIds'] as List? ?? []).contains(
-                    s.product['id'],
-                  )
-                  ? Icons.favorite
-                  : Icons.favorite_border,
-              size: 18,
-            ),
-            label: Text(
-              s.page.isCached
-                  ? 'Connect to save'
-                  : _saving
-                  ? 'Saving…'
-                  : s.page.user == null
-                  ? 'Sign in to save'
-                  : !s.approved
-                  ? 'Approval required'
-                  : (s.page.props['savedProductIds'] as List? ?? []).contains(
-                      s.product['id'],
-                    )
-                  ? 'Remove from saved'
-                  : 'Save product',
-            ),
           ),
-          const Text(
-            'BagooPH Buyer Protection',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: BagooTheme.strong,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     ],
   );
-  Widget _details() => Column(
+
+  String get _saveLabel => s.page.isCached
+      ? 'Connect to save'
+      : _saving
+      ? 'Saving product'
+      : s.page.user == null
+      ? 'Sign in to save'
+      : !s.approved
+      ? 'Approval required'
+      : (s.page.props['savedProductIds'] as List? ?? []).contains(
+          s.product['id'],
+        )
+      ? 'Remove from saved'
+      : 'Save product';
+
+  void _selectImage(int index) {
+    if (s.gallery.isEmpty) return;
+    setState(() => _image = index % s.gallery.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_thumbnails.hasClients) return;
+      final start = _image * 72.0;
+      final viewport = _thumbnails.position.viewportDimension;
+      if (start < _thumbnails.offset ||
+          start + 64 > _thumbnails.offset + viewport) {
+        final target = start.clamp(0.0, _thumbnails.position.maxScrollExtent);
+        if (MediaQuery.disableAnimationsOf(context)) {
+          _thumbnails.jumpTo(target);
+        } else {
+          _thumbnails.animateTo(
+            target,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+          );
+        }
+      }
+    });
+  }
+
+  Widget _productTitle() => Semantics(
+    header: true,
+    child: Text(
+      s.product['name'].toString(),
+      style: const TextStyle(
+        fontSize: 24,
+        height: 1.3,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -.4,
+      ),
+    ),
+  );
+
+  Widget _details({bool showTitle = true}) => Column(
+    key: _detailsKey,
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if (showTitle) ...[_productTitle(), const SizedBox(height: 12)],
       Wrap(
         spacing: 12,
         runSpacing: 8,
@@ -916,15 +977,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             style: const TextStyle(fontSize: 12, color: BagooTheme.muted),
           ),
         ],
-      ),
-      const SizedBox(height: 12),
-      Text(
-        s.product['name'].toString(),
-        style: const TextStyle(
-          fontSize: 25,
-          height: 1.3,
-          fontWeight: FontWeight.w800,
-        ),
       ),
       const SizedBox(height: 12),
       Wrap(

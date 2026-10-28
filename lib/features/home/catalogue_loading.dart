@@ -81,3 +81,55 @@ class CatalogueLoadingGrid extends StatelessWidget {
     ),
   );
 }
+
+class ProductLoadingPlaceholder extends StatelessWidget {
+  const ProductLoadingPlaceholder({super.key});
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    label: 'Loading product details',
+    excludeSemantics: true,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1000),
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text(
+              'Loading product details…',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: BagooTheme.muted,
+              ),
+            ),
+            const SizedBox(height: 20),
+            AspectRatio(
+              aspectRatio: 1.2,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(BagooTheme.panelRadius),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            for (final width in [280.0, 180.0, 220.0])
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  width: width,
+                  height: 18,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
