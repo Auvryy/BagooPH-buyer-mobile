@@ -41,3 +41,10 @@ The skill catalogue's generic landing-page layouts are not a complete match for 
 - `BuyerRepository._catalogue` waits for cache persistence before delivering a successful server page. `HomePage` reloads even when authentication already supplied Home data.
 - Public product thumbnails decode without a requested size and each loading image runs its own progress spinner. Cards repeat nested open targets and use a large save-button slot.
 - These are source findings. Native render and regression evidence will be recorded as the work progresses.
+
+## Progress
+
+- Baseline native review: 32 cases across eight main screens, using the bundled Plus Jakarta Sans and Material Icons, passed layout checks. Off-screen PNGs are machine-local in `.git/buyer-design/before/`. Visual inspection found products below the first Home viewport, product identity below gallery utility content, and a clipped selected logistics-company label despite no overflow exception.
+- Loading foundation now reuses the initial Home response, starts public snapshot previews beside fresh reads, returns online results without waiting for cache writes and coalesces identical in-flight catalogue reads. Identity, submission revision and cache invalidation separate request scopes. Private responses, quotes and mutations are not cached or coalesced by this feature.
+- Loading verification: 37 focused cache/controller/widget cases passed; all 12 loading/transport regressions then passed, including late previews, cache clear, account switches and a real isolated HTTP submission racing an earlier read. Static analysis passed. These tests prove request ordering and content availability; no production latency percentage is claimed.
+- UI hierarchy, refresh presentation, additional flow fixes and final validation remain in progress.

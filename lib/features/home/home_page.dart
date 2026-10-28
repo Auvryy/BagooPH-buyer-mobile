@@ -102,7 +102,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (widget.initial != null && widget.initial!.component != 'Buyer/Home') {
       _tab = 3;
       _visited.add(3);
-    } else {
+    } else if (widget.initial == null || widget.initial!.isCached) {
       _home.load();
     }
   }
@@ -118,7 +118,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_home.loading) {
+    if (state == AppLifecycleState.resumed &&
+        !_home.loading &&
+        _tab == 0 &&
+        (ModalRoute.isCurrentOf(context) ?? true)) {
       unawaited(_home.load());
     }
     if (state == AppLifecycleState.resumed && _home.user?['id'] is num) {

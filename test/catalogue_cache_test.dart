@@ -276,7 +276,7 @@ void main() {
     },
   );
 
-  test('slow cache storage cannot deliver the previous account response after logout', () async {
+  test('online catalogue returns before a slow cache write and persists no account data', () async {
     final session = ControlledWebSession();
     addTearDown(session.close);
     final vault = DelayedCatalogueVault();
@@ -285,14 +285,17 @@ void main() {
       session,
       catalogueCache: CatalogueCache(origin: session.origin, vault: vault),
     );
-    final request = repo.product('everyday-bag-1');
+    var delivered = false;
+    final request = repo.product('everyday-bag-1').then((page) {
+      delivered = true;
+      return page;
+    });
     await vault.started.future;
+    expect(delivered, isTrue);
+    expect((await request).user?['id'], 7);
     session.clear();
     vault.finish.complete();
-    await expectLater(
-      request,
-      throwsA(isA<BackendException>().having((e) => e.status, 'status', 401)),
-    );
+    expect((await repo.cachedProduct('everyday-bag-1'))!.user, isNull);
   });
 
   test(

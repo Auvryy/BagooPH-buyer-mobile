@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/buyer_repository.dart';
@@ -82,6 +84,7 @@ class CatalogueSearchController extends ChangeNotifier {
   String? error, moreError;
   int currentPage = 1, lastPage = 1, total = 0, _generation = 0;
   int? from, to;
+  (String, int)? _acceptedRequest;
   bool get hasMore => data?.isCached != true && currentPage < lastPage;
   List<Map<String, dynamic>> get categories =>
       mapsOf(data?.props['categories']);
@@ -100,6 +103,11 @@ class CatalogueSearchController extends ChangeNotifier {
   Future<void> load({bool more = false, int? pageNumber}) async {
     if (_disposed || more && (loading || loadingMore || !hasMore)) return;
     final generation = ++_generation;
+    final epoch = repository.session.identityEpoch;
+    final cacheGeneration = repository.catalogueCache.generation;
+    final parameters = Map<String, String>.of(filters.parameters);
+    final number = more ? currentPage + 1 : pageNumber ?? 1;
+    final request = (Uri(queryParameters: parameters).query, number);
     if (more) {
       loadingMore = true;
       moreError = null;
@@ -111,27 +119,36 @@ class CatalogueSearchController extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      final page = await repository.search(
-        filters.parameters,
-        page: more ? currentPage + 1 : pageNumber ?? 1,
-      );
-      if (_disposed || generation != _generation) return;
-      final feed = mapOf(page.props['products']);
-      final fresh = mapsOf(feed['data']);
-      data = page;
-      if (more) {
-        final ids = products.map((p) => p['id']).toSet();
-        products.addAll(fresh.where((p) => ids.add(p['id'])));
-      } else {
-        products = fresh;
+      final fresh = repository.search(parameters, page: number);
+      if (!more &&
+          (data == null || data!.isCached || request != _acceptedRequest)) {
+        unawaited(
+          repository.cachedSearch(parameters, page: number).then<void>((
+            cached,
+          ) {
+            if (cached != null &&
+                !_disposed &&
+                generation == _generation &&
+                loading &&
+                epoch == repository.session.identityEpoch &&
+                cacheGeneration == repository.catalogueCache.generation) {
+              _accept(cached);
+              _acceptedRequest = request;
+              notifyListeners();
+            }
+          }, onError: (Object _, StackTrace _) {}),
+        );
       }
-      currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
-      lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
-      total = (feed['total'] as num?)?.toInt() ?? products.length;
-      from = more
-          ? from ?? (feed['from'] as num?)?.toInt()
-          : (feed['from'] as num?)?.toInt();
-      to = (feed['to'] as num?)?.toInt();
+      final page = await fresh;
+      if (_disposed || generation != _generation) return;
+      if (epoch != repository.session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Refresh to continue.',
+          status: 401,
+        );
+      }
+      _accept(page, more: more);
+      _acceptedRequest = request;
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) return;
       if (more) {
@@ -150,6 +167,25 @@ class CatalogueSearchController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  void _accept(WebPage page, {bool more = false}) {
+    final feed = mapOf(page.props['products']);
+    final rows = mapsOf(feed['data']);
+    data = page;
+    if (more) {
+      final ids = products.map((p) => p['id']).toSet();
+      products.addAll(rows.where((p) => ids.add(p['id'])));
+    } else {
+      products = rows;
+    }
+    currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
+    lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
+    total = (feed['total'] as num?)?.toInt() ?? products.length;
+    from = more
+        ? from ?? (feed['from'] as num?)?.toInt()
+        : (feed['from'] as num?)?.toInt();
+    to = (feed['to'] as num?)?.toInt();
   }
 
   @override

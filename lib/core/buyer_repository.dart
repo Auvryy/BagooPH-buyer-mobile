@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'web_session.dart';
 import 'uploads.dart';
 import 'catalogue_cache.dart';
@@ -7,12 +9,39 @@ class BuyerRepository {
     : catalogueCache = catalogueCache ?? CatalogueCache(origin: session.origin);
   final WebSession session;
   final CatalogueCache catalogueCache;
+  final _catalogueReads = <(int, int, int, String), Future<WebPage>>{};
 
-  Future<WebPage> _catalogue(
+  Future<WebPage> _catalogue(String key, Future<WebPage> Function() fetch) {
+    final scope = (
+      session.identityEpoch,
+      session.readRevision,
+      catalogueCache.generation,
+      key,
+    );
+    final pending = _catalogueReads[scope];
+    if (pending != null) return pending;
+    final future = _readCatalogue(key, fetch);
+    _catalogueReads[scope] = future;
+    // Attach both handlers so cleanup cannot create an unhandled failed future.
+    unawaited(
+      future.then<void>(
+        (_) {
+          _catalogueReads.remove(scope);
+        },
+        onError: (Object _, StackTrace _) {
+          _catalogueReads.remove(scope);
+        },
+      ),
+    );
+    return future;
+  }
+
+  Future<WebPage> _readCatalogue(
     String key,
     Future<WebPage> Function() fetch,
   ) async {
     final epoch = session.identityEpoch;
+    final revision = session.readRevision;
     final cacheGeneration = catalogueCache.generation;
     try {
       final page = await fetch();
@@ -22,17 +51,17 @@ class BuyerRepository {
           status: 401,
         );
       }
-      try {
-        await catalogueCache.save(key, page, generation: cacheGeneration);
-      } catch (_) {
-        /* Storage is optional. */
-      }
-      if (epoch != session.identityEpoch) {
+      if (revision != session.readRevision) {
         throw const BackendException(
-          'Your account changed. Refresh before continuing.',
-          status: 401,
+          'Shopping details changed while loading. Refresh to continue.',
+          status: 409,
         );
       }
+      unawaited(
+        catalogueCache
+            .save(key, page, generation: cacheGeneration)
+            .catchError((Object _, StackTrace _) {}),
+      );
       return page;
     } on BackendException catch (e) {
       if (epoch == session.identityEpoch &&
@@ -40,15 +69,63 @@ class BuyerRepository {
         final cached = await catalogueCache.read(key);
         if (cached != null &&
             epoch == session.identityEpoch &&
+            revision == session.readRevision &&
             cacheGeneration == catalogueCache.generation) {
           return cached;
         }
       } else {
-        await catalogueCache.remove(key);
+        unawaited(
+          catalogueCache.remove(key).catchError((Object _, StackTrace _) {}),
+        );
       }
       rethrow;
     }
   }
+
+  Future<WebPage?> _preview(String key) async {
+    final epoch = session.identityEpoch;
+    final revision = session.readRevision;
+    final generation = catalogueCache.generation;
+    final result = await catalogueCache.read(key);
+    return epoch == session.identityEpoch &&
+            revision == session.readRevision &&
+            generation == catalogueCache.generation
+        ? result
+        : null;
+  }
+
+  String _homeQuery({
+    String search = '',
+    String category = '',
+    String sort = 'relevance',
+    int page = 1,
+  }) => Uri(
+    queryParameters: {
+      if (search.isNotEmpty) 'search': search,
+      if (category.isNotEmpty) 'category': category,
+      if (sort != 'relevance') 'sort': sort,
+      if (page > 1) 'page': '$page',
+    },
+  ).query;
+
+  String _searchQuery(Map<String, String> filters, int page) {
+    final values = {...filters, if (page > 1) 'page': '$page'};
+    final keys = values.keys.toList()..sort();
+    return Uri(queryParameters: {for (final key in keys) key: values[key]!})
+        .query;
+  }
+
+  Future<WebPage?> cachedHome({
+    String search = '',
+    String category = '',
+    String sort = 'relevance',
+    int page = 1,
+  }) => _preview(
+    'home:${_homeQuery(search: search, category: category, sort: sort, page: page)}',
+  );
+  Future<WebPage?> cachedSearch(Map<String, String> filters, {int page = 1}) =>
+      _preview('search:${_searchQuery(filters, page)}');
+  Future<WebPage?> cachedProduct(String slug) => _preview('product:$slug');
 
   Future<WebPage> login(
     String email,
@@ -257,14 +334,12 @@ class BuyerRepository {
     String sort = 'relevance',
     int page = 1,
   }) async {
-    final query = Uri(
-      queryParameters: {
-        if (search.isNotEmpty) 'search': search,
-        if (category.isNotEmpty) 'category': category,
-        if (sort != 'relevance') 'sort': sort,
-        if (page > 1) 'page': '$page',
-      },
-    ).query;
+    final query = _homeQuery(
+      search: search,
+      category: category,
+      sort: sort,
+      page: page,
+    );
     return _catalogue('home:$query', () async {
       final result = await session.page(
         '/${query.isNotEmpty ? '?$query' : ''}',
@@ -289,11 +364,7 @@ class BuyerRepository {
   }
 
   Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
-    final values = {...filters, if (page > 1) 'page': '$page'};
-    final keys = values.keys.toList()..sort();
-    final query = Uri(
-      queryParameters: {for (final key in keys) key: values[key]!},
-    ).query;
+    final query = _searchQuery(filters, page);
     return _catalogue('search:$query', () async {
       final result = await session.page(
         '/buyer/search${query.isEmpty ? '' : '?$query'}',

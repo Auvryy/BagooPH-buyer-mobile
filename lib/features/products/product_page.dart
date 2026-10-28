@@ -57,13 +57,17 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_busy) {
+    if (state == AppLifecycleState.resumed &&
+        !_busy &&
+        (ModalRoute.isCurrentOf(context) ?? true)) {
       _load(quiet: true);
     }
   }
 
   Future<void> _load({bool quiet = false}) async {
     final generation = ++_generation;
+    final epoch = repo.session.identityEpoch;
+    final cacheGeneration = repo.catalogueCache.generation;
     if (!quiet) {
       setState(() {
         _loading = true;
@@ -71,9 +75,31 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       });
     }
     try {
-      final page = await repo.product(widget.slug);
+      final fresh = repo.product(widget.slug);
+      if (_selection == null) {
+        unawaited(
+          repo.cachedProduct(widget.slug).then<void>((cached) {
+            if (cached != null &&
+                mounted &&
+                generation == _generation &&
+                _loading &&
+                _selection == null &&
+                epoch == repo.session.identityEpoch &&
+                cacheGeneration == repo.catalogueCache.generation) {
+              setState(() => _selection = ProductSelection(cached));
+            }
+          }, onError: (Object _, StackTrace _) {}),
+        );
+      }
+      final page = await fresh;
       if (!mounted || generation != _generation) {
         return;
+      }
+      if (epoch != repo.session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Refresh to continue.',
+          status: 401,
+        );
       }
       setState(() {
         if (!page.isCached) _verifiedAt = DateTime.now();
