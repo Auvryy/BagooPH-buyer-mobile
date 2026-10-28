@@ -80,8 +80,8 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(repository.searchRequests.last['search'], 'tea & coffee');
-      expect(input('Search the marketplace'), findsOneWidget);
-      await press(tester, find.text('Filters'));
+      expect(input('Search products'), findsOneWidget);
+      await press(tester, find.byTooltip('Filters'));
       final departments = find.widgetWithText(
         DropdownButtonFormField<String>,
         'Departments',

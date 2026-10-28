@@ -252,16 +252,18 @@ class _ParcelTrackingPageState extends State<ParcelTrackingPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Follow your parcel',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Enter the tracking number from your waybill or order details.',
-          style: TextStyle(color: BagooTheme.muted, height: 1.5),
-        ),
-        const SizedBox(height: 20),
+        if (_tracking.result == null) ...[
+          const Text(
+            'Follow your parcel',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Enter the tracking number from your waybill or order details.',
+            style: TextStyle(color: BagooTheme.muted, height: 1.5),
+          ),
+          const SizedBox(height: 20),
+        ],
         TextField(
           controller: _number,
           maxLength: 64,
@@ -304,18 +306,23 @@ class _ParcelTrackingPageState extends State<ParcelTrackingPage> {
     ),
   );
 
-  Widget _privacyNote() => const _TrackingPanel(
+  Widget _privacyNote() => const Padding(
+    padding: EdgeInsets.symmetric(horizontal: 4),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ExcludeSemantics(
-          child: Icon(Icons.shield_outlined, color: BagooTheme.muted),
+          child: Icon(Icons.shield_outlined, color: BagooTheme.muted, size: 18),
         ),
         SizedBox(width: 12),
         Expanded(
           child: Text(
             'Recipient details are masked for privacy. Order actions are available in Profile under My Purchases & Orders.',
-            style: TextStyle(color: BagooTheme.muted, height: 1.5),
+            style: TextStyle(
+              color: BagooTheme.muted,
+              fontSize: 12,
+              height: 1.5,
+            ),
           ),
         ),
       ],

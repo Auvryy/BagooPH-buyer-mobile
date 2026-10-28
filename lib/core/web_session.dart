@@ -31,6 +31,8 @@ class WebSession {
   String? _csrf;
   int _sessionEpoch = 0;
   int get identityEpoch => _sessionEpoch;
+  int _readRevision = 0;
+  int get readRevision => _readRevision;
   final SessionVault? _vault;
   Future<void> _vaultTail = Future<void>.value();
   bool _persistCookies = true, _rememberLogin = false;
@@ -292,24 +294,29 @@ class WebSession {
     String? referer,
     List<UploadPart>? files,
   }) async {
-    final sessionEpoch = _sessionEpoch;
-    if (_csrf == null &&
-        !_cookies.values.any((c) => c.cookie.name == 'XSRF-TOKEN')) {
-      await page('/login', bootstrap: true);
-    }
-    if (sessionEpoch != _sessionEpoch) {
-      throw const BackendException(
-        'Your session changed. Start this action again after signing in.',
-        status: 401,
+    _readRevision++;
+    try {
+      final sessionEpoch = _sessionEpoch;
+      if (_csrf == null &&
+          !_cookies.values.any((c) => c.cookie.name == 'XSRF-TOKEN')) {
+        await page('/login', bootstrap: true);
+      }
+      if (sessionEpoch != _sessionEpoch) {
+        throw const BackendException(
+          'Your session changed. Start this action again after signing in.',
+          status: 401,
+        );
+      }
+      return await _request(
+        method,
+        resolve(path),
+        values: values,
+        referer: referer,
+        files: files,
       );
+    } finally {
+      _readRevision++;
     }
-    return _request(
-      method,
-      resolve(path),
-      values: values,
-      referer: referer,
-      files: files,
-    );
   }
 
   Future<_Reply> _request(

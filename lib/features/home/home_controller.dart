@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/buyer_repository.dart';
@@ -7,7 +9,12 @@ class HomeController extends ChangeNotifier {
   HomeController(this.repository, {WebPage? initial})
     : data = initial,
       _knownUser = initial?.user,
-      _knownEpoch = repository.session.identityEpoch;
+      _knownEpoch = repository.session.identityEpoch {
+    if (initial != null) {
+      _accept(initial);
+      _acceptedRequest = ('', '', 'relevance', currentPage);
+    }
+  }
   final BuyerRepository repository;
   Map<String, dynamic>? _knownUser;
   int _knownEpoch;
@@ -26,6 +33,7 @@ class HomeController extends ChangeNotifier {
   int? from, to;
   int _generation = 0;
   bool _disposed = false;
+  (String, String, String, int)? _acceptedRequest;
   List<Map<String, dynamic>> get categories =>
       mapsOf(data?.props['categories']);
   List<Map<String, dynamic>> get banners => mapsOf(data?.props['banners']);
@@ -43,6 +51,14 @@ class HomeController extends ChangeNotifier {
       return;
     }
     final generation = ++_generation;
+    final epoch = repository.session.identityEpoch;
+    final cacheGeneration = repository.catalogueCache.generation;
+    final request = (
+      search,
+      category,
+      sort,
+      more ? currentPage + 1 : pageNumber ?? 1,
+    );
     if (more) {
       loadingMore = true;
       moreError = null;
@@ -54,39 +70,48 @@ class HomeController extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      final page = await repository.home(
-        search: search,
-        category: category,
-        sort: sort,
-        page: more ? currentPage + 1 : pageNumber ?? 1,
+      final fresh = repository.home(
+        search: request.$1,
+        category: request.$2,
+        sort: request.$3,
+        page: request.$4,
       );
+      if (!more &&
+          (data == null || data!.isCached || request != _acceptedRequest)) {
+        unawaited(
+          repository
+              .cachedHome(
+                search: request.$1,
+                category: request.$2,
+                sort: request.$3,
+                page: request.$4,
+              )
+              .then<void>((cached) {
+                if (cached != null &&
+                    !_disposed &&
+                    generation == _generation &&
+                    loading &&
+                    epoch == repository.session.identityEpoch &&
+                    cacheGeneration == repository.catalogueCache.generation) {
+                  _accept(cached);
+                  _acceptedRequest = request;
+                  notifyListeners();
+                }
+              }, onError: (Object _, StackTrace _) {}),
+        );
+      }
+      final page = await fresh;
       if (_disposed || generation != _generation) {
         return;
       }
-      data = page;
-      if (!page.isCached) {
-        _knownUser = page.user;
-        _knownEpoch = repository.session.identityEpoch;
+      if (epoch != repository.session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Refresh to continue.',
+          status: 401,
+        );
       }
-      if (page.component != 'Buyer/Home') {
-        products = [];
-        return;
-      }
-      final feed = mapOf(page.props['feedProducts']);
-      final fresh = mapsOf(feed['data']);
-      if (more) {
-        final ids = products.map((p) => p['id']).toSet();
-        products.addAll(fresh.where((p) => !ids.contains(p['id'])));
-      } else {
-        products = fresh;
-      }
-      currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
-      lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
-      total = (feed['total'] as num?)?.toInt() ?? products.length;
-      from = more
-          ? from ?? (feed['from'] as num?)?.toInt()
-          : (feed['from'] as num?)?.toInt();
-      to = (feed['to'] as num?)?.toInt();
+      _accept(page, more: more);
+      _acceptedRequest = request;
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) {
         return;
@@ -108,6 +133,33 @@ class HomeController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  void _accept(WebPage page, {bool more = false}) {
+    data = page;
+    if (!page.isCached) {
+      _knownUser = page.user;
+      _knownEpoch = repository.session.identityEpoch;
+    }
+    if (page.component != 'Buyer/Home') {
+      products = [];
+      return;
+    }
+    final feed = mapOf(page.props['feedProducts']);
+    final rows = mapsOf(feed['data']);
+    if (more) {
+      final ids = products.map((p) => p['id']).toSet();
+      products.addAll(rows.where((p) => ids.add(p['id'])));
+    } else {
+      products = rows;
+    }
+    currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
+    lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
+    total = (feed['total'] as num?)?.toInt() ?? products.length;
+    from = more
+        ? from ?? (feed['from'] as num?)?.toInt()
+        : (feed['from'] as num?)?.toInt();
+    to = (feed['to'] as num?)?.toInt();
   }
 
   Future<void> filter({String? query, String? department, String? order}) {

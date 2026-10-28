@@ -144,11 +144,14 @@ class CatalogueCache {
     );
   });
 
-  Future<void> remove(String key) => _serial(() async {
-    await _load();
-    _entries.remove(key);
-    await _persist();
-  });
+  Future<void> remove(String key) {
+    _generation++;
+    return _serial(() async {
+      await _load();
+      _entries.remove(key);
+      await _persist();
+    });
+  }
 
   Future<bool> clear() {
     _generation++;

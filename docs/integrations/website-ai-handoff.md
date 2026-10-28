@@ -97,9 +97,12 @@ Future website assistance, not current requirements:
 
 - Agree a versioned public catalogue projection independent of authenticated Inertia shared props. Include stable product revision/update time, canonical slug, availability/deletion outcomes, server freshness limits and conditional GET support. Do not make the client infer current stock, prices or permissions from cached data.
 - Document which product image URLs are public/cacheable, their revision/cache headers, permitted retention and removal behavior. Keep chat, identity, return evidence and other authenticated media explicitly outside public caching.
+- Consider versioned public image renditions for card, gallery preview and full-size viewing, with documented dimensions/aspect ratios and cache policy. Mobile currently limits preview decoding and lazily builds gallery thumbnails, but still downloads the existing source image bytes. Supplying appropriately sized public images could reduce transfer cost; do not expose private media through public rendition URLs.
 - Provide fixtures for product withdrawal, renamed slugs, expired sales, changed variants/prices, stale revisions, deployment-version changes and an unavailable backend. Preserve normal website catalogue and checkout behavior.
 
-The mobile refresh and fallback approach follows [Flutter route visibility](https://api.flutter.dev/flutter/widgets/ModalRoute/isCurrentOf.html) and [Flutter offline-data guidance](https://docs.flutter.dev/app-architecture/design-patterns/offline-first). These references describe client behavior; they do not establish a deployed Bagoo backend contract.
+Mobile can now display an exact saved public page while its fresh read is pending. Fresh responses are delivered before optional storage writes, and identical catalogue reads share only their pending request within the same identity/submission/cache scope. Explicit account changes, cache clear and server-denied results invalidate old previews. These changes need no website endpoint and do not cache/replay mutations or private account responses.
+
+The mobile refresh and fallback approach follows [Flutter route visibility](https://api.flutter.dev/flutter/widgets/ModalRoute/isCurrentOf.html) and [Flutter offline-data guidance](https://docs.flutter.dev/app-architecture/design-patterns/offline-first). Public preview decode sizing follows [Flutter ResizeImage](https://api.flutter.dev/flutter/painting/ResizeImage-class.html). These references describe client behavior; they do not establish a deployed Bagoo backend contract.
 
 ## Acceptance before handing back to mobile
 

@@ -332,6 +332,7 @@ class OrderItemSummary extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: RemoteImage(
+                thumbnail: true,
                 uri: imageUri(session, product['featured_image']),
               ),
             ),

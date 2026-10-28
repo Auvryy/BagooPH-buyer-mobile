@@ -426,7 +426,7 @@ class _ShopMark extends StatelessWidget {
                   color: BagooTheme.strong,
                 ),
               )
-            : RemoteImage(uri: uri),
+            : RemoteImage(uri: uri, thumbnail: true),
       ),
     );
   }

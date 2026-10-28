@@ -11,6 +11,8 @@ import '../../core/cached_catalogue_notice.dart';
 import 'campaigns.dart';
 import 'advertisement_exposure.dart';
 import 'home_controller.dart';
+import 'browse_controls.dart';
+import 'catalogue_loading.dart';
 import 'product_card.dart';
 import 'search_page.dart';
 import 'search_controller.dart';
@@ -102,7 +104,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (widget.initial != null && widget.initial!.component != 'Buyer/Home') {
       _tab = 3;
       _visited.add(3);
-    } else {
+    } else if (widget.initial == null || widget.initial!.isCached) {
       _home.load();
     }
   }
@@ -118,10 +120,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_home.loading) {
+    if (state == AppLifecycleState.resumed &&
+        !_home.loading &&
+        _tab == 0 &&
+        (ModalRoute.isCurrentOf(context) ?? true)) {
       unawaited(_home.load());
     }
-    if (state == AppLifecycleState.resumed && _home.user?['id'] is num) {
+    if (state == AppLifecycleState.resumed &&
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        _home.user?['id'] is num) {
       unawaited(_refreshNotificationSummary(_home.user!['id']));
     }
   }
@@ -345,7 +352,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       appBar: _tab == 1
           ? null
           : AppBar(
-              toolbarHeight: 72,
+              toolbarHeight: 64,
               title: const FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
@@ -406,53 +413,61 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             constraints: const BoxConstraints(maxWidth: 1280),
             child: IndexedStack(
               index: _tab,
-              children: [
-                _marketplace(),
-                if (_visited.contains(1))
-                  BagPage(
-                    repository: widget.repository,
-                    active: _tab == 1,
-                    onBrowse: () => _selectTab(2),
-                  )
-                else
-                  const SizedBox.shrink(),
-                if (_visited.contains(2))
-                  SearchPage(
-                    repository: widget.repository,
-                    request: _searchRequest,
-                  )
-                else
-                  const SizedBox.shrink(),
-                if (_visited.contains(3))
-                  ProfilePage(
-                    key: ValueKey(
-                      'buyer-profile-${_home.user?['id'] ?? 'guest'}',
-                    ),
-                    repository: widget.repository,
-                    user: _home.user,
-                    initial: widget.initial,
-                    active: _tab == 3,
-                    initialSection: _profileSection,
-                    sectionRequest: _profileSectionRequest,
-                    onSearch: _openSearchFilters,
-                    onLogin: () =>
-                        BuyerActions.login(context, destination: 'profile'),
-                    onLogout: widget.onLogout,
-                    onUserChanged: (user) {
-                      if (mounted) {
-                        setState(() {
-                          _home.data?.props['auth'] = {
-                            ...mapOf(_home.data?.props['auth']),
-                            'user': user,
-                          };
-                        });
-                        _homeChanged();
-                      }
-                    },
-                  )
-                else
-                  const SizedBox.shrink(),
-              ],
+              children:
+                  [
+                        _marketplace(),
+                        if (_visited.contains(1))
+                          BagPage(
+                            repository: widget.repository,
+                            active: _tab == 1,
+                            onBrowse: () => _selectTab(2),
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        if (_visited.contains(2))
+                          SearchPage(
+                            repository: widget.repository,
+                            request: _searchRequest,
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        if (_visited.contains(3))
+                          ProfilePage(
+                            key: ValueKey(
+                              'buyer-profile-${_home.user?['id'] ?? 'guest'}',
+                            ),
+                            repository: widget.repository,
+                            user: _home.user,
+                            initial: widget.initial,
+                            active: _tab == 3,
+                            initialSection: _profileSection,
+                            sectionRequest: _profileSectionRequest,
+                            onSearch: _openSearchFilters,
+                            onLogin: () => BuyerActions.login(
+                              context,
+                              destination: 'profile',
+                            ),
+                            onLogout: widget.onLogout,
+                            onUserChanged: (user) {
+                              if (mounted) {
+                                setState(() {
+                                  _home.data?.props['auth'] = {
+                                    ...mapOf(_home.data?.props['auth']),
+                                    'user': user,
+                                  };
+                                });
+                                _homeChanged();
+                              }
+                            },
+                          )
+                        else
+                          const SizedBox.shrink(),
+                      ].indexed
+                      .map(
+                        (tab) =>
+                            TickerMode(enabled: _tab == tab.$1, child: tab.$2),
+                      )
+                      .toList(),
             ),
           ),
         ),
@@ -472,7 +487,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Icons.shopping_bag_rounded,
               color: BagooTheme.strong,
             ),
-            label: 'Cart',
+            label: 'Bag',
           ),
           NavigationDestination(
             icon: Icon(Icons.search_outlined),
@@ -489,12 +504,120 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ),
   );
 
+  Widget _browseTools({required bool roomy}) {
+    final search = BrowseSearchField(
+      controller: _search,
+      label: 'Search products',
+      onSubmitted: (value) => _openSearch(query: value),
+      onFilters: _openingFilters ? null : _advancedFilters,
+    );
+    final utilities = _buyerUtilities();
+    return roomy
+        ? Row(
+            children: [
+              Expanded(child: search),
+              const SizedBox(width: 16),
+              utilities,
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              search,
+              const SizedBox(height: 4),
+              Align(alignment: Alignment.centerLeft, child: utilities),
+            ],
+          );
+  }
+
+  Widget _buyerUtilities() => Wrap(
+    spacing: 8,
+    runSpacing: 0,
+    children: [
+      TextButton.icon(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onPressed: _openingTracking ? null : _openTracking,
+        icon: const Icon(Icons.local_shipping_outlined, size: 18),
+        label: const Text('Track a parcel'),
+      ),
+      TextButton.icon(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onPressed: () {
+          final user = _home.user;
+          if (user == null) {
+            widget.onLogin();
+            return;
+          }
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SupportAssistantPage(
+                repository: widget.repository,
+                user: user,
+                available: _canSave,
+              ),
+            ),
+          );
+        },
+        icon: const Icon(Icons.help_outline, size: 18),
+        label: const Text('Help & Support'),
+      ),
+    ],
+  );
+
+  Widget _departments({required bool inline}) {
+    const heading = Text(
+      'Shop by department',
+      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+    );
+    final strip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _categoryChip('', 'All departments', Icons.apps_rounded),
+          for (final category in _home.categories)
+            _categoryChip(
+              category['slug'].toString(),
+              category['name'].toString(),
+              categoryIcon(category),
+            ),
+        ],
+      ),
+    );
+    return inline
+        ? Row(
+            children: [
+              heading,
+              const SizedBox(width: 16),
+              Expanded(child: strip),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [heading, const SizedBox(height: 10), strip],
+          );
+  }
+
   Widget _marketplace() => RefreshIndicator(
     onRefresh: _home.load,
     child: LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 700;
         final scaled = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final roomy = constraints.maxWidth >= 900 && scaled <= 1.4;
         final count = productColumns(constraints.maxWidth, scaled);
         final horizontal = wide ? 32.0 : 16.0;
         return CustomScrollView(
@@ -507,85 +630,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextField(
-                      controller: _search,
-                      maxLength: 100,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (value) => _openSearch(query: value),
-                      decoration: InputDecoration(
-                        labelText: 'Search products',
-                        counterText: '',
-                        hintText: 'What are you looking for?',
-                        prefixIcon: const ExcludeSemantics(
-                          child: Icon(Icons.search_rounded),
-                        ),
-                        suffixIcon: IconButton(
-                          tooltip: 'Search marketplace',
-                          onPressed: () => _openSearch(query: _search.text),
-                          icon: const Icon(Icons.arrow_forward_rounded),
-                        ),
+                    const Text(
+                      'Discover local finds',
+                      style: TextStyle(
+                        fontSize: 23,
+                        height: 1.3,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.5,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _openingFilters ? null : _advancedFilters,
-                      icon: const Icon(Icons.tune),
-                      label: Text(
-                        _openingFilters
-                            ? 'Loading filters…'
-                            : 'Filter products',
-                      ),
-                    ),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        TextButton.icon(
-                          onPressed: _openingTracking ? null : _openTracking,
-                          icon: const Icon(Icons.local_shipping_outlined),
-                          label: const Text('Track a parcel'),
-                        ),
-                        TextButton.icon(
-                          onPressed: () {
-                            final user = _home.user;
-                            if (user == null) {
-                              widget.onLogin();
-                              return;
-                            }
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => SupportAssistantPage(
-                                  repository: widget.repository,
-                                  user: user,
-                                  available: _canSave,
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.help_outline),
-                          label: const Text('Help & Support'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  AboutBagooPage(repository: widget.repository),
-                            ),
-                          ),
-                          child: const Text('About BagooPH'),
-                        ),
-                      ],
-                    ),
+                    const SizedBox(height: 16),
+                    _browseTools(roomy: roomy),
                     const SizedBox(height: 12),
-                    if (_home.loading)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 20),
-                        child: LinearProgressIndicator(),
-                      ),
+                    SizedBox(
+                      height: 4,
+                      child: _home.loading
+                          ? const LinearProgressIndicator(
+                              semanticsLabel: 'Updating products',
+                            )
+                          : null,
+                    ),
                     if (_home.data?.cachedAt case final savedAt?)
                       CachedCatalogueNotice(
                         savedAt: savedAt,
+                        refreshing: _home.loading,
                         onRefresh: _home.loading ? null : _home.load,
                       ),
                     if (_home.error != null) ...[
@@ -598,7 +666,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           label: const Text('Try again'),
                         ),
                       ),
-                    ] else if (_home.data != null && !_home.isMarketplace) ...[
+                    ],
+                    if (_home.data != null && !_home.isMarketplace) ...[
                       Notice(
                         mapOf(
                               _home.data!.props['status'],
@@ -610,8 +679,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         onPressed: () => _selectTab(3),
                         child: const Text('View account'),
                       ),
-                    ] else if (!_home.loading && _home.data != null) ...[
-                      if (!_home.hasFilters) ...[
+                    ] else if (_home.data != null) ...[
+                      if (!_home.hasFilters &&
+                          _home.banners.any((b) => b['image'] is String)) ...[
                         Campaigns(
                           banners: _home.banners,
                           session: widget.repository.session,
@@ -624,35 +694,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             'impression',
                           ),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
                       ],
                       if (_home.categories.isNotEmpty) ...[
-                        const Text(
-                          'Shop by department',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              _categoryChip(
-                                '',
-                                'All departments',
-                                Icons.apps_rounded,
-                              ),
-                              for (final category in _home.categories)
-                                _categoryChip(
-                                  category['slug'].toString(),
-                                  category['name'].toString(),
-                                  categoryIcon(category),
-                                ),
-                            ],
-                          ),
-                        ),
+                        _departments(inline: roomy),
                         const SizedBox(height: 24),
                       ],
                       if (_home.data!.props['buyerApplication'] != null) ...[
@@ -722,119 +767,71 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             ],
                           ),
                         ),
-                      const Text(
-                        'DAILY DISCOVER',
-                        style: TextStyle(
-                          color: BagooTheme.strong,
-                          letterSpacing: 1.5,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _home.search.isEmpty
-                            ? 'Recommended for you'
-                            : 'Results for “${_home.search}”',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          height: 1.3,
-                          letterSpacing: -.7,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${_home.total} active listings',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: BagooTheme.muted,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          for (final entry in const {
-                            'relevance': 'Daily Discover',
-                            'top_sales': 'Top Sales',
-                            'top_rated': 'Top Rated',
-                            'newest': 'New Arrivals',
-                          }.entries)
-                            ChoiceChip(
-                              label: Text(entry.value),
-                              selected: _home.sort == entry.key,
-                              selectedColor: BagooTheme.rose,
-                              onSelected: (_) => _home.filter(order: entry.key),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: constraints.maxWidth - horizontal * 2,
-                            ),
-                            child: SizedBox(
-                              width: 235,
-                              child: DropdownButtonFormField<String>(
-                                key: ValueKey(_home.sort),
-                                initialValue: _home.sort,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Sort by',
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _home.search.isEmpty
+                                      ? 'Recommended for you'
+                                      : 'Results for “${_home.search}”',
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    height: 1.3,
+                                    letterSpacing: -.4,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                items:
-                                    const {
-                                          'relevance': 'Recommended',
-                                          'top_sales': 'Best selling',
-                                          'top_rated': 'Highest rated',
-                                          'newest': 'Newest first',
-                                          'price_asc': 'Price: low to high',
-                                          'price_desc': 'Price: high to low',
-                                        }.entries
-                                        .map(
-                                          (e) => DropdownMenuItem(
-                                            value: e.key,
-                                            child: Text(
-                                              e.value,
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    _home.filter(order: value);
-                                  }
-                                },
-                              ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _home.error != null
+                                      ? 'Showing previous results'
+                                      : _home.loading
+                                      ? 'Updating products…'
+                                      : '${_home.total} products · ${searchSorts[_home.sort] ?? 'Recommended'}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: BagooTheme.muted,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          if (_home.hasFilters)
-                            TextButton.icon(
-                              onPressed: () {
-                                _search.clear();
-                                _home.reset();
-                              },
-                              icon: const Icon(Icons.close, size: 18),
-                              label: const Text('Clear filters'),
-                            ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              final selected = await showBuyerSort(
+                                context,
+                                _home.sort,
+                              );
+                              if (mounted &&
+                                  selected != null &&
+                                  selected != _home.sort) {
+                                _home.filter(order: selected);
+                              }
+                            },
+                            icon: const Icon(Icons.sort_rounded, size: 18),
+                            label: const Text('Sort'),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 20),
-                      if (_home.products.isEmpty)
+                      if (_home.hasFilters)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () {
+                              _search.clear();
+                              _home.reset();
+                            },
+                            icon: const Icon(Icons.close, size: 18),
+                            label: const Text('Clear filters'),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      if (_home.products.isEmpty && !_home.loading)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Column(
@@ -872,7 +869,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            if (!_home.loading && _home.error == null && _home.isMarketplace)
+            if (_home.loading && _home.products.isEmpty && _home.error == null)
+              CatalogueLoadingGrid(
+                columns: count,
+                padding: EdgeInsets.symmetric(horizontal: horizontal),
+              ),
+            if (_home.isMarketplace)
               SliverPadding(
                 padding: EdgeInsets.symmetric(horizontal: horizontal),
                 sliver: SliverLayoutBuilder(
@@ -895,9 +897,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   },
                 ),
               ),
-            if (!_home.loading &&
-                _home.error == null &&
-                _home.isMarketplace &&
+            if (_home.isMarketplace &&
                 mapsOf(_home.data?.props['relatedProducts']).isNotEmpty) ...[
               const SliverPadding(
                 padding: EdgeInsets.all(16),
@@ -934,16 +934,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   children: [
                     if (_home.moreError != null)
                       Notice(_home.moreError!, error: true),
-                    if (!_home.loading &&
-                        _home.error == null &&
-                        _home.isMarketplace)
+                    if (_home.isMarketplace)
                       CataloguePages(
                         current: _home.currentPage,
                         last: _home.lastPage,
                         total: _home.total,
                         from: _home.from,
                         to: _home.to,
-                        busy: _home.loadingMore,
+                        busy: _home.loadingMore || _home.loading,
                         onPage: (number) => _home.load(pageNumber: number),
                       ),
                     if (_home.hasMore &&
@@ -963,6 +961,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                       ),
                     const SizedBox(height: 24),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              AboutBagooPage(repository: widget.repository),
+                        ),
+                      ),
+                      child: const Text('About BagooPH'),
+                    ),
                     TextButton(
                       onPressed: () async {
                         final cleared = await widget.repository.catalogueCache
@@ -1013,7 +1020,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       saved: saved,
       saving: _saving.contains(id),
       error: _saveErrors[id],
-      saveLabel: _home.data?.isCached == true
+      saveLabel: _home.loading
+          ? 'Updating products'
+          : _home.error != null
+          ? 'Refresh to save'
+          : _home.data?.isCached == true
           ? 'Connect to save'
           : _home.user == null
           ? 'Sign in to save'
@@ -1022,7 +1033,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           : saved
           ? 'Remove from saved'
           : 'Save product',
-      onSave: _home.data?.isCached == true
+      onSave:
+          _home.loading || _home.error != null || _home.data?.isCached == true
           ? null
           : _home.user == null
           ? widget.onLogin

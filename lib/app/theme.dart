@@ -8,6 +8,9 @@ abstract final class BagooTheme {
   static const canvas = Color(0xFFF8FAFC);
   static const rose = Color(0xFFFDF2F4);
   static const border = Color(0xFFCBD5E1);
+  static const line = Color(0xFFE2E8F0);
+  static const panelRadius = 16.0;
+  static const controlRadius = 12.0;
 
   static ThemeData get light {
     final base = ThemeData(
@@ -40,15 +43,15 @@ abstract final class BagooTheme {
           vertical: 16,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: const BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: const BorderSide(color: Color(0xFF64748B)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: const BorderSide(color: crimson, width: 2),
         ),
         errorMaxLines: 4,
@@ -63,7 +66,9 @@ abstract final class BagooTheme {
             fontWeight: FontWeight.w700,
             fontSize: 15,
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(controlRadius),
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -71,7 +76,9 @@ abstract final class BagooTheme {
           minimumSize: const Size(48, 48),
           foregroundColor: ink,
           side: const BorderSide(color: border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(controlRadius),
+          ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(

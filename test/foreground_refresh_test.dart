@@ -6,6 +6,33 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
+    'an already loaded screen waits before its first scheduled read',
+    (tester) async {
+      var calls = 0;
+      final controller = ForegroundRead(
+        interval: const Duration(seconds: 30),
+        refreshInitially: false,
+        read: (_) async {
+          calls++;
+          return ReadOutcome.success;
+        },
+      );
+      controller.setActive(true);
+      await tester.pump(const Duration(seconds: 29));
+      expect(calls, 0);
+      await tester.pump(const Duration(seconds: 1));
+      expect(calls, 1);
+      controller.setActive(false);
+      await tester.pump(const Duration(minutes: 2));
+      expect(calls, 1);
+      controller.setActive(true);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(calls, 2);
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
     'serial reads discard hidden tickets and resume after pending work',
     (tester) async {
       final reads = <Completer<ReadOutcome>>[];
