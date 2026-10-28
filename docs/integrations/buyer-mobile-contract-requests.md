@@ -1,5 +1,7 @@
 # Website contracts requested for future native buyer features
 
+For the current parity work, give the website AI [website-ai-handoff.md](website-ai-handoff.md). It records the current existing contracts, owner link setup, versioned logistics documentation and concrete website prerequisites. The older baseline below is historical verification evidence.
+
 These are recommendations for the website maintainer. This document lives in the mobile repository. No website code, routes, migrations, dependencies, or deployment configuration are part of this mobile review.
 
 ## Existing contracts retained by mobile
