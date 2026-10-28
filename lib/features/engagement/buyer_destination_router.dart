@@ -13,6 +13,16 @@ import '../profile/returns_page.dart';
 import '../promotions/promotion_page.dart';
 import '../tracking/parcel_tracking_page.dart';
 import 'engagement_repository.dart';
+import 'buyer_link.dart';
+import '../../core/buyer_actions.dart';
+import '../auth/password_link_page.dart';
+import '../auth/email_verification_link_page.dart';
+import '../collections/saved_products_page.dart';
+import '../collections/followed_shops_page.dart';
+import '../notifications/notifications_page.dart';
+import '../profile/inbox_page.dart';
+import '../checkout/bag_page.dart';
+import '../checkout/checkout_page.dart';
 
 class BuyerDestinationRouter {
   const BuyerDestinationRouter._();
@@ -53,7 +63,123 @@ class BuyerDestinationRouter {
       throw const BackendException('This update has no available destination.');
     }
     final target = repository.session.resolve(href);
+    final link = BuyerLink.parse(target, repository.session.origin);
     final segments = target.pathSegments;
+    if (link.kind == BuyerLinkKind.passwordReset) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (routeContext) => PasswordLinkPage(
+            repository: repository,
+            initialLink: target,
+            checkGuest: true,
+            onComplete: () => BuyerActions.login(routeContext),
+          ),
+        ),
+      );
+      return;
+    }
+    if (link.kind == BuyerLinkKind.emailVerification) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              EmailVerificationLinkPage(repository: repository, link: target),
+        ),
+      );
+      return;
+    }
+    if (target.path == '/cart') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BagPage(
+            repository: repository,
+            voucherCode:
+                target.queryParameters['voucher'] ??
+                target.queryParameters['voucher_code'],
+          ),
+        ),
+      );
+      return;
+    }
+    if (target.path == '/checkout') {
+      final page = await repository.document(target.toString());
+      repository.requireNoErrors(page);
+      if (page.component != 'Checkout/Index' ||
+          page.props['items'] is! List ||
+          page.props['checkoutToken'] is! String) {
+        throw const BackendException(
+          'Checkout is unavailable. Review your Bag and sign in if needed.',
+        );
+      }
+      if (context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => CheckoutPage(repository: repository, initial: page),
+          ),
+        );
+      }
+      return;
+    }
+    if (target.path == '/account/security' ||
+        target.path == '/account/settings' ||
+        target.path == '/buyer/addresses' ||
+        target.path == '/pending-approval' ||
+        target.path == '/verify-email') {
+      final section = {
+        '/account/security': 'sessions',
+        '/account/settings': 'personal',
+        '/buyer/addresses': 'addresses',
+        '/pending-approval': 'identity',
+        '/verify-email': 'emails',
+      }[target.path]!;
+      _openProfile(context, section, onProfileSection, closeForTabDestination);
+      return;
+    }
+    if (target.path == '/buyer/messages') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => InboxPage(repository: ProfileRepository(repository)),
+        ),
+      );
+      return;
+    }
+    if ([
+      '/buyer/saved-products',
+      '/buyer/followed-shops',
+      '/notifications',
+    ].contains(target.path)) {
+      final page = await repository.currentSession();
+      if (page?.user?['id'] is! num) {
+        throw const BackendException(
+          'Sign in to your buyer account to open this screen.',
+          status: 401,
+        );
+      }
+      if (!context.mounted) return;
+      final owner = (page!.user!['id'] as num).toInt();
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => target.path == '/buyer/saved-products'
+              ? SavedProductsPage(
+                  repository: repository,
+                  ownerId: owner,
+                  onSearch: onSearch,
+                )
+              : target.path == '/buyer/followed-shops'
+              ? FollowedShopsPage(
+                  repository: repository,
+                  ownerId: owner,
+                  onSearch: onSearch,
+                )
+              : NotificationsPage(
+                  repository: repository,
+                  ownerId: owner,
+                  onSearch: onSearch,
+                  onProfileSection: onProfileSection,
+                ),
+        ),
+      );
+      return;
+    }
 
     if (segments.isNotEmpty &&
         segments.first == 'track' &&
@@ -104,7 +230,11 @@ class BuyerDestinationRouter {
         segments[1] == 'profile') {
       _openProfile(
         context,
-        _profileSection(target.queryParameters['tab']),
+        _profileSection(
+          target.fragment.isNotEmpty
+              ? target.fragment
+              : target.queryParameters['tab'],
+        ),
         onProfileSection,
         closeForTabDestination,
       );
@@ -139,7 +269,7 @@ class BuyerDestinationRouter {
       if (segments.length == 4 &&
           segments[1] == 'orders' &&
           segments[3] == 'create') {
-        final orderId = int.tryParse(segments[2]);
+        final orderId = buyerLinkId(segments[2]);
         if (orderId != null && orderId > 0) {
           await Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -162,7 +292,7 @@ class BuyerDestinationRouter {
     if (segments.first == 'wallet' &&
         segments.length == 3 &&
         segments[1] == 'payments') {
-      final id = int.tryParse(segments[2]);
+      final id = buyerLinkId(segments[2]);
       if (id != null && id > 0) {
         await openWalletPayment(context, ProfileRepository(repository), id);
         return;
@@ -175,10 +305,16 @@ class BuyerDestinationRouter {
       await _openProduct(context, repository, segments.last);
       return;
     }
-    if (segments.first == 'shop' && segments.length == 2) {
+    if (segments.first == 'shop' &&
+        (segments.length == 2 ||
+            segments.length == 4 && segments[2] == 'categories')) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => ShopPage(repository: repository, slug: segments[1]),
+          builder: (_) => ShopPage(
+            repository: repository,
+            slug: segments[1],
+            storeCategory: segments.length == 4 ? segments[3] : 'all',
+          ),
         ),
       );
       return;
@@ -303,7 +439,9 @@ class BuyerDestinationRouter {
       case 'Buyer/Profile':
         _openProfile(
           context,
-          _profileSection(uri.queryParameters['tab']),
+          _profileSection(
+            uri.fragment.isNotEmpty ? uri.fragment : uri.queryParameters['tab'],
+          ),
           onProfileSection,
           closeForTabDestination,
         );
@@ -329,18 +467,45 @@ class BuyerDestinationRouter {
     }
   }
 
-  static SearchFilters _filters(Uri uri) => SearchFilters(
-    query: uri.queryParameters['search'] ?? '',
-    category: uri.queryParameters['category'] ?? '',
-    location: uri.queryParameters['location'] ?? '',
-    minimum: uri.queryParameters['min_price'] ?? '',
-    maximum: uri.queryParameters['max_price'] ?? '',
-    rating: uri.queryParameters['rating'] ?? '',
-    inStock: ['1', 'true'].contains(uri.queryParameters['in_stock']),
-    sort: uri.queryParameters['sort'] ?? 'relevance',
-  );
+  static SearchFilters _filters(Uri uri) {
+    for (final key in ['min_price', 'max_price']) {
+      if (SearchFilters.priceError(uri.queryParameters[key]) != null) {
+        throw const BackendException(
+          'This search link has an invalid price filter.',
+        );
+      }
+    }
+    return SearchFilters(
+      query: uri.queryParameters['search'] ?? '',
+      category: uri.queryParameters['category'] ?? '',
+      location: uri.queryParameters['location'] ?? '',
+      minimum: uri.queryParameters['min_price'] ?? '',
+      maximum: uri.queryParameters['max_price'] ?? '',
+      rating:
+          [
+            '',
+            '3',
+            '4',
+            '4.5',
+            '5',
+          ].contains(uri.queryParameters['rating'] ?? '')
+          ? uri.queryParameters['rating'] ?? ''
+          : '',
+      inStock: ['1', 'true'].contains(uri.queryParameters['in_stock']),
+      sort: searchSorts.containsKey(uri.queryParameters['sort'])
+          ? uri.queryParameters['sort']!
+          : 'relevance',
+    );
+  }
 
   static String _profileSection(String? tab) => switch (tab) {
+    'account-personal' || 'account' => 'personal',
+    'account-password' => 'password',
+    'account-identity' ||
+    'account-verification' ||
+    'identity-correction' => 'identity',
+    'account-emails' => 'emails',
+    'login-activity' || 'security' => 'sessions',
     'personal' ||
     'emails' ||
     'password' ||
@@ -398,7 +563,7 @@ class BuyerDestinationRouter {
     BuyerRepository repository,
     String rawId,
   ) async {
-    final id = int.tryParse(rawId);
+    final id = buyerLinkId(rawId);
     if (id == null || id <= 0) {
       throw const BackendException('This order is unavailable.');
     }
@@ -417,7 +582,7 @@ class BuyerDestinationRouter {
     BuyerRepository repository,
     String rawId,
   ) async {
-    final id = int.tryParse(rawId);
+    final id = buyerLinkId(rawId);
     if (id == null || id <= 0) {
       throw const BackendException('This return is unavailable.');
     }
