@@ -143,7 +143,7 @@ class _ForegroundRefreshState extends State<ForegroundRefresh>
     widget.enabled &&
         _foreground &&
         (ModalRoute.isCurrentOf(context) ?? true) &&
-        TickerMode.of(context),
+        TickerMode.valuesOf(context).enabled,
   );
 
   @override

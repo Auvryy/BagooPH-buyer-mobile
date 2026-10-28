@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/web_session.dart';
+import '../../core/foreground_refresh.dart';
 import '../../core/widgets.dart';
 import '../../core/uploads.dart';
 import '../home/product_card.dart';
@@ -32,16 +33,42 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   WebPage? _page;
   String? _code;
   Timer? _claimTimer;
+  late ForegroundRead _updates;
+  late int _identityEpoch;
+  String? _updateError;
+  bool _refreshing = true, _accessLost = false, _manualRefresh = false;
   Map<String, dynamic> get order => mapOf(_page?.props['order']);
   Map<String, dynamic> get claim => mapOf(_page?.props['pickupClaim']);
   @override
   void initState() {
     super.initState();
-    _load();
+    _configure();
+  }
+
+  void _configure() {
+    _identityEpoch = widget.repository.session.identityEpoch;
+    _updates = ForegroundRead(read: _read);
+  }
+
+  @override
+  void didUpdateWidget(covariant OrderDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.repository, widget.repository) ||
+        oldWidget.orderId != widget.orderId) {
+      _updates.dispose();
+      _claimTimer?.cancel();
+      _page = null;
+      _code = _updateError = problem = success = null;
+      errors = {};
+      _accessLost = _manualRefresh = false;
+      _refreshing = true;
+      _configure();
+    }
   }
 
   @override
   void dispose() {
+    _updates.dispose();
     _claimTimer?.cancel();
     _code = null;
     super.dispose();
@@ -59,19 +86,22 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
 
   void _accept(WebPage page) {
     widget.repository.buyer.requireNoErrors(page);
-    if (page.component != 'Buyer/OrderDetail' ||
+    if (_identityEpoch != widget.repository.session.identityEpoch ||
+        page.component != 'Buyer/OrderDetail' ||
         mapOf(page.props['order'])['id'] != widget.orderId ||
+        page.user?['id'] is! num ||
         page.user?['role'] != 'buyer' ||
         _page != null && _page!.user?['id'] != page.user?['id']) {
       throw const BackendException(
         'This order could not be confirmed for your account.',
+        status: 401,
       );
     }
     if (!mounted) return;
     final prior = claim['reference'];
     setState(() {
       _page = page;
-      if (prior != claim['reference']) _code = null;
+      if (prior != claim['reference'] || !readyForPickup) _code = null;
     });
     _scheduleClaimBoundary();
   }
@@ -101,10 +131,93 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     }
   }
 
-  Future<void> _load() async => perform(() async {
-    _accept(await widget.repository.order(widget.orderId));
-    return null;
-  }, validate: false);
+  void _clearPrivate() {
+    _accessLost = true;
+    _updates.setActive(false);
+    _claimTimer?.cancel();
+    _page = null;
+    _code = null;
+    _refreshing = false;
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if ([401, 403, 404, 419].contains(error.status) ||
+        _identityEpoch != widget.repository.session.identityEpoch) {
+      _clearPrivate();
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (_accessLost ||
+        _identityEpoch != widget.repository.session.identityEpoch) {
+      setState(() {
+        _clearPrivate();
+        problem = 'Your account changed. Reopen this order after signing in.';
+      });
+      return Future.value(false);
+    }
+    _updates.setActive(false);
+    return super.perform(action, validate: validate);
+  }
+
+  Future<void> _load() async {
+    _manualRefresh = true;
+    await _updates.refresh();
+  }
+
+  Future<ReadOutcome> _read(ReadTicket ticket) async {
+    if (mounted) setState(() => _refreshing = true);
+    try {
+      if (_identityEpoch != widget.repository.session.identityEpoch) {
+        throw const BackendException(
+          'Your account changed. Reopen this order after signing in.',
+          status: 401,
+        );
+      }
+      final page = await widget.repository.session.page(
+        '/buyer/orders/${widget.orderId}',
+      );
+      if (!mounted || !ticket.isCurrent) return ReadOutcome.success;
+      _accept(page);
+      setState(() {
+        _updateError = null;
+        if (_manualRefresh) {
+          problem = null;
+          errors = {};
+          _manualRefresh = false;
+        }
+      });
+      return ReadOutcome.success;
+    } on BackendException catch (e) {
+      if (!mounted || !ticket.isCurrent) return ReadOutcome.success;
+      final denied =
+          [401, 403, 404, 419].contains(e.status) ||
+          _identityEpoch != widget.repository.session.identityEpoch;
+      setState(() {
+        _updateError = denied
+            ? e.message
+            : 'Order updates are delayed. Retrying automatically. ${e.message}';
+        if (denied) _clearPrivate();
+      });
+      return denied ? ReadOutcome.stop : ReadOutcome.retry;
+    } catch (_) {
+      if (mounted && ticket.isCurrent) {
+        setState(
+          () => _updateError =
+              'Order updates are delayed. Retrying automatically.',
+        );
+      }
+      return ReadOutcome.retry;
+    } finally {
+      if (mounted && ticket.isCurrent) setState(() => _refreshing = false);
+    }
+  }
+
   Future<void> _confirm() async {
     if (!await confirmAction(
       context,
@@ -153,7 +266,11 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
           'The pickup code was not returned. Refresh tracking before trying again.',
         );
       }
-      if (mounted && readyForPickup) setState(() => _code = data['code']);
+      if (mounted &&
+          readyForPickup &&
+          _identityEpoch == widget.repository.session.identityEpoch) {
+        setState(() => _code = data['code']);
+      }
       return 'Keep your code private. Present it with your valid photo ID at the assigned hub.';
     }, validate: false);
   }
@@ -162,398 +279,417 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   Widget build(BuildContext context) {
     final tracking = mapOf(order['tracking']);
     final userCan = _page?.props['canUsePortal'] == true;
-    final canAct = !busy && problem == null;
-    return PopScope(
-      canPop: !busy,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            order.isEmpty ? 'Your purchase' : 'Order #${order['order_number']}',
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh recorded order',
-              onPressed: busy ? null : _load,
-              icon: const Icon(Icons.refresh),
+    final canAct =
+        !busy && !_accessLost && problem == null && _updateError == null;
+    return ForegroundRefresh(
+      controller: _updates,
+      enabled: !busy && !_accessLost,
+      child: PopScope(
+        canPop: !busy,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              order.isEmpty
+                  ? 'Your purchase'
+                  : 'Order #${order['order_number']}',
             ),
-          ],
-        ),
-        body: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 960),
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (busy) const LinearProgressIndicator(),
-                  if (problem != null) ...[
-                    Notice(
-                      [problem!, ...errors.values].join('\n'),
-                      error: true,
-                    ),
-                    TextButton(
-                      onPressed: busy ? null : _load,
-                      child: const Text('Refresh order'),
-                    ),
-                  ],
-                  if (success != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Notice(success!),
-                    ),
-                  if (_page != null) ...[
-                    ProfilePanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          ProfileHeading(
-                            'Order progress',
-                            'Placed ${readableDateTime(order['created_at'])}. Status reflects recorded parcel checkpoints.',
-                            Icons.local_shipping_outlined,
-                          ),
-                          Text(
-                            tracking['status_label']?.toString() ??
-                                order['status']?.toString() ??
-                                'Status not loaded',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: BagooTheme.strong,
-                              height: 1.5,
+            actions: [
+              IconButton(
+                tooltip: 'Refresh recorded order',
+                onPressed: busy || _refreshing || _accessLost ? null : _load,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (busy || _refreshing && _page == null)
+                      const LinearProgressIndicator(),
+                    if (_updateError != null) ...[
+                      Notice(_updateError!, error: true),
+                      if (!_accessLost)
+                        TextButton(
+                          onPressed: _refreshing ? null : _load,
+                          child: const Text('Refresh order'),
+                        ),
+                    ],
+                    if (problem != null) ...[
+                      Notice(
+                        [problem!, ...errors.values].join('\n'),
+                        error: true,
+                      ),
+                      TextButton(
+                        onPressed: busy || _accessLost ? null : _load,
+                        child: const Text('Refresh order'),
+                      ),
+                    ],
+                    if (success != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Notice(success!),
+                      ),
+                    if (_page != null) ...[
+                      ProfilePanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            ProfileHeading(
+                              'Order progress',
+                              'Placed ${readableDateTime(order['created_at'])}. Status reflects recorded parcel checkpoints.',
+                              Icons.local_shipping_outlined,
                             ),
-                          ),
-                          Text(
-                            tracking['stage_label']?.toString() ??
-                                'Parcel stage not loaded',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              height: 1.7,
-                            ),
-                          ),
-                          Text(
-                            'Recorded holder: ${tracking['custodian'] ?? 'Not recorded'}\n${tracking['responsible'] ?? 'Next step'}: ${tracking['next_step'] ?? 'Refresh for the next recorded step.'}',
-                            style: const TextStyle(height: 1.7),
-                          ),
-                          if (tracking['notice'] != null)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Notice(tracking['notice'].toString()),
-                            ),
-                          if (tracking['failure'] is Map)
                             Text(
-                              'Delivery attempt: ${mapOf(tracking['failure'])['reason']}\n${readableDateTime(mapOf(tracking['failure'])['attempted_at'])}${mapOf(tracking['failure'])['retry_at'] == null ? '' : '\nApproved retry: ${readableDateTime(mapOf(tracking['failure'])['retry_at'])}'}',
+                              tracking['status_label']?.toString() ??
+                                  order['status']?.toString() ??
+                                  'Status not loaded',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                color: BagooTheme.strong,
+                                height: 1.5,
+                              ),
+                            ),
+                            Text(
+                              tracking['stage_label']?.toString() ??
+                                  'Parcel stage not loaded',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                height: 1.7,
+                              ),
+                            ),
+                            Text(
+                              'Recorded holder: ${tracking['custodian'] ?? 'Not recorded'}\n${tracking['responsible'] ?? 'Next step'}: ${tracking['next_step'] ?? 'Refresh for the next recorded step.'}',
                               style: const TextStyle(height: 1.7),
                             ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
+                            if (tracking['notice'] != null)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                child: Notice(tracking['notice'].toString()),
+                              ),
+                            if (tracking['failure'] is Map)
+                              Text(
+                                'Delivery attempt: ${mapOf(tracking['failure'])['reason']}\n${readableDateTime(mapOf(tracking['failure'])['attempted_at'])}${mapOf(tracking['failure'])['retry_at'] == null ? '' : '\nApproved retry: ${readableDateTime(mapOf(tracking['failure'])['retry_at'])}'}',
+                                style: const TextStyle(height: 1.7),
+                              ),
+                            const SizedBox(height: 16),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (_page!.props['canConfirmReceipt'] == true)
+                                  FilledButton(
+                                    onPressed: canAct ? _confirm : null,
+                                    child: const Text('Confirm Received'),
+                                  ),
+                                if (userCan &&
+                                    _page!.props['buyAgainToken'] is String)
+                                  OutlinedButton(
+                                    onPressed: canAct
+                                        ? () => perform(() async {
+                                            await buyAgain(
+                                              context,
+                                              widget.repository,
+                                              widget.orderId,
+                                              _page!.props['buyAgainToken'],
+                                            );
+                                            return null;
+                                          }, validate: false)
+                                        : null,
+                                    child: const Text('Buy again'),
+                                  ),
+                                if (_page!.props['cancelOrderUrl'] is String)
+                                  OutlinedButton(
+                                    onPressed: canAct
+                                        ? () => Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => _CancelOrderPage(
+                                                repository: widget.repository,
+                                                page: _page!,
+                                                onSaved: _accept,
+                                              ),
+                                            ),
+                                          )
+                                        : null,
+                                    child: const Text('Cancel order'),
+                                  ),
+                                if (mapOf(
+                                      _page!.props['returnAvailability'],
+                                    )['can_request'] ==
+                                    true)
+                                  OutlinedButton(
+                                    onPressed: canAct
+                                        ? () => Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => ReturnsPage(
+                                                repository: widget.repository,
+                                                orderId: widget.orderId,
+                                              ),
+                                            ),
+                                          )
+                                        : null,
+                                    child: const Text('Request return/refund'),
+                                  ),
+                                if (order['wallet_payment'] is Map)
+                                  TextButton(
+                                    onPressed: canAct
+                                        ? () => perform(() async {
+                                            await openWalletPayment(
+                                              context,
+                                              widget.repository,
+                                              (mapOf(
+                                                        order['wallet_payment'],
+                                                      )['id']
+                                                      as num)
+                                                  .toInt(),
+                                            );
+                                            _accept(
+                                              await widget.repository.order(
+                                                widget.orderId,
+                                              ),
+                                            );
+                                            return null;
+                                          }, validate: false)
+                                        : null,
+                                    child: const Text('Review wallet payment'),
+                                  ),
+                              ],
+                            ),
+                            if (_page!.props['cancellationReason'] != null)
+                              Text(
+                                'Cancellation reason: ${_page!.props['cancellationReason']}',
+                                style: const TextStyle(height: 1.7),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (claim.isNotEmpty)
+                        ProfilePanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              if (_page!.props['canConfirmReceipt'] == true)
+                              const ProfileHeading(
+                                'Bayan Hub collection',
+                                'Bring your valid photo ID. COD parcels require the recorded cash payment; a paid wallet parcel requires no cash.',
+                                Icons.storefront_outlined,
+                              ),
+                              Text(
+                                '${mapOf(_page!.props['pickupHub'])['name'] ?? 'Assigned hub'}\n${mapOf(_page!.props['pickupHub'])['address'] ?? ''}\n${mapOf(_page!.props['pickupHub'])['operating_hours'] ?? 'Contact the hub for operating hours.'}\nCollect before: ${readableDateTime(claim['expires_at'])}',
+                                style: const TextStyle(height: 1.7),
+                              ),
+                              if (_code != null && readyForPickup)
+                                Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: SelectableText(
+                                    _code!,
+                                    style: const TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              if (_code == null &&
+                                  claim['code_issued_at'] != null)
+                                const Text(
+                                  'Your code was already shown. Use the code you saved; contact the hub if it was lost.',
+                                  style: TextStyle(height: 1.7),
+                                ),
+                              if (readyForPickup &&
+                                  _page!.props['pickupCodeAvailable'] == true &&
+                                  claim['code_issued_at'] == null &&
+                                  _code == null)
                                 FilledButton(
-                                  onPressed: canAct ? _confirm : null,
-                                  child: const Text('Confirm Received'),
+                                  onPressed: canAct ? _pickup : null,
+                                  child: const Text('Show my code once'),
+                                ),
+                              if (!readyForPickup)
+                                Text(
+                                  'Collection status: ${claim['status']}. Refresh tracking to check current collection authority. ${claim['locked_until'] == null ? '' : 'Locked until ${readableDateTime(claim['locked_until'])}.'}',
+                                  style: const TextStyle(height: 1.7),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ProfilePanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const ProfileHeading(
+                              'Purchased items',
+                              'Original item options, quantities, and recorded prices.',
+                              Icons.shopping_bag_outlined,
+                            ),
+                            for (final item in mapsOf(order['items'])) ...[
+                              OrderItemSummary(
+                                item: item,
+                                session: widget.repository.session,
+                                repository: widget.repository.buyer,
+                              ),
+                              if (item['review'] is Map)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: Text(
+                                    'Your rating: ${mapOf(item['review'])['rating']} / 5\n${mapOf(item['review'])['comment'] ?? ''}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.7,
+                                    ),
+                                  ),
                                 ),
                               if (userCan &&
-                                  _page!.props['buyAgainToken'] is String)
-                                OutlinedButton(
-                                  onPressed: canAct
-                                      ? () => perform(() async {
-                                          await buyAgain(
-                                            context,
-                                            widget.repository,
-                                            widget.orderId,
-                                            _page!.props['buyAgainToken'],
-                                          );
-                                          return null;
-                                        }, validate: false)
-                                      : null,
-                                  child: const Text('Buy again'),
-                                ),
-                              if (_page!.props['cancelOrderUrl'] is String)
-                                OutlinedButton(
+                                  order['status'] == 'completed' &&
+                                  (item['review'] == null ||
+                                      mapOf(item['review'])['edit_url']
+                                          is String))
+                                TextButton.icon(
                                   onPressed: canAct
                                       ? () => Navigator.of(context).push(
                                           MaterialPageRoute<void>(
-                                            builder: (_) => _CancelOrderPage(
+                                            builder: (_) => _ReviewPage(
                                               repository: widget.repository,
-                                              page: _page!,
+                                              item: item,
+                                              orderId: widget.orderId,
                                               onSaved: _accept,
                                             ),
                                           ),
                                         )
                                       : null,
-                                  child: const Text('Cancel order'),
+                                  icon: const Icon(Icons.star_outline),
+                                  label: Text(
+                                    item['review'] == null
+                                        ? 'Rate & review purchased item'
+                                        : 'Edit your review',
+                                  ),
                                 ),
+                              const Divider(height: 24),
+                            ],
+                            Text(
+                              'Subtotal: ${pesos(order['subtotal'])}\nDelivery: ${pesos(order['shipping_fee'])}\nDiscount: ${pesos(order['voucher_discount'])}\nTotal: ${pesos(order['total_amount'])}\nPayment: ${order['payment_method']} · ${order['payment_status']}',
+                              style: const TextStyle(
+                                height: 1.8,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (order['voucher_receipt'] is Map)
+                        ProfilePanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const ProductHeading('Original voucher receipt'),
+                              VoucherReceipt(
+                                receipt: mapOf(order['voucher_receipt']),
+                                paymentMethod:
+                                    order['payment_method']?.toString() ??
+                                    'cod',
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (order['delivery'] is Map)
+                        ProfilePanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const ProductHeading('Package details'),
+                              for (final entry in const {
+                                'tracking_number': 'Tracking number',
+                                'logistics_partner': 'Logistics partner',
+                                'pickup_store_name': 'Pickup shop',
+                                'pickup_address': 'Pickup address',
+                                'delivery_recipient_name': 'Recipient',
+                                'delivery_address': 'Delivery address',
+                                'courier_notes': 'Courier notes',
+                              }.entries)
+                                if (mapOf(order['delivery'])[entry.key] != null)
+                                  Text(
+                                    '${entry.value}: ${mapOf(order['delivery'])[entry.key]}',
+                                    style: const TextStyle(height: 1.7),
+                                  ),
                               if (mapOf(
-                                    _page!.props['returnAvailability'],
-                                  )['can_request'] ==
-                                  true)
-                                OutlinedButton(
-                                  onPressed: canAct
-                                      ? () => Navigator.of(context).push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) => ReturnsPage(
-                                              repository: widget.repository,
-                                              orderId: widget.orderId,
-                                            ),
-                                          ),
-                                        )
-                                      : null,
-                                  child: const Text('Request return/refund'),
-                                ),
-                              if (order['wallet_payment'] is Map)
-                                TextButton(
-                                  onPressed: canAct
-                                      ? () => perform(() async {
-                                          await openWalletPayment(
-                                            context,
-                                            widget.repository,
-                                            (mapOf(
-                                                      order['wallet_payment'],
-                                                    )['id']
-                                                    as num)
-                                                .toInt(),
-                                          );
-                                          _accept(
-                                            await widget.repository.order(
-                                              widget.orderId,
-                                            ),
-                                          );
-                                          return null;
-                                        }, validate: false)
-                                      : null,
-                                  child: const Text('Review wallet payment'),
+                                    mapOf(order['delivery'])['courier'],
+                                  )['name'] !=
+                                  null)
+                                Text(
+                                  'Courier: ${mapOf(mapOf(order['delivery'])['courier'])['name']}',
+                                  style: const TextStyle(height: 1.7),
                                 ),
                             ],
                           ),
-                          if (_page!.props['cancellationReason'] != null)
-                            Text(
-                              'Cancellation reason: ${_page!.props['cancellationReason']}',
-                              style: const TextStyle(height: 1.7),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (claim.isNotEmpty)
-                      ProfilePanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const ProfileHeading(
-                              'Bayan Hub collection',
-                              'Bring your valid photo ID. COD parcels require the recorded cash payment; a paid wallet parcel requires no cash.',
-                              Icons.storefront_outlined,
-                            ),
-                            Text(
-                              '${mapOf(_page!.props['pickupHub'])['name'] ?? 'Assigned hub'}\n${mapOf(_page!.props['pickupHub'])['address'] ?? ''}\n${mapOf(_page!.props['pickupHub'])['operating_hours'] ?? 'Contact the hub for operating hours.'}\nCollect before: ${readableDateTime(claim['expires_at'])}',
-                              style: const TextStyle(height: 1.7),
-                            ),
-                            if (_code != null && readyForPickup)
-                              Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: SelectableText(
-                                  _code!,
-                                  style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            if (_code == null &&
-                                claim['code_issued_at'] != null)
-                              const Text(
-                                'Your code was already shown. Use the code you saved; contact the hub if it was lost.',
-                                style: TextStyle(height: 1.7),
-                              ),
-                            if (readyForPickup &&
-                                _page!.props['pickupCodeAvailable'] == true &&
-                                claim['code_issued_at'] == null &&
-                                _code == null)
-                              FilledButton(
-                                onPressed: canAct ? _pickup : null,
-                                child: const Text('Show my code once'),
-                              ),
-                            if (!readyForPickup)
-                              Text(
-                                'Collection status: ${claim['status']}. Refresh tracking to check current collection authority. ${claim['locked_until'] == null ? '' : 'Locked until ${readableDateTime(claim['locked_until'])}.'}',
-                                style: const TextStyle(height: 1.7),
-                              ),
-                          ],
                         ),
-                      ),
-                    ProfilePanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const ProfileHeading(
-                            'Purchased items',
-                            'Original item options, quantities, and recorded prices.',
-                            Icons.shopping_bag_outlined,
-                          ),
-                          for (final item in mapsOf(order['items'])) ...[
-                            OrderItemSummary(
-                              item: item,
-                              session: widget.repository.session,
-                              repository: widget.repository.buyer,
-                            ),
-                            if (item['review'] is Map)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Text(
-                                  'Your rating: ${mapOf(item['review'])['rating']} / 5\n${mapOf(item['review'])['comment'] ?? ''}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    height: 1.7,
-                                  ),
-                                ),
-                              ),
-                            if (userCan &&
-                                order['status'] == 'completed' &&
-                                (item['review'] == null ||
-                                    mapOf(item['review'])['edit_url']
-                                        is String))
-                              TextButton.icon(
-                                onPressed: canAct
-                                    ? () => Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) => _ReviewPage(
-                                            repository: widget.repository,
-                                            item: item,
-                                            orderId: widget.orderId,
-                                            onSaved: _accept,
-                                          ),
-                                        ),
-                                      )
-                                    : null,
-                                icon: const Icon(Icons.star_outline),
-                                label: Text(
-                                  item['review'] == null
-                                      ? 'Rate & review purchased item'
-                                      : 'Edit your review',
-                                ),
-                              ),
-                            const Divider(height: 24),
-                          ],
-                          Text(
-                            'Subtotal: ${pesos(order['subtotal'])}\nDelivery: ${pesos(order['shipping_fee'])}\nDiscount: ${pesos(order['voucher_discount'])}\nTotal: ${pesos(order['total_amount'])}\nPayment: ${order['payment_method']} · ${order['payment_status']}',
-                            style: const TextStyle(
-                              height: 1.8,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (order['voucher_receipt'] is Map)
-                      ProfilePanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const ProductHeading('Original voucher receipt'),
-                            VoucherReceipt(
-                              receipt: mapOf(order['voucher_receipt']),
-                              paymentMethod:
-                                  order['payment_method']?.toString() ?? 'cod',
-                            ),
-                          ],
-                        ),
-                      ),
-                    if (order['delivery'] is Map)
                       ProfilePanel(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const ProductHeading('Package details'),
-                            for (final entry in const {
-                              'tracking_number': 'Tracking number',
-                              'logistics_partner': 'Logistics partner',
-                              'pickup_store_name': 'Pickup shop',
-                              'pickup_address': 'Pickup address',
-                              'delivery_recipient_name': 'Recipient',
-                              'delivery_address': 'Delivery address',
-                              'courier_notes': 'Courier notes',
-                            }.entries)
-                              if (mapOf(order['delivery'])[entry.key] != null)
-                                Text(
-                                  '${entry.value}: ${mapOf(order['delivery'])[entry.key]}',
-                                  style: const TextStyle(height: 1.7),
-                                ),
-                            if (mapOf(
-                                  mapOf(order['delivery'])['courier'],
-                                )['name'] !=
-                                null)
-                              Text(
-                                'Courier: ${mapOf(mapOf(order['delivery'])['courier'])['name']}',
-                                style: const TextStyle(height: 1.7),
-                              ),
+                            const ProfileHeading(
+                              'Delivery recipient',
+                              'Existing orders retain the delivery details recorded at checkout.',
+                              Icons.location_on_outlined,
+                            ),
+                            Text(
+                              '${order['recipient_name'] ?? order['shipping_name'] ?? 'Not recorded'}\n${order['recipient_phone'] ?? order['shipping_phone'] ?? ''}\n${order['shipping_address'] ?? ''}\n${order['destination_barangay'] ?? ''}, ${order['shipping_city'] ?? ''}, ${order['shipping_province'] ?? ''} ${order['shipping_postal_code'] ?? ''}',
+                              style: const TextStyle(height: 1.8),
+                            ),
                           ],
                         ),
                       ),
-                    ProfilePanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const ProfileHeading(
-                            'Delivery recipient',
-                            'Existing orders retain the delivery details recorded at checkout.',
-                            Icons.location_on_outlined,
-                          ),
-                          Text(
-                            '${order['recipient_name'] ?? order['shipping_name'] ?? 'Not recorded'}\n${order['recipient_phone'] ?? order['shipping_phone'] ?? ''}\n${order['shipping_address'] ?? ''}\n${order['destination_barangay'] ?? ''}, ${order['shipping_city'] ?? ''}, ${order['shipping_province'] ?? ''} ${order['shipping_postal_code'] ?? ''}',
-                            style: const TextStyle(height: 1.8),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (mapsOf(_page!.props['buyerReturns']).isNotEmpty)
-                      ProfilePanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const ProfileHeading(
-                              'Returns & Refunds',
-                              '',
-                              Icons.assignment_return_outlined,
-                            ),
-                            for (final item in mapsOf(
-                              _page!.props['buyerReturns'],
-                            ))
-                              ListTile(
-                                title: Text(item['reference'].toString()),
-                                subtitle: Text(item['status'].toString()),
-                                trailing: const Icon(Icons.chevron_right),
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => ReturnsPage(
-                                      repository: widget.repository,
-                                      caseId: (item['id'] as num).toInt(),
+                      if (mapsOf(_page!.props['buyerReturns']).isNotEmpty)
+                        ProfilePanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const ProfileHeading(
+                                'Returns & Refunds',
+                                '',
+                                Icons.assignment_return_outlined,
+                              ),
+                              for (final item in mapsOf(
+                                _page!.props['buyerReturns'],
+                              ))
+                                ListTile(
+                                  title: Text(item['reference'].toString()),
+                                  subtitle: Text(item['status'].toString()),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => ReturnsPage(
+                                        repository: widget.repository,
+                                        caseId: (item['id'] as num).toInt(),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
+                        ),
+                      ProfilePanel(
+                        child: OrderJourney(
+                          order: order,
+                          notices: mapsOf(_page!.props['orderNotices']),
+                          busy: busy,
+                          onRead: (id) => perform(() async {
+                            await BuyerEngagementRepository(
+                              widget.repository.buyer,
+                            ).markNotificationRead(id);
+                            _accept(
+                              await widget.repository.order(widget.orderId),
+                            );
+                            return 'Order update marked read.';
+                          }, validate: false),
                         ),
                       ),
-                    ProfilePanel(
-                      child: OrderJourney(
-                        order: order,
-                        notices: mapsOf(_page!.props['orderNotices']),
-                        busy: busy,
-                        onRead: (id) => perform(() async {
-                          await BuyerEngagementRepository(
-                            widget.repository.buyer,
-                          ).markNotificationRead(id);
-                          _accept(
-                            await widget.repository.order(widget.orderId),
-                          );
-                          return 'Order update marked read.';
-                        }, validate: false),
-                      ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),

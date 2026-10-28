@@ -163,11 +163,12 @@ class _ChatPageState extends State<ChatPage> {
       });
       return ReadOutcome.retry;
     } catch (_) {
-      if (mounted && ticket.isCurrent)
+      if (mounted && ticket.isCurrent) {
         setState(() {
           _updateError = 'Messages could not update. Retrying automatically.';
           _loading = false;
         });
+      }
       return ReadOutcome.retry;
     }
   }
