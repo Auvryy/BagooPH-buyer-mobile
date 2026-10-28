@@ -111,6 +111,7 @@ class _ChatPageState extends State<ChatPage> {
       _text.clear();
       _attachment = null;
       _intent = _intentText = null;
+      _error = null;
       _updateError = message;
       _loading = _sending = false;
     });

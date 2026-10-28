@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
+import 'package:bagoo_buyer_mobile/core/uploads.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/order_detail_page.dart';
@@ -48,6 +49,22 @@ WebPage orderPage({String status = 'Preparing', int owner = 7}) =>
       'canUsePortal': false,
       'orderNotices': [],
     });
+
+class OrderActionSession extends ControlledWebSession {
+  int submissions = 0;
+  @override
+  Future<WebPage> submit(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+    List<UploadPart>? files,
+  }) async {
+    expect(path, '/buyer/orders/11/confirm');
+    submissions++;
+    return orderPage(status: 'Completed');
+  }
+}
 
 void main() {
   testWidgets('inbox updates unread badges while preserving search', (
@@ -195,6 +212,48 @@ void main() {
       expect(find.textContaining('could not be confirmed'), findsOneWidget);
       await tester.pump(const Duration(minutes: 5));
       expect(session.pageRequests, hasLength(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'an earlier order read cannot undo an explicitly confirmed receipt',
+    (tester) async {
+      final session = OrderActionSession();
+      addTearDown(session.close);
+      final delivered = orderPage(status: 'Delivered');
+      delivered.props['canConfirmReceipt'] = true;
+      session.onPage = (_) async => delivered;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: OrderDetailPage(
+            repository: ProfileRepository(BuyerRepository(session)),
+            orderId: 11,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final pending = Completer<WebPage>();
+      session.onPage = (_) => pending.future;
+      await tester.pump(const Duration(seconds: 15));
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Confirm Received').first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Confirm Received').last,
+      );
+      await tester.pumpAndSettle();
+      expect(session.submissions, 1);
+      expect(find.text('Completed'), findsOneWidget);
+      session.onPage = (_) async => orderPage(status: 'Completed');
+      pending.complete(delivered);
+      await tester.pumpAndSettle();
+      expect(find.text('Completed'), findsOneWidget);
+      expect(find.text('Delivered'), findsNothing);
+      expect(session.submissions, 1);
+      expect(session.posts, isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

@@ -137,6 +137,8 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     _claimTimer?.cancel();
     _page = null;
     _code = null;
+    success = null;
+    errors = {};
     _refreshing = false;
   }
 
@@ -171,6 +173,8 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   }
 
   Future<ReadOutcome> _read(ReadTicket ticket) async {
+    final clearActionError = _manualRefresh;
+    _manualRefresh = false;
     if (mounted) setState(() => _refreshing = true);
     try {
       if (_identityEpoch != widget.repository.session.identityEpoch) {
@@ -186,10 +190,9 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
       _accept(page);
       setState(() {
         _updateError = null;
-        if (_manualRefresh) {
+        if (clearActionError) {
           problem = null;
           errors = {};
-          _manualRefresh = false;
         }
       });
       return ReadOutcome.success;
