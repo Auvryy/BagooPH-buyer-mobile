@@ -965,12 +965,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     const SizedBox(height: 24),
                     TextButton(
                       onPressed: () async {
-                        await widget.repository.catalogueCache.clear();
+                        final cleared = await widget.repository.catalogueCache
+                            .clear();
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
+                            SnackBar(
                               content: Text(
-                                'Saved browsing data cleared from this device.',
+                                cleared
+                                    ? 'Saved browsing data cleared from this device.'
+                                    : 'Cleared for this session. Device storage is unavailable; try again to remove saved copies.',
                               ),
                             ),
                           );

@@ -312,6 +312,23 @@ void main() {
   );
 
   test(
+    'failed device deletion is reported while the in-process cache is cleared',
+    () async {
+      final origin = Uri.parse('https://catalogue.test');
+      final vault = CatalogueVault();
+      final cache = CatalogueCache(origin: origin, vault: vault);
+      await cache.save('home:', homePage());
+      vault.fail = true;
+      expect(await cache.clear(), isFalse);
+      expect(await cache.read('home:'), isNull);
+      expect(vault.values, isNotEmpty);
+      vault.fail = false;
+      expect(await cache.clear(), isTrue);
+      expect(vault.values, isEmpty);
+    },
+  );
+
+  test(
     'public fallback does not replace a known in-memory buyer with a guest',
     () async {
       final repo = FakeBuyerRepository();

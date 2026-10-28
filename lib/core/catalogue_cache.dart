@@ -91,15 +91,17 @@ class CatalogueCache {
   String _encode() =>
       jsonEncode({'version': 1, 'origin': origin.origin, 'entries': _entries});
 
-  Future<void> _persist() async {
+  Future<bool> _persist() async {
     try {
       if (_entries.isEmpty) {
         await vault?.delete(_key);
       } else {
         await vault?.write(_key, _encode());
       }
+      return true;
     } catch (_) {
       /* A memory cache remains useful without native storage. */
+      return false;
     }
   }
 
@@ -148,12 +150,12 @@ class CatalogueCache {
     await _persist();
   });
 
-  Future<void> clear() {
+  Future<bool> clear() {
     _generation++;
     return _serial(() async {
       _loaded = true;
       _entries.clear();
-      await _persist();
+      return _persist();
     });
   }
 }
