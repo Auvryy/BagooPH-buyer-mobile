@@ -73,6 +73,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   String _address = 'new';
   String? _hub;
   int? _company;
+  bool _hasCompanyContract = false;
   List<Map<String, dynamic>> _companies = [];
   bool _locating = false;
   String? _locationFeedback;
@@ -94,6 +95,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   void initState() {
     super.initState();
     _page = widget.initial;
+    _hasCompanyContract = _page.props.containsKey('logisticsCompanies');
     _quote = mapOf(_page.props['quote']);
     _offers = mapsOf(_page.props['availableVouchers']);
     _fields['voucher_code']!.text = widget.voucherCode ?? '';
@@ -123,7 +125,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     'shipping_city': _location['city'],
     'shipping_province': _location['province'],
     'destination_barangay': _location['barangay'],
-    'logistics_company_id': _company,
+    if (_hasCompanyContract) 'logistics_company_id': _company,
     'delivery_type': _delivery,
     'pickup_hub_id': _delivery == 'hub_self_pickup'
         ? int.tryParse(_hub ?? '')
@@ -144,7 +146,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     'shipping_province': _location['province'],
     'shipping_postal_code': _fields['shipping_postal_code']!.text.trim(),
     'destination_barangay': _location['barangay'],
-    'logistics_company_id': _company,
+    if (_hasCompanyContract) 'logistics_company_id': _company,
     'code': _fields['voucher_code']!.text.trim().toUpperCase(),
     'platform_voucher_revision_id': _platformVoucher,
     'shop_voucher_revision_ids': Map.of(_shopVouchers),
@@ -215,6 +217,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       );
     }
     _companies = rows;
+    _hasCompanyContract = true;
     if (_fields['shipping_postal_code']!.text.trim().length == 4 &&
         !_companies.any((row) => row['id'] == _company)) {
       _company = null;
@@ -346,8 +349,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       setState(() {
         _quote = quote;
         _offers = mapsOf(data['availableVouchers']);
-        _ready = _company != null;
-        if (_company == null) {
+        _ready = !_hasCompanyContract || _company != null;
+        if (!_ready) {
           _error =
               'Choose a serving logistics company before reviewing this order.';
         }
@@ -466,7 +469,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
         );
       }
       if (mounted) {
-        setState(() => _page = fresh);
+        setState(() {
+          _page = fresh;
+          _hasCompanyContract = fresh.props.containsKey('logisticsCompanies');
+          _readCompanies(fresh.props);
+        });
         await _updateQuote();
       }
     } on BackendException catch (e) {
@@ -557,9 +564,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ),
                     const SizedBox(height: 8),
                   ],
-                  Text(
-                    'Logistics: ${_companies.where((row) => row['id'] == payload['logistics_company_id']).firstOrNull?['name'] ?? 'Recorded company'}',
-                  ),
+                  if (_hasCompanyContract)
+                    Text(
+                      'Logistics: ${_companies.where((row) => row['id'] == payload['logistics_company_id']).firstOrNull?['name'] ?? 'Recorded company'}',
+                    ),
                   const SizedBox(height: 12),
                   Text(
                     payload['delivery_type'] == 'hub_self_pickup'
@@ -1159,50 +1167,59 @@ class _CheckoutPageState extends State<CheckoutPage> {
       children: [
         const ProductHeading('Delivery method'),
         const SizedBox(height: 12),
-        DropdownButtonFormField<int>(
-          key: ValueKey(
-            'company-$_company-${_companies.map((row) => row['id']).join('-')}',
-          ),
-          initialValue: _companies.any((row) => row['id'] == _company)
-              ? _company
-              : null,
-          isExpanded: true,
-          itemHeight: null,
-          decoration: InputDecoration(
-            labelText: 'Logistics company',
-            errorText: _fieldErrors['logistics_company_id'],
-          ),
-          items: [
-            for (final company in _companies)
-              DropdownMenuItem(
-                value: (company['id'] as num).toInt(),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(company['name'].toString()),
+        if (_hasCompanyContract) ...[
+          DropdownButtonFormField<int>(
+            key: ValueKey(
+              'company-$_company-${_companies.map((row) => row['id']).join('-')}',
+            ),
+            initialValue: _companies.any((row) => row['id'] == _company)
+                ? _company
+                : null,
+            isExpanded: true,
+            itemHeight: null,
+            decoration: InputDecoration(
+              labelText: 'Logistics company',
+              errorText: _fieldErrors['logistics_company_id'],
+            ),
+            items: [
+              for (final company in _companies)
+                DropdownMenuItem(
+                  value: (company['id'] as num).toInt(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(company['name'].toString()),
+                  ),
                 ),
-              ),
-          ],
-          onChanged: _frozen || _submitting
-              ? null
-              : (value) {
-                  setState(() {
-                    _company = value;
-                    _hub = null;
-                  });
-                  _edit();
-                },
-          validator: (_) =>
-              _company == null ? 'Choose a serving logistics company.' : null,
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text(
-            _companies.isEmpty
-                ? 'No company choices are currently available. Complete or review the address and refresh the quote.'
-                : 'Companies must serve both seller and recipient. Shipping uses the greater of actual and volumetric weight.',
-            style: const TextStyle(fontSize: 12, height: 1.7),
+            ],
+            onChanged: _frozen || _submitting
+                ? null
+                : (value) {
+                    setState(() {
+                      _company = value;
+                      _hub = null;
+                    });
+                    _edit();
+                  },
+            validator: (_) =>
+                _company == null ? 'Choose a serving logistics company.' : null,
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              _companies.isEmpty
+                  ? 'No company choices are currently available. Complete or review the address and refresh the quote.'
+                  : 'Companies must serve both seller and recipient. Shipping uses the greater of actual and volumetric weight.',
+              style: const TextStyle(fontSize: 12, height: 1.7),
+            ),
+          ),
+        ] else
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Your delivery partner and fees are assigned by Bagoo and confirmed in the quote.',
+              style: TextStyle(fontSize: 12, height: 1.7),
+            ),
+          ),
         CheckoutChoice(
           title: 'Doorstep delivery',
           description: 'Delivered to your recipient address. Shipping is calculated separately for each shop.',
@@ -1232,7 +1249,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
             itemHeight: null,
             decoration: const InputDecoration(labelText: 'Pickup Bayan Hub'),
             items: mapsOf(_page.props['pickupHubs'])
-                .where((hub) => hub['logistics_company_id'] == _company)
+                .where(
+                  (hub) =>
+                      !_hasCompanyContract ||
+                      hub['logistics_company_id'] == _company,
+                )
                 .map(
                   (h) => DropdownMenuItem(
                     value: h['id'].toString(),

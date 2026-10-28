@@ -35,6 +35,46 @@ void main() {
   }
 
   testWidgets(
+    'older checkout contracts retain their existing server-quoted flow',
+    (tester) async {
+      final props = Map<String, dynamic>.from(checkoutPage().props)
+        ..remove('logisticsCompanies');
+      final requests = <Map<String, dynamic>>[];
+      repo.quoteHandler = (values) async {
+        requests.add(values);
+        return {'success': true, 'quote': props['quote']};
+      };
+      await open(tester, WebPage('Checkout/Index', props));
+      expect(find.byType(DropdownButtonFormField<int>), findsNothing);
+      expect(requests.last.containsKey('logistics_company_id'), isFalse);
+      await press(tester, find.widgetWithText(FilledButton, 'Review order'));
+      expect(find.text('Confirm your order'), findsOneWidget);
+      expect(repo.orderCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'an explicit empty serving-company list cannot use the older checkout flow',
+    (tester) async {
+      final props = {
+        ...checkoutPage().props,
+        'logisticsCompanies': <Map<String, dynamic>>[],
+      };
+      await open(tester, WebPage('Checkout/Index', props));
+      expect(find.byType(DropdownButtonFormField<int>), findsOneWidget);
+      expect(
+        tester
+            .widgetList<FilledButton>(
+              find.widgetWithText(FilledButton, 'Review order'),
+            )
+            .every((button) => button.onPressed == null),
+        isTrue,
+      );
+      expect(repo.orderCalls, 0);
+    },
+  );
+
+  testWidgets(
     'quotes include route context and orders retain saved coordinates',
     (tester) async {
       final requests = <Map<String, dynamic>>[];
