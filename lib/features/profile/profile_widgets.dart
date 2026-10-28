@@ -10,7 +10,7 @@ import 'profile_repository.dart';
 export '../../core/file_selection.dart' show pickUpload;
 
 class ProfilePanel extends StatelessWidget {
-  const ProfilePanel({super.key, required this.child, this.padding = 24});
+  const ProfilePanel({super.key, required this.child, this.padding = 20});
   final Widget child;
   final double padding;
   @override
@@ -20,8 +20,8 @@ class ProfilePanel extends StatelessWidget {
     margin: const EdgeInsets.only(bottom: 16),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: const Color(0xFFE2E8F0)),
+      borderRadius: BorderRadius.circular(BagooTheme.panelRadius),
+      border: Border.all(color: BagooTheme.line),
       boxShadow: const [
         BoxShadow(
           color: Color(0x040F172A),

@@ -14,12 +14,12 @@ class ProductPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
-    margin: const EdgeInsets.only(bottom: 20),
+    margin: const EdgeInsets.only(bottom: 16),
     padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE2E8F0)),
+      borderRadius: BorderRadius.circular(BagooTheme.panelRadius),
+      border: Border.all(color: BagooTheme.line),
       boxShadow: const [
         BoxShadow(
           color: Color(0x070F172A),

@@ -60,8 +60,8 @@ void main() {
         expect(find.text('-20%'), findsOneWidget);
         await tester.tap(find.text('₱1,200.00'));
         expect(opened, 1);
-        await tester.ensureVisible(find.text('Remove from saved').first);
-        await tester.tap(find.text('Remove from saved').first);
+        await tester.ensureVisible(find.byTooltip('Remove from saved').first);
+        await tester.tap(find.byTooltip('Remove from saved').first);
         expect(saved, 1);
         expect(opened, 1);
       },

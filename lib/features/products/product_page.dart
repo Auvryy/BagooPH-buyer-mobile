@@ -466,6 +466,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       if (s.page.cachedAt case final savedAt?)
                         CachedCatalogueNotice(
                           savedAt: savedAt,
+                          refreshing: _loading,
                           onRefresh: _loading || _busy
                               ? null
                               : () => _load(quiet: true),

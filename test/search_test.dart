@@ -132,7 +132,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        if (layout.$1 < 1050) await press(tester, find.text('Filters'));
+        if (layout.$1 < 1050) await press(tester, find.byTooltip('Filters'));
         expect(find.text('Filter by'), findsOneWidget);
         final min = find.widgetWithText(TextFormField, 'Minimum price');
         await tester.ensureVisible(min);

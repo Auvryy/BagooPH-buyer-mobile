@@ -14,6 +14,8 @@ import '../products/product_widgets.dart';
 import 'search_controller.dart';
 import 'search_filters.dart';
 import 'product_card.dart';
+import 'browse_controls.dart';
+import 'catalogue_loading.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, required this.repository, this.request});
@@ -138,7 +140,11 @@ class _SearchPageState extends State<SearchPage> {
       onTap: () => _open(product),
       saved: saved,
       saving: _saving.contains(id),
-      saveLabel: _catalogue.data?.isCached == true
+      saveLabel: _catalogue.loading
+          ? 'Updating products'
+          : _catalogue.error != null
+          ? 'Refresh to save'
+          : _catalogue.data?.isCached == true
           ? 'Connect to save'
           : _catalogue.user == null
           ? 'Sign in to save'
@@ -148,7 +154,9 @@ class _SearchPageState extends State<SearchPage> {
           ? 'Remove from saved'
           : 'Save product',
       onSave:
-          _catalogue.data?.isCached == true ||
+          _catalogue.loading ||
+              _catalogue.error != null ||
+              _catalogue.data?.isCached == true ||
               _catalogue.user != null && !_canSave
           ? null
           : () => _save(product, saved),
@@ -205,9 +213,7 @@ class _SearchPageState extends State<SearchPage> {
       final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
       final count = productColumns(box.maxWidth, scale);
       final width = (box.maxWidth - 32 - (count - 1) * 14) / count;
-      final related = !_catalogue.loading && _catalogue.error == null
-          ? _catalogue.related
-          : <Map<String, dynamic>>[];
+      final related = _catalogue.related;
       return RefreshIndicator(
         onRefresh: _catalogue.load,
         child: CustomScrollView(
@@ -232,19 +238,15 @@ class _SearchPageState extends State<SearchPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Discover products from Bagoo shops.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.7,
-                          color: BagooTheme.muted,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      TextField(
+                      const SizedBox(height: 16),
+                      BrowseSearchField(
                         controller: _text,
-                        maxLength: 100,
-                        textInputAction: TextInputAction.search,
+                        label: 'Search products',
+                        clearable: true,
+                        showFilters: !wide,
+                        filterLabel:
+                            'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
+                        onFilters: _catalogue.data == null ? null : _filters,
                         onSubmitted: (_) {
                           FocusScope.of(context).unfocus();
                           _search();
@@ -257,60 +259,8 @@ class _SearchPageState extends State<SearchPage> {
                             _search,
                           );
                         },
-                        decoration: InputDecoration(
-                          labelText: 'Search the marketplace',
-                          hintText: 'Products, shops, or departments',
-                          counterText: '',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: IconButton(
-                            tooltip: _text.text.isEmpty
-                                ? 'Search products'
-                                : 'Clear search',
-                            onPressed: () {
-                              if (_text.text.isNotEmpty) _text.clear();
-                              _search();
-                            },
-                            icon: Icon(
-                              _text.text.isEmpty
-                                  ? Icons.arrow_forward
-                                  : Icons.close,
-                            ),
-                          ),
-                        ),
                       ),
-                      const SizedBox(height: 16),
-                      if (!wide) ...[
-                        OutlinedButton.icon(
-                          onPressed: _catalogue.data == null ? null : _filters,
-                          icon: const Icon(Icons.tune),
-                          label: Text(
-                            'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      DropdownButtonFormField<String>(
-                        key: ValueKey(filters.sort),
-                        initialValue: filters.sort,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Sort results',
-                        ),
-                        items: [
-                          for (final sort in searchSorts.entries)
-                            DropdownMenuItem(
-                              value: sort.key,
-                              child: Text(sort.value),
-                            ),
-                        ],
-                        onChanged: (value) => _apply(
-                          filters.copyWith(
-                            sort: value,
-                            query: _text.text.trim(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
                       _chips(),
                     ],
                   ),
@@ -323,13 +273,18 @@ class _SearchPageState extends State<SearchPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_catalogue.loading)
-                      const LinearProgressIndicator(
-                        semanticsLabel: 'Searching products',
-                      ),
+                    SizedBox(
+                      height: 4,
+                      child: _catalogue.loading
+                          ? const LinearProgressIndicator(
+                              semanticsLabel: 'Searching products',
+                            )
+                          : null,
+                    ),
                     if (_catalogue.data?.cachedAt case final savedAt?)
                       CachedCatalogueNotice(
                         savedAt: savedAt,
+                        refreshing: _catalogue.loading,
                         onRefresh: _catalogue.loading ? null : _catalogue.load,
                       ),
                     if (_catalogue.error != null) ...[
@@ -339,16 +294,53 @@ class _SearchPageState extends State<SearchPage> {
                         child: const Text('Try again'),
                       ),
                     ],
-                    if (!_catalogue.loading && _catalogue.error == null)
-                      Semantics(
-                        liveRegion: true,
-                        child: Text(
-                          '${_catalogue.total} ${filters.query.trim().isEmpty ? 'products to discover' : 'results for “${filters.query.trim()}”'}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            height: 1.7,
+                    if (_catalogue.error == null || _catalogue.data != null)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                child: Text(
+                                  _catalogue.error != null
+                                      ? 'Showing previous results'
+                                      : _catalogue.loading
+                                      ? 'Updating results…'
+                                      : '${_catalogue.total} ${filters.query.trim().isEmpty ? 'products to discover' : 'results for “${filters.query.trim()}”'}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.6,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              _debounce?.cancel();
+                              final selected = await showBuyerSort(
+                                context,
+                                filters.sort,
+                              );
+                              if (mounted &&
+                                  selected != null &&
+                                  selected != filters.sort) {
+                                _apply(
+                                  filters.copyWith(
+                                    sort: selected,
+                                    query: _text.text.trim(),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.sort_rounded, size: 18),
+                            label: const Text('Sort'),
+                          ),
+                        ],
                       ),
                     if (!_catalogue.loading &&
                         _catalogue.error == null &&
@@ -400,12 +392,14 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
+            if (_catalogue.loading &&
+                _catalogue.products.isEmpty &&
+                _catalogue.error == null)
+              CatalogueLoadingGrid(columns: count),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverGrid.builder(
-                itemCount: _catalogue.loading || _catalogue.error != null
-                    ? 0
-                    : _catalogue.products.length,
+                itemCount: _catalogue.products.length,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: count,
                   crossAxisSpacing: 14,
@@ -422,14 +416,14 @@ class _SearchPageState extends State<SearchPage> {
                   children: [
                     if (_catalogue.moreError != null)
                       Notice(_catalogue.moreError!, error: true),
-                    if (!_catalogue.loading && _catalogue.error == null)
+                    if (_catalogue.data != null)
                       CataloguePages(
                         current: _catalogue.currentPage,
                         last: _catalogue.lastPage,
                         total: _catalogue.total,
                         from: _catalogue.from,
                         to: _catalogue.to,
-                        busy: _catalogue.loadingMore,
+                        busy: _catalogue.loadingMore || _catalogue.loading,
                         onPage: (number) {
                           _catalogue.load(pageNumber: number);
                           if (_scroll.hasClients) _scroll.jumpTo(0);
