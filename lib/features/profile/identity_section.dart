@@ -438,6 +438,9 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
           'sex',
           'address',
           'city',
+          'province',
+          'municipality',
+          'barangay',
           'postal_code',
         ].contains(f['key']),
       )

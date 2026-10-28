@@ -15,14 +15,14 @@ The website working tree is evolving independently. Recheck relevant controller/
 | ID | Audit requirement | Initial status |
 | --- | --- | --- |
 | P01 | Native Google authentication and registration | Dependency: native identity exchange |
-| P02 | Remembered login/email and guest session continuity | Pending |
-| P03 | Recognize current sessions on authentication screens | Pending |
-| P04 | Emailed password-link recovery and token reset | Pending |
-| P05 | Canonical address fields in registration | Pending |
-| P06 | Optional identity upload during registration | Pending |
-| P07 | Live registration email availability | Pending |
-| P08 | Full account status, restriction review requests and decisions | Pending |
-| P09 | Home application entry, correction and status refresh | Home entry/refresh implemented; full status destination remains |
+| P02 | Remembered login/email and guest session continuity | Implemented; isolated account/session checks pass |
+| P03 | Recognize current sessions on authentication screens | Implemented; isolated account/session checks pass |
+| P04 | Emailed password-link recovery and token reset | Implemented; isolated account/session checks pass |
+| P05 | Canonical address fields in registration | Implemented; isolated account/session checks pass |
+| P06 | Optional identity upload during registration | Implemented; isolated account/session checks pass |
+| P07 | Live registration email availability | Implemented; isolated account/session checks pass |
+| P08 | Full account status, restriction review requests and decisions | Implemented; isolated account/session checks pass |
+| P09 | Home application entry, correction and status refresh | Implemented: Home application/correction entry, resume refresh and native status destination |
 | P10 | Home active-shipment summary and order destination | Implemented; isolated discovery checks pass |
 | P11 | Home recommendations and related products alongside search matches | Implemented; isolated discovery checks pass |
 | P12 | Home advanced filters, price presets and exact five-star option | Implemented; isolated discovery checks pass |
@@ -88,3 +88,7 @@ Formatting and static analysis pass. All 17 focused checkout/logistics/Bag tests
 ### Discovery slice verification
 
 All 38 focused discovery, product, search, Home and authentication baseline tests pass. New checks exercise direct-page races, related products alongside matches, nested shop categories and sorting across pages at 200% text, capped voucher benefits with native eligible-product URLs, and one-time sale boundary refresh. Home filters use the same native filter sheet and open the filtered Search tab. Sharing retains Copy link for the Linux preview; Android/iOS share interaction is still a device acceptance check.
+
+### Account slice verification
+
+The 28 session, transport and authentication baseline tests pass. New account checks cover session recognition, stale email-availability responses, restriction-review conflict tokens and retained drafts, owner changes, optional registration multipart inputs, and explicit native password-link submission and foreign-link rejection. Remembered cookies use native secure storage; passwords and reset/verification tokens remain in memory. Guest cookies survive restarts, unremembered login cookies do not, and queued writes cannot resurrect a cleared session. Native keychain/provisioning and incoming OS links remain for platform verification.

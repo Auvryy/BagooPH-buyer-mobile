@@ -5,8 +5,8 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 ## Included
 
 - Buyer email/password login and server-confirmed logout.
-- Two-step registration, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
-- Password recovery with email-code verification and a new password.
+- Two-step registration, live email availability, optional canonical address and government ID, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
+- Password recovery with email-code verification or an emailed reset link rendered as a native password form.
 - Guest browsing and signed-in home with real products, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
 - Tappable campaign banners with native promotion details and native product, shop, and search destinations.
 - Web-style, equal-size product cards with square images, sale prices, comparison prices, stock/vacation states, ratings, location, and confirmed save controls.
@@ -26,7 +26,7 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Shopping, support, and profile actions stay in Flutter with no browser or WebView handoff. Native Google sign-in and device push are deferred until the website maintainer supplies verified mobile contracts; this app does not call unsupported endpoints or display controls for those unfinished flows. Registration may omit optional address and document fields; existing buyers can submit their permitted evidence from Profile. The app never creates a local account or accepts a locally generated verification code.
+Shopping, support, and profile actions stay in Flutter with no browser or WebView handoff. Native Google sign-in and device push are deferred until the website maintainer supplies verified mobile contracts; this app does not call unsupported endpoints or display controls for those unfinished flows. Registration supports optional address and document fields; existing buyers can also submit permitted evidence from Profile. Account status shows recorded restrictions, review requests and decisions. The app never creates a local account or accepts a locally generated verification code.
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
@@ -103,7 +103,7 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Inbox / returns | `GET /buyer/messages`, `/buyer-returns`, `/buyer-returns/orders/{id}/create`, `/buyer-returns/{id}` and permitted buyer action/evidence routes |
 | Account policies | Versioned URLs supplied by `GET /register` |
 
-The adapter bootstraps CSRF and session cookies from the web page, reads Inertia props, refreshes the asset version after deployments, handles JSON validation errors, and follows redirects only within the configured origin. It never replays a failed mutation automatically. No credentials, cookies, or tokens are logged or written to disk. Sessions last only while the app process remains alive; reopening the app requires login.
+The adapter bootstraps CSRF and session cookies from the web page, reads Inertia props, refreshes the asset version after deployments, handles JSON validation errors, and follows redirects only within the configured origin. It never replays a failed mutation automatically. Passwords and verification/reset tokens are never persisted or logged. Guest session cookies are kept in native secure storage for Bag continuity. Selecting Remember me also saves the signed-in session and email there; every restored session is checked with the server. An unremembered login lasts for the current app process. Logout and expired-session clearing remove saved cookies, and delayed writes cannot restore them afterward. Secure-storage failure leaves ordinary sign-in usable with explicit feedback when a requested session cannot be saved.
 
 Profile changes use the website's existing eligibility and validation contracts. The original sign-in email and account role remain fixed. Reviewed identity changes go through the server's correction review; wallet balances and order status only change after server confirmation. Explicit retries preserve request tokens and payloads where the backend provides replay protection. Responses from an earlier cleared session are discarded.
 

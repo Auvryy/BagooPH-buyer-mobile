@@ -31,7 +31,7 @@ The mobile implementation should consume these current contracts. Website mainte
 
 | Buyer feature | Existing contract and required fields |
 | --- | --- |
-| Session recognition / persistence | `GET /auth/session`, normal cookie/CSRF login/logout. Return the existing authenticated/role/destination status. The server still validates every restored session; a stored cookie is not proof of login. Secure-cookie/domain settings must match the actual HTTPS buyer origin. |
+| Session recognition / persistence | `GET /auth/session`, normal cookie/CSRF login/logout. Retain the existing `authenticated` boolean and, for authenticated replies, `code` and same-origin `redirect`. The mobile client fetches that allowed buyer destination and verifies its authenticated buyer role; the session JSON itself has no role field. The server still validates every restored session; a stored cookie is not proof of login. Secure-cookie/domain settings must match the actual HTTPS buyer origin. |
 | Registration | `GET /register` policy/birth-date requirements, `POST /register/email/validate`, `POST /register/validate`, multipart `POST /register` with optional `id_document` and canonical address. Preserve server validation and OTP requirements. |
 | Password recovery | Existing password-link request and `/reset-password/{token}` form contract plus existing email-code recovery. Links remain expiring, single-purpose, role-bound and server-validated. |
 | Account status / review requests | `GET /account/status` → `Auth/AccountStatus` with status/account/sources/requests and correction/access flags. `POST /account/review-requests` uses subject type/ID, current source token and message. A review request never reactivates an account. |

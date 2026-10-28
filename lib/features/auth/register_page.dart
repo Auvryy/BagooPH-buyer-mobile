@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
+import '../../core/uploads.dart';
+import '../../core/file_selection.dart';
+import '../checkout/location_picker.dart';
 import 'auth_shell.dart';
 import 'policy_page.dart';
 import 'verification_page.dart';
@@ -15,11 +20,13 @@ class RegisterPage extends StatefulWidget {
     required this.onBack,
     required this.onBrowse,
     required this.onComplete,
+    this.selectDocument = pickUpload,
   });
   final BuyerRepository repository;
   final VoidCallback onBack;
   final VoidCallback onBrowse;
   final ValueChanged<WebPage> onComplete;
+  final Future<UploadPart?> Function(String) selectDocument;
   @override
   State<RegisterPage> createState() => _RegisterPageState();
 }
@@ -37,6 +44,8 @@ class _RegisterPageState extends State<RegisterPage> {
       'password_confirmation',
       'birthday',
       'phone',
+      'address',
+      'postal_code',
     ])
       key: TextEditingController(),
   };
@@ -48,6 +57,17 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _busy = false;
   int _step = 1;
   String? _verifiedToken;
+  UploadPart? _document;
+  bool _addAddress = false, _locationLoading = false, _checkingEmail = false;
+  Map<String, String> _location = {
+    'region': '',
+    'province': '',
+    'city': '',
+    'barangay': '',
+  };
+  Timer? _emailTimer;
+  int _emailGeneration = 0;
+  String? _emailStatus;
 
   @override
   void initState() {
@@ -62,6 +82,10 @@ class _RegisterPageState extends State<RegisterPage> {
     });
     try {
       final page = await widget.repository.registration();
+      if (mounted && page.user?['role'] == 'buyer') {
+        widget.onComplete(page);
+        return;
+      }
       if (mounted) {
         setState(() => _contract = page.props);
       }
@@ -78,14 +102,66 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Map<String, dynamic> get _values => {
     for (final entry in _fields.entries)
-      entry.key: entry.key.startsWith('password')
-          ? entry.value.text
-          : entry.value.text.trim(),
+      if (_addAddress || !['address', 'postal_code'].contains(entry.key))
+        entry.key: entry.key.startsWith('password')
+            ? entry.value.text
+            : entry.value.text.trim(),
     'sex': _sex,
     'policy_accepted': _accepted,
     'terms_version': mapOf(_contract?['policies'])['terms_version'],
     'privacy_version': mapOf(_contract?['policies'])['privacy_version'],
+    if (_addAddress) ..._location,
   };
+
+  void _emailChanged() {
+    _emailTimer?.cancel();
+    final generation = ++_emailGeneration;
+    setState(() {
+      _emailStatus = null;
+      _checkingEmail = false;
+    });
+    final email = _fields['email']!.text.trim().toLowerCase();
+    if (emailValidator(email) != null) return;
+    _emailTimer = Timer(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
+      setState(() => _checkingEmail = true);
+      try {
+        final available = await widget.repository.registrationEmailAvailable(
+          email,
+        );
+        if (mounted && generation == _emailGeneration) {
+          setState(() {
+            _emailStatus = available
+                ? 'Email is available for a buyer account.'
+                : 'This email already has a buyer account. Log in or recover your password.';
+            if (!available) _errors['email'] = _emailStatus!;
+          });
+        }
+      } on BackendException catch (e) {
+        if (mounted && generation == _emailGeneration) {
+          setState(() => _emailStatus = e.message);
+        }
+      } finally {
+        if (mounted && generation == _emailGeneration) {
+          setState(() => _checkingEmail = false);
+        }
+      }
+    });
+  }
+
+  Future<void> _pickDocument() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final file = await widget.selectDocument('id_document');
+      if (mounted && file != null) setState(() => _document = file);
+    } on BackendException catch (e) {
+      if (mounted) _showError(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _showError(BackendException e) {
     setState(() {
       _error = e.fields.isEmpty
@@ -117,7 +193,7 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _submit() async {
-    if (_busy) {
+    if (_busy || _step == 2 && _addAddress && _locationLoading) {
       return;
     }
     setState(() {
@@ -142,7 +218,10 @@ class _RegisterPageState extends State<RegisterPage> {
           setState(() => _step = 2);
         }
       } else {
-        await widget.repository.validateRegistration(_values);
+        await widget.repository.validateRegistration(
+          _values,
+          files: _document == null ? null : [_document!],
+        );
         if (!mounted) {
           return;
         }
@@ -166,7 +245,11 @@ class _RegisterPageState extends State<RegisterPage> {
           }
           _verifiedToken = token;
         }
-        final page = await widget.repository.register(_values, _verifiedToken!);
+        final page = await widget.repository.register(
+          _values,
+          _verifiedToken!,
+          files: _document == null ? null : [_document!],
+        );
         if (mounted) {
           widget.onComplete(page);
         }
@@ -236,15 +319,21 @@ class _RegisterPageState extends State<RegisterPage> {
     autofillHints: autofill,
     validator: validator,
     error: _errors[key],
-    onChanged: (_) => setState(() {
-      _errors.remove(key);
-      if (['email', 'password', 'password_confirmation'].contains(key)) {
-        _verifiedToken = null;
-      }
-    }),
+    onChanged: (_) {
+      setState(() {
+        _errors.remove(key);
+        if (['email', 'password', 'password_confirmation'].contains(key)) {
+          _verifiedToken = null;
+        }
+      });
+      if (key == 'email') _emailChanged();
+    },
   );
   @override
   void dispose() {
+    _emailTimer?.cancel();
+    _emailGeneration++;
+    _document = null;
     for (final c in _fields.values) {
       c.dispose();
     }
@@ -349,6 +438,19 @@ class _RegisterPageState extends State<RegisterPage> {
                     autofill: const [AutofillHints.email],
                     validator: emailValidator,
                   ),
+                  if (_checkingEmail || _emailStatus != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          _checkingEmail
+                              ? 'Checking email availability…'
+                              : _emailStatus!,
+                          style: const TextStyle(fontSize: 12, height: 1.7),
+                        ),
+                      ),
+                    ),
                   _field(
                     'password',
                     'Password',
@@ -386,6 +488,64 @@ class _RegisterPageState extends State<RegisterPage> {
                     hint: '09XX XXX XXXX',
                     keyboard: TextInputType.phone,
                     autofill: const [AutofillHints.telephoneNumber],
+                  ),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Add my address now'),
+                    value: _addAddress,
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(() => _addAddress = value),
+                  ),
+                  if (_addAddress) ...[
+                    LocationPicker(
+                      repository: widget.repository,
+                      initial: _location,
+                      disabled: _busy,
+                      onChanged: (value) {
+                        if (mounted) setState(() => _location = value);
+                      },
+                      onLoading: (value) {
+                        if (mounted) setState(() => _locationLoading = value);
+                      },
+                    ),
+                    _field(
+                      'address',
+                      'Street / house / unit',
+                      validator: (value) => (value?.trim().length ?? 0) < 5
+                          ? 'Enter a complete street address.'
+                          : null,
+                    ),
+                    _field(
+                      'postal_code',
+                      'Postal code',
+                      keyboard: TextInputType.number,
+                      validator: (value) =>
+                          RegExp(r'^[0-9]{4}$').hasMatch(value?.trim() ?? '')
+                          ? null
+                          : 'Enter a four-digit postal code.',
+                    ),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _pickDocument,
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: const Text('Choose government ID (optional)'),
+                  ),
+                  if (_document != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(_document!.name),
+                      trailing: IconButton(
+                        tooltip: 'Remove selected ID',
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _document = null),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ),
+                  const Text(
+                    'JPG, PNG, WEBP or PDF, up to 5 MB. A document is reviewed by Bagoo before checkout access is granted.',
+                    style: TextStyle(fontSize: 12, height: 1.7),
                   ),
                   const Text(
                     'Delivery details are collected at checkout. Identity approval is required before purchasing.',

@@ -24,6 +24,7 @@ import '../collections/saved_products_page.dart';
 import '../home/search_controller.dart';
 import '../notifications/notifications_page.dart';
 import '../support/support_assistant_page.dart';
+import 'account_status_page.dart';
 import '../tracking/parcel_tracking_page.dart';
 
 const _sections = {
@@ -490,6 +491,22 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     ),
     const Divider(height: 24),
+    ListTile(
+      leading: const Icon(Icons.manage_accounts_outlined),
+      title: const Text('Account status and reviews'),
+      enabled: !_signingOut && _page?.user?['role'] == 'buyer',
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (routeContext) => AccountStatusPage(
+            repository: widget.repository,
+            onIdentity: () {
+              Navigator.pop(routeContext);
+              _select('identity');
+            },
+          ),
+        ),
+      ),
+    ),
     ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 14),
       leading: const ExcludeSemantics(

@@ -7,6 +7,7 @@ import '../products/product_page.dart';
 import '../products/shop_page.dart';
 import '../profile/order_detail_page.dart';
 import '../profile/profile_repository.dart';
+import '../profile/account_status_page.dart';
 import '../profile/purchases_section.dart';
 import '../profile/returns_page.dart';
 import '../promotions/promotion_page.dart';
@@ -160,11 +161,19 @@ class BuyerDestinationRouter {
     if (segments.first == 'account' &&
         segments.length >= 2 &&
         segments[1] == 'status') {
-      _openProfile(
-        context,
-        'overview',
-        onProfileSection,
-        closeForTabDestination,
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (routeContext) => AccountStatusPage(
+            repository: repository,
+            onIdentity: onProfileSection == null
+                ? null
+                : () {
+                    Navigator.pop(routeContext);
+                    if (closeForTabDestination) Navigator.pop(context);
+                    onProfileSection('identity');
+                  },
+          ),
+        ),
       );
       return;
     }

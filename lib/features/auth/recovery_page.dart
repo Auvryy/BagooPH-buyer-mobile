@@ -5,6 +5,7 @@ import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'auth_shell.dart';
 import 'verification_page.dart';
+import 'password_link_page.dart';
 
 class RecoveryPage extends StatefulWidget {
   const RecoveryPage({
@@ -166,6 +167,23 @@ class _RecoveryPageState extends State<RecoveryPage> {
             busy: _busy,
             onPressed: _submit,
           ),
+          if (_token == null)
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (routeContext) => PasswordLinkPage(
+                          repository: widget.repository,
+                          onComplete: () {
+                            Navigator.pop(routeContext);
+                            widget.onComplete();
+                          },
+                        ),
+                      ),
+                    ),
+              child: const Text('Recover with an email link'),
+            ),
         ],
       ),
     ),

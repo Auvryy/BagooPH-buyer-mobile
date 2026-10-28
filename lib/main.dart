@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,12 +9,14 @@ import 'core/buyer_repository.dart';
 import 'core/buyer_actions.dart';
 import 'core/web_session.dart';
 import 'core/widgets.dart';
+import 'core/session_vault.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/recovery_page.dart';
 import 'features/auth/register_page.dart';
 import 'features/home/home_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MainApp());
 }
 
@@ -26,7 +29,7 @@ class MainApp extends StatefulWidget {
   State<MainApp> createState() => _MainAppState();
 }
 
-class _MainAppState extends State<MainApp> {
+class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   final _navigator = GlobalKey<NavigatorState>();
   String? _pendingProduct;
   int _pendingDestination = 0;
@@ -35,11 +38,15 @@ class _MainAppState extends State<MainApp> {
   _Screen _screen = _Screen.login;
   WebPage? _initial;
   String? _notice;
+  bool _restoring = false;
+  int _probeGeneration = 0;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.repository != null) {
       _repository = widget.repository;
+      unawaited(_probeSession());
       return;
     }
     const configured = String.fromEnvironment('BAGOO_BASE_URL');
@@ -55,7 +62,11 @@ class _MainAppState extends State<MainApp> {
       if (kReleaseMode && origin.scheme != 'https') {
         throw ArgumentError('HTTPS is required for release builds.');
       }
-      _repository = BuyerRepository(WebSession(origin));
+      _repository = BuyerRepository(
+        WebSession(origin, vault: const NativeSessionVault()),
+      );
+      _restoring = true;
+      unawaited(_restore());
     } on ArgumentError {
       _configurationError =
           'The BagooPH service is not configured for this build.';
@@ -64,24 +75,65 @@ class _MainAppState extends State<MainApp> {
     }
   }
 
+  Future<void> _restore() async {
+    await _repository!.session.restoreSavedSession();
+    if (mounted) await _probeSession();
+  }
+
+  Future<void> _probeSession() async {
+    final generation = ++_probeGeneration;
+    try {
+      final page = await _repository!.currentSession();
+      if (mounted &&
+          generation == _probeGeneration &&
+          _screen != _Screen.home &&
+          page != null) {
+        _authenticated(page);
+      }
+    } on BackendException catch (e) {
+      if (mounted && generation == _probeGeneration) {
+        setState(() => _notice = e.message);
+      }
+    } finally {
+      if (mounted && generation == _probeGeneration) {
+        setState(() => _restoring = false);
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _repository != null &&
+        _screen != _Screen.home) {
+      unawaited(_probeSession());
+    }
+  }
+
   void _go(_Screen screen, {String? notice}) {
+    _probeGeneration++;
     setState(() {
       _screen = screen;
       _notice = notice;
     });
+    if (screen != _Screen.home) unawaited(_probeSession());
   }
 
   void _authenticated(WebPage page) {
+    _probeGeneration++;
     setState(() {
       _initial = page;
       _screen = _Screen.home;
       _notice = null;
+      _restoring = false;
     });
   }
 
   Future<void> _logout() async {
     await _repository!.logout();
     if (mounted) {
+      _probeGeneration++;
+      _navigator.currentState?.popUntil((route) => route.isFirst);
       setState(() {
         _initial = null;
         _pendingDestination = 0;
@@ -94,6 +146,8 @@ class _MainAppState extends State<MainApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _probeGeneration++;
     if (widget.repository == null) {
       _repository?.session.close();
     }
@@ -135,6 +189,16 @@ class _MainAppState extends State<MainApp> {
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Notice(_configurationError!, error: true),
+                ),
+              ),
+            ),
+          )
+        : _restoring
+        ? const Scaffold(
+            body: SafeArea(
+              child: Center(
+                child: CircularProgressIndicator(
+                  semanticsLabel: 'Checking saved session',
                 ),
               ),
             ),
