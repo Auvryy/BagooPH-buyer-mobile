@@ -262,6 +262,9 @@ WebPage productPage({bool signedIn = false, Map<String, dynamic>? override}) =>
       'shopOffers': [],
     });
 WebPage checkoutPage() => const WebPage('Checkout/Index', {
+  'logisticsCompanies': [
+    {'id': 41, 'name': 'Test delivery company'},
+  ],
   'checkoutToken': 'test-checkout-token',
   'auth': {'user': buyer},
   'user': buyer,

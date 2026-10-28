@@ -9,6 +9,7 @@ import '../home/product_card.dart';
 import '../products/product_page.dart';
 import '../products/product_widgets.dart';
 import 'bag_controller.dart';
+import 'commerce_details.dart';
 import 'checkout_page.dart';
 
 class BagPage extends StatefulWidget {
@@ -472,6 +473,8 @@ class _BagPageState extends State<BagPage> {
               ),
             ],
           ),
+          if (priced != null && _bag.quote != null)
+            PriceSegments(segments: mapsOf(priced['price_segments'])),
           if (priced != null && _bag.quote != null)
             _row(
               'Selected line total',
