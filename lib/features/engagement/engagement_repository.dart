@@ -99,6 +99,46 @@ class BuyerEngagementRepository {
     }
   }
 
+  Future<int> markDisplayedNotifications(List<String> ids) async {
+    if (ids.isEmpty ||
+        ids.length > 6 ||
+        ids.toSet().length != ids.length ||
+        !ids.every(_isUuid)) {
+      throw const BackendException(
+        'Refresh the displayed notification preview.',
+      );
+    }
+    final result = await buyer.session.jsonPost(
+      '/notifications/read-displayed',
+      {'ids': ids},
+      method: 'PATCH',
+    );
+    final summary = mapOf(result['summary']);
+    if (summary['available'] != true || summary['unread'] is! num) {
+      throw const BackendException(
+        'The read status was not confirmed. Refresh the preview.',
+      );
+    }
+    return (summary['unread'] as num).toInt();
+  }
+
+  Future<WebPage> openNotification(String id, int ownerId) async {
+    if (!_isUuid(id)) {
+      throw const BackendException('This notification is unavailable.');
+    }
+    final page = await buyer.session.submit('/notifications/$id/read', {
+      'open': true,
+    }, method: 'PATCH');
+    buyer.requireNoErrors(page);
+    if (page.user?['role'] != 'buyer' || page.user?['id'] != ownerId) {
+      throw const BackendException(
+        'Your account changed. Sign in again to view notifications.',
+        status: 401,
+      );
+    }
+    return page;
+  }
+
   Future<int> markNotificationSnapshotRead(String snapshot) async {
     if (!_isUuid(snapshot)) {
       throw const BackendException(
@@ -119,15 +159,20 @@ class BuyerEngagementRepository {
     return (summary['unread'] as num).toInt();
   }
 
-  Future<void> reportAdvertisementClick(
+  Future<void> reportAdvertisementClick(Map<String, dynamic> measurement) =>
+      reportAdvertisement(measurement, 'click');
+
+  Future<void> reportAdvertisement(
     Map<String, dynamic> measurement,
+    String type,
   ) async {
+    if (!['impression', 'click'].contains(type)) return;
     final endpoint = measurement['endpoint'];
     final token = measurement['token'];
     if (endpoint is! String || token is! String || token.isEmpty) return;
     await buyer.session.jsonPostNoContent(endpoint, {
       'token': token,
-      'type': 'click',
+      'type': type,
     });
   }
 

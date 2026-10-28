@@ -52,10 +52,10 @@ The website working tree is evolving independently. Recheck relevant controller/
 | P36 | Return next steps, photo purposes and decision/actor labels | Implemented; isolated post-purchase checks pass |
 | P37 | Rich tappable chat product cards and message timestamps | Implemented; isolated post-purchase checks pass |
 | P38 | Product inquiry action and editable quick questions | Implemented; isolated post-purchase checks pass |
-| P39 | Compact notification preview, displayed snapshot and read times | Pending |
+| P39 | Compact notification preview, displayed snapshot and read times | Implemented; visibility, ownership and failure checks pass |
 | P40 | Native support entry while shopping | Implemented; isolated discovery checks pass |
 | P41 | Native incoming links and missing internal destinations/anchors | Pending; owner domain association needed |
-| P42 | Advertisement impression measurement | Pending |
+| P42 | Advertisement impression measurement | Implemented; visibility, ownership and failure checks pass |
 | P43 | Native platform information equivalent to Overview/About | Implemented; isolated discovery checks pass |
 
 Partner/admin portal sign-in and merchant branding edits are separate products. Native sharing uses the operating system's app chooser. A buyer role remains fixed. Public website SEO is represented by native links rather than copied browser metadata.
@@ -96,3 +96,7 @@ The 28 session, transport and authentication baseline tests pass. New account ch
 ### Purchase follow-up slice verification
 
 Six new isolated checks pass for repeated checkpoint/notice merging, missing milestone evidence, separate return barcode/QR payloads, payment expiry while its refresh is pending, editable chat questions with exact retry keys, and keyboard/200% chat layouts. The six existing checkout widget checks also pass, and static analysis is clean. Payment expiry only disables a local action and fetches recorded status; it never marks a payment expired or successful locally. Scanning printed/device codes and real repayment/parcel actions remain manual acceptance work.
+
+### Notifications and measurements verification
+
+Five new checks pass for server-resolved owned notification destinations, explicit preview reads limited to actually displayed IDs, late account-change acknowledgements, loaded/visible one-second impressions, event deduplication and reporting failure isolation. All 24 existing notification lifecycle and public tracking widget checks pass. The preview never automatically acknowledges a notice; its button sends only the displayed owned IDs. Impression attempts are scoped to a mounted Home and revision, without a persistent visitor identifier.

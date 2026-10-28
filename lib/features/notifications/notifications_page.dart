@@ -10,6 +10,7 @@ import '../../core/widgets.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../home/search_controller.dart';
+import '../products/product_widgets.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({
@@ -204,22 +205,22 @@ class _NotificationsPageState extends State<NotificationsPage>
     if (_reading != null || id.isEmpty) return;
     if (notice['read_at'] == null && !await _markRead(id)) return;
     if (!mounted || !_currentScope(scope)) return;
-    final href = notice['href']?.toString();
-    if (href == null || href.isEmpty) {
-      _showMessage('This update has no linked buyer screen.');
-      return;
-    }
+    setState(() => _reading = id);
     try {
-      await BuyerDestinationRouter.openHref(
+      await BuyerDestinationRouter.openNotification(
         context,
         widget.repository,
-        href,
+        id,
+        widget.ownerId,
         onSearch: widget.onSearch,
         onProfileSection: widget.onProfileSection,
         closeForTabDestination: true,
+        isCurrent: () => _currentInbox(scope),
       );
     } on BackendException catch (e) {
-      if (mounted) _showMessage(e.message);
+      if (_currentScope(scope)) _showMessage(e.message);
+    } finally {
+      if (_currentScope(scope)) setState(() => _reading = null);
     }
   }
 
@@ -542,9 +543,9 @@ class _NotificationCard extends StatelessWidget {
                   label: const Text('Mark read'),
                 )
               else
-                const Text(
-                  'Read',
-                  style: TextStyle(fontSize: 12, color: BagooTheme.muted),
+                Text(
+                  'Read ${readableDateTime(notice['read_at'])}',
+                  style: const TextStyle(fontSize: 12, color: BagooTheme.muted),
                 ),
             ],
           ),

@@ -12,9 +12,34 @@ import '../profile/purchases_section.dart';
 import '../profile/returns_page.dart';
 import '../promotions/promotion_page.dart';
 import '../tracking/parcel_tracking_page.dart';
+import 'engagement_repository.dart';
 
 class BuyerDestinationRouter {
   const BuyerDestinationRouter._();
+
+  static Future<void> openNotification(
+    BuildContext context,
+    BuyerRepository repository,
+    String id,
+    int ownerId, {
+    required ValueChanged<SearchFilters>? onSearch,
+    required ValueChanged<String>? onProfileSection,
+    bool closeForTabDestination = false,
+    bool Function()? isCurrent,
+  }) async {
+    final page = await BuyerEngagementRepository(repository)
+        .openNotification(id, ownerId);
+    if (!context.mounted || isCurrent?.call() == false) return;
+    await _openPage(
+      context,
+      repository,
+      page,
+      fallbackUri: repository.session.resolve(page.url ?? '/notifications'),
+      onSearch: onSearch,
+      onProfileSection: onProfileSection,
+      closeForTabDestination: closeForTabDestination,
+    );
+  }
 
   static Future<void> openHref(
     BuildContext context,
@@ -202,6 +227,16 @@ class BuyerDestinationRouter {
         ? fallbackUri
         : repository.session.resolve(page.url!);
     switch (page.component) {
+      case 'Auth/AccountStatus':
+        await openHref(
+          context,
+          repository,
+          '/account/status',
+          onSearch: onSearch,
+          onProfileSection: onProfileSection,
+          closeForTabDestination: closeForTabDestination,
+        );
+        return;
       case 'Public/Tracking':
         final number = page.props['searchedNumber'];
         if (number is! String) {

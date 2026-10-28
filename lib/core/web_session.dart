@@ -30,6 +30,7 @@ class WebSession {
   String? _version;
   String? _csrf;
   int _sessionEpoch = 0;
+  int get identityEpoch => _sessionEpoch;
   final SessionVault? _vault;
   Future<void> _vaultTail = Future<void>.value();
   bool _persistCookies = true, _rememberLogin = false;

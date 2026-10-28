@@ -8,6 +8,7 @@ import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
 import 'campaigns.dart';
+import 'advertisement_exposure.dart';
 import 'home_controller.dart';
 import 'product_card.dart';
 import 'search_page.dart';
@@ -19,6 +20,7 @@ import '../support/support_assistant_page.dart';
 import '../engagement/buyer_destination_router.dart';
 import '../engagement/engagement_repository.dart';
 import '../notifications/notifications_page.dart';
+import '../notifications/notification_preview.dart';
 import '../tracking/parcel_tracking_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
@@ -51,6 +53,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
+  late final BuyerAdvertisementSession _advertisements;
   final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
@@ -75,6 +78,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
+    _advertisements = BuyerAdvertisementSession(
+      BuyerEngagementRepository(widget.repository).reportAdvertisement,
+    );
     _home.addListener(_homeChanged);
     _homeChanged();
     _tab = widget.initialDestination;
@@ -245,13 +251,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       widget.onLogin();
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => NotificationsPage(
+    FocusManager.instance.primaryFocus?.unfocus();
+    final selection = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheet) => SizedBox(
+        height: MediaQuery.sizeOf(sheet).height * .82,
+        child: NotificationPreview(
           repository: widget.repository,
           ownerId: (user['id'] as num).toInt(),
-          onSearch: _openSearchFilters,
-          onProfileSection: _openProfileSection,
+          isCurrentOwner: () => mounted && _home.user?['id'] == user['id'],
           onSummaryChanged: (count) {
             if (mounted && _home.user?['id'] == user['id']) {
               setState(() => _notificationCount = count);
@@ -260,6 +271,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       ),
     );
+    if (!mounted || _home.user?['id'] != user['id']) return;
+    if (selection?['notice'] is Map) {
+      try {
+        await BuyerDestinationRouter.openNotification(
+          context,
+          widget.repository,
+          mapOf(selection!['notice'])['id'].toString(),
+          (user['id'] as num).toInt(),
+          onSearch: _openSearchFilters,
+          onProfileSection: _openProfileSection,
+          isCurrent: () => mounted && _home.user?['id'] == user['id'],
+        );
+      } on BackendException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      }
+    }
+    if (selection?['all'] == true && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => NotificationsPage(
+            repository: widget.repository,
+            ownerId: (user['id'] as num).toInt(),
+            onSearch: _openSearchFilters,
+            onProfileSection: _openProfileSection,
+            onSummaryChanged: (count) {
+              if (mounted && _home.user?['id'] == user['id']) {
+                setState(() => _notificationCount = count);
+              }
+            },
+          ),
+        ),
+      );
+    }
     if (mounted && _home.user?['id'] is num) {
       await _refreshNotificationSummary(_home.user!['id']);
     }
@@ -272,11 +319,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _openBannerDestination(Map<String, dynamic> banner) async {
     final measurement = mapOf(banner['measurement']);
     if (measurement.isNotEmpty) {
-      unawaited(
-        BuyerEngagementRepository(widget.repository)
-            .reportAdvertisementClick(measurement)
-            .catchError((_) {}),
-      );
+      _advertisements.record(measurement, 'click');
     }
     try {
       await BuyerDestinationRouter.openHref(
@@ -567,6 +610,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           banners: _home.banners,
                           session: widget.repository.session,
                           onOpen: _openBanner,
+                          active:
+                              _tab == 0 &&
+                              (ModalRoute.of(context)?.isCurrent ?? true),
+                          onImpression: (banner) => _advertisements.record(
+                            mapOf(banner['measurement']),
+                            'impression',
+                          ),
                         ),
                         const SizedBox(height: 24),
                       ],
