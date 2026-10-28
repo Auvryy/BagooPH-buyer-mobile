@@ -461,17 +461,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             ? const ProductLoadingPlaceholder()
             : _selection == null
             ? Center(
-                child: Padding(
+                child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Notice(_error ?? 'Product unavailable.', error: true),
-                      TextButton(
-                        onPressed: _load,
-                        child: const Text('Try again'),
-                      ),
-                    ],
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Notice(_error ?? 'Product unavailable.', error: true),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('Try again'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               )
@@ -1016,14 +1019,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             ),
           ),
           Stars(s.product['rating']),
-          Text(
-            '${s.product['verified_review_count'] ?? 0} Verified ratings',
-            style: const TextStyle(fontSize: 12),
-          ),
-          Text(
-            '${s.product['sales_count'] ?? 0} Sold',
-            style: const TextStyle(fontSize: 12),
-          ),
+          if (s.product['verified_review_count'] case final num count)
+            Text(
+              '$count verified ratings',
+              style: const TextStyle(fontSize: 12),
+            ),
+          if (s.product['sales_count'] case final num count)
+            Text('$count sold', style: const TextStyle(fontSize: 12)),
         ],
       ),
       const SizedBox(height: 12),
@@ -1593,14 +1595,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ),
               ),
               Stars(s.product['rating']),
-              Text(
-                '(${s.product['verified_review_count'] ?? 0} Verified Reviews)',
-                style: const TextStyle(fontSize: 12),
-              ),
+              if (s.product['verified_review_count'] case final num count)
+                Text(
+                  '($count verified reviews)',
+                  style: const TextStyle(fontSize: 12),
+                ),
             ],
           ),
           const Divider(height: 32),
-          if (reviews.isEmpty)
+          if (reviews.isEmpty && s.page.isCached)
+            const Text(
+              'Refresh from Bagoo to load customer reviews.',
+              style: TextStyle(color: BagooTheme.muted, height: 1.5),
+            )
+          else if (reviews.isEmpty)
             const Padding(
               padding: EdgeInsets.all(20),
               child: Column(

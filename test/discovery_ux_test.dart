@@ -47,6 +47,52 @@ void main() {
     )..addFont(rootBundle.load('assets/fonts/PlusJakartaSans.ttf'))).load();
   });
 
+  testWidgets(
+    'Home keeps the search draft through compact and inline headers',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(375, 812);
+      addTearDown(() {
+        tester.view.reset();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: HomePage(
+            repository: repo,
+            initial: homePage(),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final search = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Search products',
+      );
+      await tester.enterText(search, 'canvas tote');
+      for (final scene in [
+        (const Size(900, 768), 1.4),
+        (const Size(1024, 768), 1.0),
+        (const Size(375, 812), 1.0),
+      ]) {
+        tester.platformDispatcher.textScaleFactorTestValue = scene.$2;
+        tester.view.physicalSize = scene.$1;
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(search).controller!.text,
+          'canvas tote',
+        );
+        expect(tester.takeException(), isNull);
+      }
+      expect(repo.homeRequests, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final size in [const Size(375, 812), const Size(700, 375)]) {
     testWidgets(
       'all sort choices remain reachable at $size with enlarged text',

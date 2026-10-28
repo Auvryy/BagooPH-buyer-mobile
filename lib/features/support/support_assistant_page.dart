@@ -406,7 +406,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   Widget _composer() => Material(
     key: const ValueKey('support-composer'),
     color: Colors.white,
-    elevation: 2,
+    shape: const Border(top: BorderSide(color: BagooTheme.line)),
     child: Padding(
       padding: const EdgeInsets.all(16),
       child: Column(

@@ -528,7 +528,7 @@ class _BagPageState extends State<BagPage> {
             children: [
               const ProductHeading('Your Shopping Bag'),
               Text(
-                '${_bag.items.length} items · Choose what you want to checkout.',
+                '${_bag.items.length} item${_bag.items.length == 1 ? '' : 's'} · Choose what to check out.',
                 style: const TextStyle(
                   fontSize: 13,
                   color: BagooTheme.muted,

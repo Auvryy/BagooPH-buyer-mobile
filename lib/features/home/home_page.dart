@@ -504,12 +504,120 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ),
   );
 
+  Widget _browseTools({required bool roomy}) {
+    final search = BrowseSearchField(
+      controller: _search,
+      label: 'Search products',
+      onSubmitted: (value) => _openSearch(query: value),
+      onFilters: _openingFilters ? null : _advancedFilters,
+    );
+    final utilities = _buyerUtilities();
+    return roomy
+        ? Row(
+            children: [
+              Expanded(child: search),
+              const SizedBox(width: 16),
+              utilities,
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              search,
+              const SizedBox(height: 4),
+              Align(alignment: Alignment.centerLeft, child: utilities),
+            ],
+          );
+  }
+
+  Widget _buyerUtilities() => Wrap(
+    spacing: 8,
+    runSpacing: 0,
+    children: [
+      TextButton.icon(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onPressed: _openingTracking ? null : _openTracking,
+        icon: const Icon(Icons.local_shipping_outlined, size: 18),
+        label: const Text('Track a parcel'),
+      ),
+      TextButton.icon(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onPressed: () {
+          final user = _home.user;
+          if (user == null) {
+            widget.onLogin();
+            return;
+          }
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SupportAssistantPage(
+                repository: widget.repository,
+                user: user,
+                available: _canSave,
+              ),
+            ),
+          );
+        },
+        icon: const Icon(Icons.help_outline, size: 18),
+        label: const Text('Help & Support'),
+      ),
+    ],
+  );
+
+  Widget _departments({required bool inline}) {
+    const heading = Text(
+      'Shop by department',
+      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+    );
+    final strip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _categoryChip('', 'All departments', Icons.apps_rounded),
+          for (final category in _home.categories)
+            _categoryChip(
+              category['slug'].toString(),
+              category['name'].toString(),
+              categoryIcon(category),
+            ),
+        ],
+      ),
+    );
+    return inline
+        ? Row(
+            children: [
+              heading,
+              const SizedBox(width: 16),
+              Expanded(child: strip),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [heading, const SizedBox(height: 10), strip],
+          );
+  }
+
   Widget _marketplace() => RefreshIndicator(
     onRefresh: _home.load,
     child: LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 700;
         final scaled = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final roomy = constraints.maxWidth >= 900 && scaled <= 1.4;
         final count = productColumns(constraints.maxWidth, scaled);
         final horizontal = wide ? 32.0 : 16.0;
         return CustomScrollView(
@@ -532,63 +640,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    BrowseSearchField(
-                      controller: _search,
-                      label: 'Search products',
-                      onSubmitted: (value) => _openSearch(query: value),
-                      onFilters: _openingFilters ? null : _advancedFilters,
-                    ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 0,
-                      children: [
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            textStyle: const TextStyle(
-                              fontFamily: 'Plus Jakarta Sans',
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          onPressed: _openingTracking ? null : _openTracking,
-                          icon: const Icon(
-                            Icons.local_shipping_outlined,
-                            size: 18,
-                          ),
-                          label: const Text('Track a parcel'),
-                        ),
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            textStyle: const TextStyle(
-                              fontFamily: 'Plus Jakarta Sans',
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          onPressed: () {
-                            final user = _home.user;
-                            if (user == null) {
-                              widget.onLogin();
-                              return;
-                            }
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => SupportAssistantPage(
-                                  repository: widget.repository,
-                                  user: user,
-                                  available: _canSave,
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.help_outline, size: 18),
-                          label: const Text('Help & Support'),
-                        ),
-                      ],
-                    ),
+                    _browseTools(roomy: roomy),
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 4,
@@ -645,32 +697,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         const SizedBox(height: 16),
                       ],
                       if (_home.categories.isNotEmpty) ...[
-                        const Text(
-                          'Shop by department',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              _categoryChip(
-                                '',
-                                'All departments',
-                                Icons.apps_rounded,
-                              ),
-                              for (final category in _home.categories)
-                                _categoryChip(
-                                  category['slug'].toString(),
-                                  category['name'].toString(),
-                                  categoryIcon(category),
-                                ),
-                            ],
-                          ),
-                        ),
+                        _departments(inline: roomy),
                         const SizedBox(height: 24),
                       ],
                       if (_home.data!.props['buyerApplication'] != null) ...[

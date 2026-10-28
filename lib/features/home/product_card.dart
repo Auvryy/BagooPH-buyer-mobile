@@ -366,10 +366,12 @@ class _Ribbon extends CustomClipper<Path> {
 
 int productColumns(double width, double scale) => scale > 1.4
     ? (width / 280).floor().clamp(1, 4)
-    : width >= 1024
-    ? 6
-    : width >= 768
+    : width >= 1200
+    ? 5
+    : width >= 900
     ? 4
     : width >= 640
     ? 3
-    : 2;
+    : width >= 300
+    ? 2
+    : 1;

@@ -18,6 +18,81 @@ void main() {
     )..addFont(rootBundle.load('assets/fonts/PlusJakartaSans.ttf'))).load();
   });
 
+  testWidgets('a long product failure remains scrollable above the keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(700, 375);
+    addTearDown(tester.view.reset);
+    final repo = FakeBuyerRepository()
+      ..productError = const BackendException(
+        'We couldn’t verify this product. Check your connection and try again. Prices and availability will be rechecked when Bagoo is reachable.',
+      );
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(700, 375),
+            textScaler: TextScaler.linear(2),
+            viewInsets: EdgeInsets.only(bottom: 120),
+          ),
+          child: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final retry = find.widgetWithText(TextButton, 'Try again');
+    await tester.ensureVisible(retry);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(retry).bottom, lessThanOrEqualTo(255));
+    expect(tester.getRect(retry).top, greaterThanOrEqualTo(56));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a saved product does not claim that omitted reviews are empty', (
+    tester,
+  ) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    final page = productPage(override: {'rating': 4.8});
+    repo.productResponse = WebPage(
+      page.component,
+      page.props,
+      cachedAt: DateTime.utc(2026, 10, 28),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final reviews = find.text('Reviews & photos');
+    await tester.scrollUntilVisible(
+      reviews,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(RefreshIndicator),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(reviews);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Refresh from Bagoo to load customer reviews.'),
+      findsOneWidget,
+    );
+    expect(find.text('No customer reviews yet'), findsNothing);
+    expect(find.textContaining('0 verified'), findsNothing);
+    expect(repo.orderCalls, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'product identity is visible before the gallery and purchase actions',
     (tester) async {

@@ -29,21 +29,27 @@ class ReviewRepository extends FakeBuyerRepository {
         'sales_count': 128,
       },
     );
-    homeHandler = (_, _) async => homePage(
-      products: [
-        for (var id = 1; id <= 6; id++)
-          {
-            ...product(id),
-            'name': id.isEven
-                ? 'Wireless Earbuds with Charging Case'
-                : 'Everyday Carry Canvas Tote',
-            'price': id.isEven ? '899.00' : '1200.00',
-            'rating': 4.8,
-            'sales_count': 128,
-            'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
-          },
-      ],
-    );
+    homeHandler = (_, _) async {
+      final page = homePage(
+        products: [
+          for (var id = 1; id <= 6; id++)
+            {
+              ...product(id),
+              'name': id.isEven
+                  ? 'Wireless Earbuds with Charging Case'
+                  : 'Everyday Carry Canvas Tote',
+              'price': id.isEven ? '899.00' : '1200.00',
+              'rating': 4.8,
+              'sales_count': 128,
+              'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
+            },
+        ],
+      );
+      return WebPage(page.component, {
+        ...page.props,
+        'feedProducts': {...mapOf(page.props['feedProducts']), 'total': 6},
+      });
+    };
   }
 
   @override
@@ -204,7 +210,9 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
-          if (name == 'home' && scene.$1.width == 375 && scene.$2 == 1) {
+          if (name == 'home' &&
+              [375.0, 1024.0].contains(scene.$1.width) &&
+              scene.$2 == 1) {
             final card = find.byType(ProductCard).first;
             expect(card, findsOneWidget);
             final price = find
@@ -213,6 +221,18 @@ void main() {
             expect(
               tester.getRect(price).bottom,
               lessThan(tester.getRect(find.byType(NavigationBar)).top),
+            );
+          }
+          if (name == 'home' && scene.$1.width == 1024 && scene.$2 == 1) {
+            final card = find.byType(ProductCard).at(1);
+            expect(tester.getSize(card).width, greaterThan(200));
+            final title = find.descendant(
+              of: card,
+              matching: find.text('Wireless Earbuds with Charging Case'),
+            );
+            expect(
+              tester.renderObject<RenderParagraph>(title).didExceedMaxLines,
+              isFalse,
             );
           }
           if (export) {
