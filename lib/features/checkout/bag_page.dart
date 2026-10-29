@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
@@ -811,6 +812,7 @@ class _BagQuantityDialogState extends State<_BagQuantityDialog> {
               autofocus: true,
               maxLength: 2,
               keyboardType: TextInputType.number,
+              inputFormatters: [unsignedIntegerFormatter],
               decoration: InputDecoration(
                 labelText: 'Quantity',
                 helperText: 'Up to ${widget.maximum} available',

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -1192,6 +1193,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   enabled: !_busy && s.maxQuantity > 0,
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.number,
+                  inputFormatters: [unsignedIntegerFormatter],
                   maxLength: 2,
                   decoration: const InputDecoration(
                     counterText: '',

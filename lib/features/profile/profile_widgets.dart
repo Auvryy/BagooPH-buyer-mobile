@@ -4,6 +4,7 @@ import 'package:pdfrx/pdfrx.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/contact_input.dart';
+import '../../core/numeric_input.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -228,6 +229,8 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       keyboardType: keyboard,
       inputFormatters: keyboard == TextInputType.phone
           ? [mobileNumberFormatter]
+          : keyboard == TextInputType.number
+          ? [unsignedIntegerFormatter]
           : null,
       autofillHints: autofill,
       maxLength: max,

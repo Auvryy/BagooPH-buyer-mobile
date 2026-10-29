@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/contact_input.dart';
+import '../../core/numeric_input.dart';
 import '../../core/widgets.dart';
 export '../../core/auth_validation.dart';
 
@@ -245,6 +246,8 @@ class _AuthFieldState extends State<AuthField> {
       keyboardType: widget.keyboardType,
       inputFormatters: widget.keyboardType == TextInputType.phone
           ? [mobileNumberFormatter]
+          : widget.keyboardType == TextInputType.number
+          ? [unsignedIntegerFormatter]
           : null,
       autofillHints: widget.autofillHints,
       maxLength: widget.maxLength,

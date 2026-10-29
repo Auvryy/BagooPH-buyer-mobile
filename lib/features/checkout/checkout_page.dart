@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/contact_input.dart';
+import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -678,6 +679,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       keyboardType: keyboard,
       inputFormatters: keyboard == TextInputType.phone
           ? [mobileNumberFormatter]
+          : keyboard == TextInputType.number
+          ? [unsignedIntegerFormatter]
           : null,
       enabled: !_submitting && !_frozen,
       onChanged: (_) {

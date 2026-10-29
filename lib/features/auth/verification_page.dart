@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 
@@ -185,7 +185,7 @@ class _VerificationPageState extends State<VerificationPage> {
                   keyboardType: TextInputType.number,
                   maxLength: 6,
                   autofillHints: const [AutofillHints.oneTimeCode],
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [unsignedIntegerFormatter],
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _verify(),
                   style: const TextStyle(
