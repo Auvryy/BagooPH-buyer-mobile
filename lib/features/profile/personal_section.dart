@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/auth_validation.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -263,6 +264,7 @@ class _PasswordSectionState extends ProfileFormState<PasswordSection> {
       secret: true,
       min: 8,
       max: 128,
+      check: passwordValidator,
       autofill: const [AutofillHints.newPassword],
     ),
     field(
