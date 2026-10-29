@@ -63,7 +63,11 @@ Push is additional native functionality, not an already verified buyer web push 
 
 ## 5. Versioned capability discovery and documentation
 
-Agree a versioned read-only mobile capability reply before advertising Google or push. Default optional features to disabled. The existing proposed `/buyer/mobile-capabilities` name is a proposal, not an instruction for the mobile app to call an absent route.
+The web maintainer confirmed version one and implemented guest-safe `GET /buyer/mobile-capabilities` locally in web commit `91795f5`. The response contains integer `contract_version: 1` and required boolean `features.native_google_sign_in` and `features.device_push`. Its initial fixture disables both; responses are private/no-store and require no submitted CSRF token. Read `docs/api/BUYER_MOBILE_INTEGRATION.md` and the sanitized response envelope under `docs/api/buyer-mobile-contract-handoff/` in that web version. This is local source support, not a deployment claim.
+
+Mobile now has an on-demand discovery adapter and strict parser, described in [the capability plan](../plans/buyer-mobile-capability-integration.md). Missing, malformed, unsupported, failed or redirected replies leave optional features unavailable without making discovery an authentication/shopping prerequisite. Direct discovery rejects redirects; ordinary page/login redirects keep their existing behavior. The diagnostic backend probe reports capability availability separately. No Google/push SDK or provider control is enabled by this slice.
+
+The owner has deferred device push; its flag stays false. Native Google, production association files, owner configuration and device acceptance remain separate prerequisites. Keep every feature disabled until its actual server/mobile/provider implementation is ready; the remaining proposed routes in the detailed contract request are not assumed to be deployed.
 
 Reconcile the old buyer-confirmed completion prose with current versioned logistics behavior: new version-two orders complete on the server after evidenced handover/payment gates; historical version-one orders can retain buyer receipt confirmation. Publish the version and server action eligibility. Mobile must only display recorded state and permitted actions, never advance completion itself.
 

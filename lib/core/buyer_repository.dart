@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'buyer_capabilities.dart';
 import 'web_session.dart';
 import 'uploads.dart';
 import 'catalogue_cache.dart';
@@ -10,6 +11,17 @@ class BuyerRepository {
   final WebSession session;
   final CatalogueCache catalogueCache;
   final _catalogueReads = <(int, int, int, String), Future<WebPage>>{};
+
+  /// Optional discovery is requested explicitly, never as an auth prerequisite.
+  Future<BuyerCapabilities> discoverCapabilities() async {
+    try {
+      return BuyerCapabilities.parse(
+        await session.jsonGetDirect('/buyer/mobile-capabilities'),
+      );
+    } on BackendException {
+      return const BuyerCapabilities.unavailable();
+    }
+  }
 
   Future<WebPage> _catalogue(String key, Future<WebPage> Function() fetch) {
     final scope = (
@@ -159,6 +171,7 @@ class BuyerRepository {
     }
     final target = session.resolve(status['redirect']);
     if (target.path != '/' &&
+        target.path != '/buyer' &&
         target.path != '/account/status' &&
         target.path != '/buyer/orders' &&
         !RegExp(r'^/buyer/orders/[0-9]+$').hasMatch(target.path)) {

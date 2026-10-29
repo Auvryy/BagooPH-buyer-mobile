@@ -123,6 +123,8 @@ When a voucher expires or becomes ineligible, checkout retains the server-confir
 
 This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
 
+The [capability integration](docs/plans/buyer-mobile-capability-integration.md) adds explicit, read-only `BuyerRepository.discoverCapabilities()` support for the agreed `GET /buyer/mobile-capabilities` version-one response. It accepts only the supported version and required boolean flags; missing, malformed, redirected or unavailable replies leave optional providers unavailable. Discovery is on demand, without a startup/authentication dependency, background polling or persistent cache. The backend probe reports it after core checks and keeps an unavailable optional response separate from a core failure. A server flag does not install or enable an unfinished native SDK: Google remains separate integration/configuration work, and device push is deferred.
+
 All sibling products, including the Bagoo website/backend, are read-only references for mobile work. Required website additions are recommendations in [mobile contract requests](docs/integrations/buyer-mobile-contract-requests.md), not changes to the website repository.
 
 The Notifications screen refreshes its current filter and page when the app resumes. Read acknowledgements remain explicit buyer actions. Support history and drafts live only on the current screen; they are cleared when the account or access changes. Short windows and enlarged text use a scrollable composer to keep its fields and send action reachable with the keyboard.

@@ -104,6 +104,15 @@ Future<void> main(List<String> args) async {
     stdout.writeln(
       '${mapsOf(home.props['categories']).length} categories; ${mapOf(home.props['feedProducts'])['total']} listings.',
     );
+    final capabilities = await repository.discoverCapabilities();
+    stdout.writeln(
+      capabilities.isSupported
+          ? 'Optional capability contract v${capabilities.contractVersion}: '
+                'native Google advertised=${capabilities.nativeGoogleSignIn}; '
+                'device push advertised=${capabilities.devicePush}. '
+                'Native SDK and owner acceptance remain separate.'
+          : 'Optional capability discovery unavailable; core buyer checks passed.',
+    );
   } catch (error) {
     stderr.writeln('Backend contract check failed: $error');
     exitCode = 1;

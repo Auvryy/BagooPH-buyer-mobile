@@ -49,3 +49,6 @@ app.*.map.json
 
 # Local task-management guidance
 /docs/Task Management.md
+
+# Local communication between buyer mobile and web agents
+/docs/local/buyer-web-coordination.md
