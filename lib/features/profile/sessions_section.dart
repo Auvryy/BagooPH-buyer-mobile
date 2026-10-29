@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/request_id.dart';
+import '../../core/buyer_account_scope.dart';
+import '../../core/verification_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/buyer_actions.dart';
@@ -28,20 +30,57 @@ class SessionsSection extends StatefulWidget {
   State<SessionsSection> createState() => _SessionsSectionState();
 }
 
-class _SessionsSectionState extends State<SessionsSection> {
+class _SessionsSectionState extends State<SessionsSection>
+    with WidgetsBindingObserver {
+  late final BuyerAccountScope _account;
+  late final int _owner;
   Map<String, dynamic>? _data;
   String? _error, _feedback;
   bool _busy = true;
   int _sessionsPage = 1, _historyPage = 1, _generation = 0;
+  bool get _current =>
+      _account.isCurrent &&
+      identical(_account.session, widget.repository.session) &&
+      widget.owner == _owner;
+
+  void _discardPrivate() {
+    _account.invalidate();
+    _generation++;
+    _data = null;
+    _feedback = null;
+    _busy = false;
+    _error = 'Your buyer account changed or access ended. Reopen login activity from your profile.';
+  }
+
+  void _accessLost() {
+    if (mounted) setState(_discardPrivate);
+  }
+
+  bool _ensureCurrent() {
+    if (_current) return true;
+    _accessLost();
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
+    _owner = widget.owner;
+    _account = BuyerAccountScope(widget.repository.session);
+    if (_owner < 1) _account.invalidate();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _ensureCurrent();
   }
 
   @override
   void didUpdateWidget(SessionsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!_ensureCurrent()) return;
     if (widget.active &&
         (!oldWidget.active ||
             widget.refreshVersion != oldWidget.refreshVersion)) {
@@ -51,11 +90,14 @@ class _SessionsSectionState extends State<SessionsSection> {
 
   @override
   void dispose() {
+    _account.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
     _generation++;
     super.dispose();
   }
 
   Future<void> _load() async {
+    if (!_ensureCurrent()) return;
     final generation = ++_generation;
     setState(() {
       _busy = true;
@@ -65,6 +107,13 @@ class _SessionsSectionState extends State<SessionsSection> {
       final data = await widget.repository.session.jsonGet(
         '/account/security?sessions_page=$_sessionsPage&history_page=$_historyPage',
       );
+      _account.check();
+      if (!_current) {
+        throw const BackendException(
+          'Your buyer account changed.',
+          status: 401,
+        );
+      }
       bool validList(dynamic value) {
         final list = mapOf(value);
         return list['data'] is List &&
@@ -86,12 +135,14 @@ class _SessionsSectionState extends State<SessionsSection> {
             );
       }
 
-      if (data['sessionOwnerId'] != widget.owner ||
+      if (data['sessionOwnerId'] is! int ||
+          data['sessionOwnerId'] != _owner ||
           !validList(data['sessions']) ||
           !validList(data['signIns']) ||
           data['currentSessionId'] is! String) {
         throw const BackendException(
           'Login activity could not be confirmed for your account.',
+          status: 401,
         );
       }
       if (mounted && generation == _generation) setState(() => _data = data);
@@ -99,7 +150,9 @@ class _SessionsSectionState extends State<SessionsSection> {
       if (mounted && generation == _generation) {
         setState(() {
           _error = e.message;
-          if (e.status == 401 || e.status == 419) _data = null;
+          if (!_current || [401, 403, 404, 419].contains(e.status)) {
+            _discardPrivate();
+          }
         });
       }
     } finally {
@@ -108,6 +161,7 @@ class _SessionsSectionState extends State<SessionsSection> {
   }
 
   Future<void> _revoke(Map<String, dynamic>? session) async {
+    if (!_ensureCurrent() || _busy || _error != null) return;
     final result = await showDialog<String>(
       context: context,
       barrierDismissible: false,
@@ -115,9 +169,11 @@ class _SessionsSectionState extends State<SessionsSection> {
         repository: widget.repository,
         session: session,
         canEmail: _data?['canConfirmByEmail'] == true,
+        account: _account,
+        onAccessLost: _accessLost,
       ),
     );
-    if (!mounted || result == null) return;
+    if (!mounted || !_ensureCurrent() || result == null) return;
     setState(() => _feedback = result);
     await _load();
   }
@@ -188,90 +244,113 @@ class _SessionsSectionState extends State<SessionsSection> {
     ),
   );
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      ProfilePanel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const ProfileHeading(
-              'Login activity',
-              'Manage where you are signed in. Each entry is a browser or app session; several can belong to the same device.',
-              Icons.devices_outlined,
+  Widget build(BuildContext context) => !_current
+      ? ListView(
+          padding: const EdgeInsets.all(16),
+          children: const [
+            ProfileHeading(
+              'Login activity unavailable',
+              '',
+              Icons.lock_outline,
             ),
-            if (_busy) const LinearProgressIndicator(),
-            if (_error != null) ...[
-              Notice(_error!, error: true),
-              TextButton(
-                onPressed: _busy ? null : _load,
-                child: const Text('Try again'),
-              ),
-              TextButton(
-                onPressed: () => BuyerActions.login(context),
-                child: const Text('Sign in again'),
-              ),
-            ],
-            if (_feedback != null) Notice(_feedback!),
-            if (_data != null) ...[
-              if (_data!['lastSignIn'] != null)
-                Text(
-                  'Latest sign-in: ${readableDateTime(mapOf(_data!['lastSignIn'])['signed_in_at'])}',
-                  style: const TextStyle(fontSize: 12, height: 1.7),
-                ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _load,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Refresh login activity'),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Signed-in sessions',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-              for (final session in mapsOf(mapOf(_data!['sessions'])['data']))
-                _entry(session, actionable: true),
-              if (mapsOf(mapOf(_data!['sessions'])['data']).isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Text('No other signed-in sessions found.'),
-                ),
-              ProfilePagination(mapOf(_data!['sessions']), (page) {
-                _sessionsPage = page;
-                _load();
-              }, disabled: _busy),
-              OutlinedButton(
-                onPressed:
-                    _busy ||
-                        _error != null ||
-                        !mapsOf(mapOf(_data!['sessions'])['data']).any(
-                          (s) => s['active'] == true && s['current'] != true,
-                        )
-                    ? null
-                    : () => _revoke(null),
-                child: const Text('Sign out other sessions'),
-              ),
-              const Divider(height: 40),
-              Text(
-                'Recent sign-ins · ${_data!['historyDays']} days',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              for (final session in mapsOf(mapOf(_data!['signIns'])['data']))
-                _entry(session),
-              ProfilePagination(mapOf(_data!['signIns']), (page) {
-                _historyPage = page;
-                _load();
-              }, disabled: _busy),
-            ],
+            Notice(
+              'Your buyer account changed or access ended. Reopen login activity from your profile.',
+              error: true,
+            ),
           ],
-        ),
-      ),
-    ],
-  );
+        )
+      : ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            ProfilePanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const ProfileHeading(
+                    'Login activity',
+                    'Manage where you are signed in. Each entry is a browser or app session; several can belong to the same device.',
+                    Icons.devices_outlined,
+                  ),
+                  if (_busy) const LinearProgressIndicator(),
+                  if (_error != null) ...[
+                    Notice(_error!, error: true),
+                    TextButton(
+                      onPressed: _busy ? null : _load,
+                      child: const Text('Try again'),
+                    ),
+                    TextButton(
+                      onPressed: () => BuyerActions.login(context),
+                      child: const Text('Sign in again'),
+                    ),
+                  ],
+                  if (_feedback != null) Notice(_feedback!),
+                  if (_data != null) ...[
+                    if (_data!['lastSignIn'] != null)
+                      Text(
+                        'Latest sign-in: ${readableDateTime(mapOf(_data!['lastSignIn'])['signed_in_at'])}',
+                        style: const TextStyle(fontSize: 12, height: 1.7),
+                      ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _load,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Refresh login activity'),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Signed-in sessions',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    for (final session in mapsOf(
+                      mapOf(_data!['sessions'])['data'],
+                    ))
+                      _entry(session, actionable: true),
+                    if (mapsOf(mapOf(_data!['sessions'])['data']).isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text('No other signed-in sessions found.'),
+                      ),
+                    ProfilePagination(mapOf(_data!['sessions']), (page) {
+                      _sessionsPage = page;
+                      _load();
+                    }, disabled: _busy),
+                    OutlinedButton(
+                      onPressed:
+                          _busy ||
+                              _error != null ||
+                              !mapsOf(mapOf(_data!['sessions'])['data']).any(
+                                (s) =>
+                                    s['active'] == true && s['current'] != true,
+                              )
+                          ? null
+                          : () => _revoke(null),
+                      child: const Text('Sign out other sessions'),
+                    ),
+                    const Divider(height: 40),
+                    Text(
+                      'Recent sign-ins · ${_data!['historyDays']} days',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    for (final session in mapsOf(
+                      mapOf(_data!['signIns'])['data'],
+                    ))
+                      _entry(session),
+                    ProfilePagination(mapOf(_data!['signIns']), (page) {
+                      _historyPage = page;
+                      _load();
+                    }, disabled: _busy),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
 }
 
 class _RevokeDialog extends StatefulWidget {
@@ -279,15 +358,21 @@ class _RevokeDialog extends StatefulWidget {
     required this.repository,
     required this.session,
     required this.canEmail,
+    required this.account,
+    required this.onAccessLost,
   });
   final ProfileRepository repository;
   final Map<String, dynamic>? session;
   final bool canEmail;
+  final BuyerAccountScope account;
+  final VoidCallback onAccessLost;
   @override
   State<_RevokeDialog> createState() => _RevokeDialogState();
 }
 
-class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
+class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
+    with WidgetsBindingObserver {
+  late final BuyerAccountScope _account;
   final _password = TextEditingController(), _code = TextEditingController();
   final _intent = requestId();
   String _method = 'password';
@@ -295,8 +380,68 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
   DateTime? _nextCode;
   Timer? _timer;
   int _cooldown = 0;
+  bool _lost = false;
+  @override
+  void initState() {
+    super.initState();
+    _account = widget.account.fork();
+    _lost = !_account.isCurrent;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if (!_account.isCurrent || [401, 403, 404, 419].contains(error.status)) {
+      _account.invalidate();
+      _lost = true;
+      _timer?.cancel();
+      _submitted = null;
+      _password.clear();
+      _code.clear();
+      problem = null;
+      success = null;
+      errors = {};
+      widget.onAccessLost();
+    } else if (error.status == 429) {
+      _wait(error.data, retryAt: error.retryAt);
+    } else if (error.status == 422 || error.fields.isNotEmpty) {
+      _submitted = null;
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (!_account.isCurrent || _lost) {
+      if (mounted) {
+        setState(
+          () => onFailure(
+            const BackendException('Your buyer account changed.', status: 401),
+          ),
+        );
+      }
+      return Future.value(false);
+    }
+    return super.perform(action, validate: validate);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_account.isCurrent && mounted) {
+      setState(
+        () => onFailure(
+          const BackendException('Your buyer account changed.', status: 401),
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
+    _account.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _password.dispose();
     _code.dispose();
@@ -305,11 +450,19 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
 
   Future<void> _sendCode() async => perform(() async {
     final data = await widget.repository.json('/account/security/code', {});
+    _account.check();
     if (data['success'] != true) {
       throw const BackendException('The confirmation email was not confirmed.');
     }
-    _cooldown = (data['cooldown'] as num?)?.ceil() ?? 60;
-    _nextCode = DateTime.now().add(Duration(seconds: _cooldown));
+    _wait(data);
+    return 'Code sent to your verified sign-in email. It expires after ten minutes.';
+  }, validate: false);
+
+  void _wait(Map<String, dynamic> data, {DateTime? retryAt}) {
+    _nextCode = verificationCooldownDeadline(data, retryAt: retryAt);
+    _cooldown = (_nextCode!.difference(DateTime.now()).inMilliseconds / 1000)
+        .ceil()
+        .clamp(0, 3600);
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -324,8 +477,8 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
       );
       if (_cooldown == 0) timer.cancel();
     });
-    return 'Code sent to your verified sign-in email. It expires after ten minutes.';
-  }, validate: false);
+  }
+
   Future<void> _submit() async {
     await perform(() async {
       _submitted ??= jsonDecode(
@@ -342,11 +495,13 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
             : '/account/security/sessions/${Uri.encodeComponent(widget.session!['id'])}/revoke',
         _submitted!,
       );
+      _account.check();
       if (data['reference'] is! String ||
           !RegExp(r'^[a-f0-9-]{36}$').hasMatch(data['reference']) ||
-          data['affected_count'] is! num ||
+          data['affected_count'] is! int ||
           data['affected_count'] < 0 ||
-          data['message'] is! String) {
+          data['message'] is! String ||
+          (data['message'] as String).trim().isEmpty) {
         throw const BackendException(
           'Sign-out could not be confirmed. Refresh login activity before retrying.',
         );
@@ -358,94 +513,120 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy,
-    child: Dialog(
-      child: SizedBox(
-        width: 520,
-        height: MediaQuery.sizeOf(context).height * .8,
-        child: content([
-          ProfileHeading(
-            widget.session == null
-                ? 'Sign out other sessions?'
-                : 'Sign out this session?',
-            widget.session == null
-                ? 'End other browser and rider-app sessions. Your current session stays open.'
-                : '${widget.session!['device']} will need to sign in again. Your current session stays open.',
-            Icons.phonelink_lock,
-          ),
-          if (widget.canEmail)
-            DropdownButtonFormField<String>(
-              initialValue: _method,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Confirm it is you'),
-              items: const [
-                DropdownMenuItem(
-                  value: 'password',
-                  child: Text('Current password'),
+  Widget build(BuildContext context) => _lost || !_account.isCurrent
+      ? Dialog(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Notice(
+                  'Your buyer account changed or access ended. Close this confirmation and reopen login activity from your profile.',
+                  error: true,
                 ),
-                DropdownMenuItem(value: 'email', child: Text('Email code')),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
               ],
-              onChanged: busy || _submitted != null
-                  ? null
-                  : (v) => setState(() {
-                      _method = v!;
-                      _password.clear();
-                      _code.clear();
-                    }),
             ),
-          const SizedBox(height: 20),
-          if (_method == 'password')
-            field(
-              'current_password',
-              'Current password',
-              _password,
-              secret: true,
-              max: 4096,
-              enabled: _submitted == null,
-              autofill: const [AutofillHints.password],
-            )
-          else ...[
-            OutlinedButton(
-              onPressed: busy || _cooldown > 0 || _submitted != null
-                  ? null
-                  : _sendCode,
-              child: Text(
-                _cooldown > 0 ? 'Resend in ${_cooldown}s' : 'Send email code',
-              ),
-            ),
-            const SizedBox(height: 16),
-            field(
-              'code',
-              'Email code',
-              _code,
-              enabled: _submitted == null,
-              max: 6,
-              keyboard: TextInputType.number,
-              autofill: const [AutofillHints.oneTimeCode],
-              check: (value) => RegExp(r'^\d{6}$').hasMatch(value)
-                  ? null
-                  : 'Enter the six numbers from your email.',
-            ),
-          ],
-          if (_submitted != null && !busy)
-            const Notice(
-              'The previous result is uncertain. Retry this same request or close and refresh login activity.',
-              error: true,
-            ),
-          SubmitButton(
-            label: _submitted == null
-                ? 'Confirm sign out'
-                : 'Retry same sign-out request',
-            onPressed: _submit,
-            busy: busy,
           ),
-          TextButton(
-            onPressed: busy ? null : () => Navigator.pop(context),
-            child: const Text('Close'),
+        )
+      : PopScope(
+          canPop: !busy,
+          child: Dialog(
+            child: SizedBox(
+              width: 520,
+              height: MediaQuery.sizeOf(context).height * .8,
+              child: content([
+                ProfileHeading(
+                  widget.session == null
+                      ? 'Sign out other sessions?'
+                      : 'Sign out this session?',
+                  widget.session == null
+                      ? 'End other browser and app sessions. Your current session stays open.'
+                      : '${widget.session!['device']} will need to sign in again. Your current session stays open.',
+                  Icons.phonelink_lock,
+                ),
+                if (widget.canEmail)
+                  DropdownButtonFormField<String>(
+                    initialValue: _method,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Confirm it is you',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'password',
+                        child: Text('Current password'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'email',
+                        child: Text('Email code'),
+                      ),
+                    ],
+                    onChanged: busy || _submitted != null
+                        ? null
+                        : (v) => setState(() {
+                            _method = v!;
+                            _password.clear();
+                            _code.clear();
+                          }),
+                  ),
+                const SizedBox(height: 20),
+                if (_method == 'password')
+                  field(
+                    'current_password',
+                    'Current password',
+                    _password,
+                    secret: true,
+                    max: 4096,
+                    enabled: _submitted == null,
+                    autofill: const [AutofillHints.password],
+                  )
+                else ...[
+                  OutlinedButton(
+                    onPressed: busy || _cooldown > 0 || _submitted != null
+                        ? null
+                        : _sendCode,
+                    child: Text(
+                      _cooldown > 0
+                          ? 'Resend in ${_cooldown}s'
+                          : 'Send email code',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  field(
+                    'code',
+                    'Email code',
+                    _code,
+                    enabled: _submitted == null,
+                    max: 6,
+                    keyboard: TextInputType.number,
+                    autofill: const [AutofillHints.oneTimeCode],
+                    check: (value) => RegExp(r'^\d{6}$').hasMatch(value)
+                        ? null
+                        : 'Enter the six numbers from your email.',
+                  ),
+                ],
+                if (_submitted != null && !busy)
+                  const Notice(
+                    'The previous result is uncertain. Retry this same request or close and refresh login activity.',
+                    error: true,
+                  ),
+                SubmitButton(
+                  label: _submitted == null
+                      ? 'Confirm sign out'
+                      : 'Retry same sign-out request',
+                  onPressed: _submit,
+                  busy: busy,
+                ),
+                TextButton(
+                  onPressed: busy ? null : () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ]),
+            ),
           ),
-        ]),
-      ),
-    ),
-  );
+        );
 }
