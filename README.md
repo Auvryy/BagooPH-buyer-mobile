@@ -5,6 +5,7 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 ## Included
 
 - Buyer email/password login and server-confirmed logout.
+- Native Android/iOS Google sign-in, explicit password proof when linking an existing buyer, and expiring native Google buyer registration. Requires approved public client configuration and backend capability; email login stays available.
 - Two-step registration, live email availability, optional canonical address and government ID, server validation, current Terms/Privacy documents, adult birth-date selection, and emailed verification codes.
 - Password recovery with email-code verification or an emailed reset link rendered as a native password form.
 - Guest browsing and signed-in home with real products, active delivery and application summaries, departments, campaigns when configured, and native catalogue search with canonical ship-from areas, price ranges, stock/rating filters, supported sorts, server suggestions, pagination, refresh, empty states, and retry. Home search and department links open Search with the requested selection.
@@ -26,7 +27,7 @@ Native Flutter buyer shopping and authentication, using the existing BagooPH Lar
 - Account status and native sign-in when a shopping action needs authentication. Pending buyers can browse and use their Bag; checkout permissions remain server-owned.
 - Original BagooPH branding, bundled Plus Jakarta Sans, and responsive phone/tablet layouts.
 
-Shopping, support, and profile actions stay in Flutter with no browser or WebView handoff. Native Google sign-in and device push are deferred until the website maintainer supplies verified mobile contracts; this app does not call unsupported endpoints or display controls for those unfinished flows. Registration supports optional address and document fields; existing buyers can also submit permitted evidence from Profile. Account status shows recorded restrictions, review requests and decisions. The app never creates a local account or accepts a locally generated verification code.
+Shopping, support, and profile actions stay in Flutter with no browser or WebView handoff. Native Google uses the implemented session exchange and registration contract, gated on supported platform, owner SDK configuration and backend capability. Device push remains deferred. Registration supports optional address and document fields; existing buyers can also submit permitted evidence from Profile. Account status shows recorded restrictions, review requests and decisions. The app never creates a local account or accepts a locally generated verification code.
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
@@ -77,8 +78,9 @@ Incoming links stay in Flutter and are accepted only for the configured buyer or
 
 The default association hostname is the non-production placeholder `buyer.example.invalid`. To enable installed-app HTTPS links, the owner must configure the actual hostname and publish the association files described in [the website AI handoff](docs/integrations/website-ai-handoff.md).
 
-- Android reads the Gradle property `BAGOO_LINK_HOST`. For an owner build, supply it with `ORG_GRADLE_PROJECT_BAGOO_LINK_HOST='<BUYER_HOST>'` alongside `--dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'`. Use approved release signing; the current template still has development release signing.
-- iOS reads the Xcode build setting `BAGOO_LINK_HOST`. Set it for the applicable build configurations and provision Associated Domains and Keychain capabilities. `Runner.entitlements` is shared by Debug, Profile and Release.
+- The [owner build helper](docs/release-setup.md) derives native link settings from one ignored public configuration file. It validates Google public IDs and rejects development origins for release. Plain `flutter run -d linux` continues to work for local email/buyer preview.
+- Android reads the Gradle property `BAGOO_LINK_HOST`. The helper supplies it automatically. Release requires owner signing in ignored `android/key.properties`; the debug signing fallback has been removed.
+- iOS reads the Xcode build setting `BAGOO_LINK_HOST` and its Google callback scheme from an ignored helper-generated override. Provision Associated Domains and Keychain capabilities. `Runner.entitlements` is shared by Debug, Profile and Release.
 - Match the hostname to the buyer base origin. Domain association, release signing, physical devices and iOS/Xcode acceptance require owner setup. Linux preview supports the native screens and clipboard fallback; no desktop URL registration is installed by this task.
 
 ## Backend integration
@@ -88,6 +90,7 @@ Buyer flows currently use Laravel web sessions, JSON endpoints, and Inertia page
 | Purpose | Existing routes |
 | --- | --- |
 | Session recognition / login / logout | `GET /auth/session`, `POST /login`, `POST /logout` |
+| Native Google exchange / challenge / registration | Direct JSON `POST /auth/google/native`, `GET /auth/google/native/registration`, `POST /auth/google/native/register` |
 | Registration requirements / validation / creation | `GET /register`, `POST /register/email/validate`, `POST /register/validate`, `POST /register` |
 | Send / resend / verify email codes | `POST /otp/send`, `POST /otp/resend`, `POST /otp/verify` |
 | Password recovery | Existing email-code routes and `POST /password/reset-otp`; link requests use `POST /forgot-password` and native link reset uses `POST /reset-password` |
@@ -123,7 +126,9 @@ When a voucher expires or becomes ineligible, checkout retains the server-confir
 
 This is a native Android/iOS client with Linux desktop preview; Flutter web is not a configured target. The web-session adapter depends on the backend's existing Inertia contract. A future native buyer API can replace it behind `BuyerRepository`.
 
-The [capability integration](docs/plans/buyer-mobile-capability-integration.md) adds explicit, read-only `BuyerRepository.discoverCapabilities()` support for the agreed `GET /buyer/mobile-capabilities` version-one response. It accepts only the supported version and required boolean flags; missing, malformed, redirected or unavailable replies leave optional providers unavailable. Discovery is on demand, without a startup/authentication dependency, background polling or persistent cache. The backend probe reports it after core checks and keeps an unavailable optional response separate from a core failure. A server flag does not install or enable an unfinished native SDK: Google remains separate integration/configuration work, and device push is deferred.
+The [capability integration](docs/plans/buyer-mobile-capability-integration.md) adds explicit, read-only `BuyerRepository.discoverCapabilities()` support for the agreed `GET /buyer/mobile-capabilities` version-one response. It accepts only the supported version and required boolean flags; missing, malformed, redirected or unavailable replies leave optional providers unavailable. Discovery is on demand, without a startup/authentication dependency, background polling or persistent cache. The backend probe reports it after core checks and keeps an unavailable optional response separate from a core failure. The [native Google follow-up](docs/plans/buyer-native-google-release-readiness.md) adds the SDK and forms; backend capability alone cannot enable them without valid owner/device configuration. Device push remains deferred.
+
+That native Google pass passed all **379 isolated tests**, clean analysis/formatting and Android/Linux debug compilation. Release without owner signing is correctly blocked. Google provider/device acceptance and deployed app links remain pending; follow the [owner setup guide](docs/release-setup.md). The backend repository was not changed.
 
 All sibling products, including the Bagoo website/backend, are read-only references for mobile work. Required website additions are recommendations in [mobile contract requests](docs/integrations/buyer-mobile-contract-requests.md), not changes to the website repository.
 

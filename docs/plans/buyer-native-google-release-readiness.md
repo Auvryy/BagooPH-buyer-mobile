@@ -33,4 +33,46 @@ Complete coherent slices before starting another. Keep commits local; a previous
 - `flutter devices --machine` reports Linux and Chrome only. Flutter web is not a configured buyer target; no Android/iOS device is connected.
 - The owner confirmed an Android phone can be connected in the future. No iOS/macOS build host is currently available.
 - Existing Google Web application client IDs can be reused as the server audience after owner/backend configuration; Android needs its own package/signing registration. Await approved public IDs and actual buyer hostname. Do not read backend secret files to discover them.
-- Implementation and verification are in progress. Record actual checks and residual blockers below as work completes.
+- The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. Both are saved only in ignored owner configuration. Android OAuth registration is awaiting confirmation; the public Android client ID also belongs in the backend authorized-party allowlist. The local Google switch stays off while setup is incomplete.
+
+## Implementation and verification outcome
+
+Mobile implementation is complete on the unpublished working branch. Operational Google and installed-link acceptance remains pending owner/provider/deployment setup; the overall readiness work is still open.
+
+- `6336055` records the plan and boundaries.
+- `1ec87c7` adds strict native Google exchange/registration contracts, direct JSON writes, CSRF/session handling, rate metadata and explicit read-only recovery.
+- `d1bcd60` adds the maintained native Google SDK behind an injectable Android/iOS provider and explicit public configuration gates.
+- `5f3db58` adds native account-link proof, expiring registration and policy forms, retained drafts, provider-flow lifecycle guards and responsive regressions.
+- `f384162` exposes canonical address errors and avoids repeated screen-reader announcements from the cooldown countdown.
+- `e702bb6` adds owner configuration tooling, matching native hosts/callbacks, release signing controls and setup documentation.
+- This final documentation pass records combined evidence and a separate local PR draft. No branch publication is authorized for this task.
+
+Observed final checks:
+
+| Check | Result |
+|---|---|
+| Full isolated Flutter suite | **379 passed**, including 46 additional native Google/configuration checks beyond the 333-test baseline |
+| `flutter analyze` | No issues found |
+| Edited Dart formatting / whitespace | Clean |
+| Android debug APK | Compiled successfully with the native Google dependency |
+| Linux debug bundle | Compiled successfully; Google remains unsupported on Linux |
+| Android release without owner signing | Correctly blocked by `validateBuyerReleaseSetup`; no signed release is certified |
+| iOS property lists / configuration references | Parse and reference the shared link/callback settings; Xcode compilation unavailable |
+| Public configuration helper | Example and ignored owner configuration validate; actual IDs/host are untracked |
+| Read-only local backend probe | Core buyer contracts pass; optional capability advertises Google false and push false |
+| Owner's public buyer origin | Guest session endpoint200; capability route and both association files404, without redirects |
+
+The new regressions cover direct HTTP/CSRF rotation, rejected redirects, strict challenge parsing, original buyer email/role confirmation, password proof, duplicate/rate/expiry/session guards, explicit uncertain-response recovery without POST replay, draft/policy preservation, paused lifecycle probes/queued links, canonical address feedback and narrow/landscape/tablet layouts with keyboard insets, 200% text and reduced motion. No browser automation, visible app launch or live account/order/payment/email/chat/database write was used.
+
+## Remaining operational acceptance
+
+1. Confirm the Android OAuth package/signing registration and obtain its public client ID for the backend authorized-party allowlist. The current development APK's public certificate fingerprints are recorded only in the ignored owner setup note. Release/Play signing certificates need their own approved registration.
+2. Have the backend owner deploy/verify the implemented native capability/auth routes and configure approved Web audiences, native authorized parties and feature switches. The public404 response does not establish deployment of the new source. This mobile task changes no server settings or source.
+3. Supply owner release signing and actual association identities; verify HTTPS association responses and installed cold/warm links on signed builds. No private key was requested or generated for release.
+4. Complete native provider and full buyer-journey acceptance using approved test accounts when the owner connects a phone; use the concrete checklist in [release setup](../release-setup.md). iOS additionally needs an iOS public client ID, Apple team/provisioning and macOS/Xcode.
+
+Device push and later efficiency work remain deferred. Passing isolated tests and compilation is not a zero-bug, live-provider or production-parity certification.
+
+## Handoff
+
+Setup: [release-setup.md](../release-setup.md). PR title/body: [local draft](buyer-native-google-release-readiness-pr.md), not saved on GitHub. Actual build/test logs, owner configuration, certificate notes and web-agent coordination remain ignored machine-local artifacts.
