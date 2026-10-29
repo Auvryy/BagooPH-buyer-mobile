@@ -20,6 +20,76 @@ Future<void> selectDevice(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets(
+    'native dialogs stay within the phone and leave side controls usable',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1050, 810);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        var changes = 0;
+        await tester.pumpWidget(
+          BuyerDevicePreview(
+            extraControls: [
+              TextButton(
+                onPressed: () => changes++,
+                child: const Text('Change test account'),
+              ),
+            ],
+            builder: (_) => MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Buyer confirmation'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close confirmation'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    child: const Text('Open buyer dialog'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Open buyer dialog'));
+        await tester.pumpAndSettle();
+        final phone = tester.getRect(
+          find.byKey(const ValueKey('buyer-preview-frame')),
+        );
+        final dialog = tester.getRect(find.byType(AlertDialog));
+        expect(phone.contains(dialog.topLeft), isTrue);
+        expect(phone.contains(dialog.bottomRight), isTrue);
+        final change = find.text('Change test account');
+        expect(
+          tester.getSemantics(change).label,
+          contains('Change test account'),
+        );
+        await Scrollable.ensureVisible(tester.element(change), alignment: .5);
+        await tester.pumpAndSettle();
+        expect(change.hitTestable(), findsOneWidget);
+        await tester.tap(change);
+        await tester.pumpAndSettle();
+        expect(changes, 1);
+        expect(find.text('Buyer confirmation'), findsOneWidget);
+        await tester.tap(find.text('Close confirmation'));
+        await tester.pumpAndSettle();
+        expect(find.text('Buyer confirmation'), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('selected device metrics and theme reach the nested buyer app', (
     tester,
   ) async {

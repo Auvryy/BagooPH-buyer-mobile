@@ -150,24 +150,39 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
     );
   }
 
-  Widget _phone() => Padding(
-    padding: const EdgeInsets.all(8),
-    child: Center(
-      child: DeviceFrame(
-        key: const ValueKey('buyer-preview-frame'),
-        device: _device,
-        orientation: _orientation,
-        isFrameVisible: _frame,
-        screen: Builder(
-          builder: (deviceContext) => MediaQuery(
-            data: MediaQuery.of(deviceContext)
-                .copyWith(textScaler: TextScaler.linear(_textScale)),
-            child: ScrollConfiguration(
-              behavior: const _PreviewScrollBehavior(),
-              child: Builder(builder: widget.builder),
+  Widget _phone() => Semantics(
+    container: true,
+    explicitChildNodes: true,
+    child: Padding(
+      padding: const EdgeInsets.all(8),
+      child: Center(
+        child: DeviceFrame(
+          key: const ValueKey('buyer-preview-frame'),
+          device: _device,
+          orientation: _orientation,
+          isFrameVisible: _frame,
+          screen: Builder(
+            builder: (deviceContext) => MediaQuery(
+              data: MediaQuery.of(deviceContext)
+                  .copyWith(textScaler: TextScaler.linear(_textScale)),
+              child: ScrollConfiguration(
+                behavior: const _PreviewScrollBehavior(),
+                child: Builder(builder: widget.builder),
+              ),
             ),
           ),
         ),
+      ),
+    ),
+  );
+
+  Widget _controlNavigation(Widget child) => Semantics(
+    container: true,
+    explicitChildNodes: true,
+    child: HeroControllerScope.none(
+      child: Navigator(
+        pages: [MaterialPage<void>(child: child)],
+        onDidRemovePage: (_) {},
       ),
     ),
   );
@@ -177,7 +192,9 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
     title: 'BagooPH Buyer Device Preview',
     debugShowCheckedModeBanner: false,
     theme: BagooTheme.light,
-    home: LayoutBuilder(
+    // Keep the preview shell outside the buyer's root Navigator. Root dialogs
+    // then belong to the device; only the sidebar owns its menu navigation.
+    builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
         final sidebar = constraints.maxWidth >= 640;
         return Scaffold(
@@ -187,40 +204,42 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
               : Drawer(
                   child: SafeArea(
                     child: Builder(
-                      builder: (drawerContext) => _controls(
-                        onClose: () => Scaffold.of(drawerContext).closeDrawer(),
+                      builder: (drawerContext) => _controlNavigation(
+                        _controls(
+                          onClose: () =>
+                              Scaffold.of(drawerContext).closeDrawer(),
+                        ),
                       ),
                     ),
                   ),
                 ),
           body: SafeArea(
             child: Row(
-              // Nested buyer routes block preceding semantics siblings. Keep
-              // controls after the phone in traversal, visually on the left.
-              textDirection: TextDirection.rtl,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: _phone()),
-                const VerticalDivider(width: 1),
                 SizedBox(
                   width: sidebar ? 248 : 56,
-                  child: sidebar
-                      ? _controls()
-                      : ColoredBox(
-                          color: Colors.white,
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: Builder(
-                              builder: (railContext) => IconButton(
-                                tooltip: 'Preview options',
-                                onPressed: () =>
-                                    Scaffold.of(railContext).openDrawer(),
-                                icon: const Icon(Icons.tune),
+                  child: _controlNavigation(
+                    sidebar
+                        ? _controls()
+                        : ColoredBox(
+                            color: Colors.white,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Builder(
+                                builder: (railContext) => IconButton(
+                                  tooltip: 'Preview options',
+                                  onPressed: () =>
+                                      Scaffold.of(railContext).openDrawer(),
+                                  icon: const Icon(Icons.tune),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                  ),
                 ),
+                const VerticalDivider(width: 1),
+                Expanded(child: _phone()),
               ],
             ),
           ),
