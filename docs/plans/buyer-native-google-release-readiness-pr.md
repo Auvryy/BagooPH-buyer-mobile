@@ -20,6 +20,6 @@ The owner build helper validates a public-only local configuration and derives m
 
 ## Owner prerequisites
 
-The Web client ID and buyer hostname are saved only in ignored owner configuration. Android OAuth registration/public authorized-party ID, backend deployment and enablement, owner release certificates/association identities and real provider acceptance remain pending. The owner deferred connecting an Android phone; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
+The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement, owner release certificates/association identities and real provider acceptance remain pending. The owner deferred connecting an Android phone; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
 
 This is a **local PR draft**. No branch push, GitHub PR creation, merge or deployment has been performed for this work.

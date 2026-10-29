@@ -32,8 +32,8 @@ Complete coherent slices before starting another. Keep commits local; a previous
 
 - `flutter devices --machine` reports Linux and Chrome only. Flutter web is not a configured buyer target; no Android/iOS device is connected.
 - The owner confirmed an Android phone can be connected in the future. No iOS/macOS build host is currently available.
-- Existing Google Web application client IDs can be reused as the server audience after owner/backend configuration; Android needs its own package/signing registration. Await approved public IDs and actual buyer hostname. Do not read backend secret files to discover them.
-- The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. Both are saved only in ignored owner configuration. Android OAuth registration is awaiting confirmation; the public Android client ID also belongs in the backend authorized-party allowlist. The local Google switch stays off while setup is incomplete.
+- Existing Google Web application client IDs can be reused as the server audience after owner/backend configuration; Android needs its own package/signing registration. Do not read backend secret files to discover owner configuration.
+- The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. They have now also confirmed creating the requested Android development OAuth client and provided its public ID. All actual values are saved only in ignored owner notes/configuration and the existing shared handoff. The Android ID belongs in the backend authorized-party allowlist; Flutter continues using the Web ID as its server client. Runtime provider acceptance is still pending. The local Google switch stays off until backend readiness is verified.
 
 ## Implementation and verification outcome
 
@@ -66,7 +66,7 @@ The new regressions cover direct HTTP/CSRF rotation, rejected redirects, strict 
 
 ## Remaining operational acceptance
 
-1. Confirm the Android OAuth package/signing registration and obtain its public client ID for the backend authorized-party allowlist. The current development APK's public certificate fingerprints are recorded only in the ignored owner setup note. Release/Play signing certificates need their own approved registration.
+1. The owner has confirmed creating the development Android OAuth client and supplied its public ID. The backend owner still needs to include that approved native client in its authorized-party allowlist. The current development APK's public certificate fingerprints are recorded only in the ignored owner setup note. Release/Play signing certificates need their own approved registration; a real provider/device exchange remains unverified.
 2. Have the backend owner deploy/verify the implemented native capability/auth routes and configure approved Web audiences, native authorized parties and feature switches. The public404 response does not establish deployment of the new source. This mobile task changes no server settings or source.
 3. Supply owner release signing and actual association identities; verify HTTPS association responses and installed cold/warm links on signed builds. No private key was requested or generated for release.
 4. Complete native provider and full buyer-journey acceptance using approved test accounts when the owner connects a phone; use the concrete checklist in [release setup](../release-setup.md). iOS additionally needs an iOS public client ID, Apple team/provisioning and macOS/Xcode.
