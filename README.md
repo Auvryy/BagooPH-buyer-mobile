@@ -102,6 +102,15 @@ Run the corresponding native regression cases with:
 flutter test -d linux integration_test/return_misuse_test.dart
 ```
 
+To review contact emails, reviewed identity, rejected applications, login sessions, personal details, password changes and demo credits with synthetic replies:
+
+```sh
+flutter run -d linux -t tool/account_review.dart
+flutter test -d linux integration_test/account_misuse_test.dart
+```
+
+The account review sidebar selects successful, failed, denied, conflicting or throttled responses and shows the synthetic write count. Account changes expire open forms and confirmations. No real emails, passwords, sessions or credits are changed. Automated native checks can use a separate virtual display while the desktop is in use; ordinary Linux run/test commands open a window on their configured display.
+
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 
 ```sh

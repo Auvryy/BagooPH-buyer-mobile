@@ -18,22 +18,22 @@ Acceptance requires a coverage record for each family, passing formatting/analys
 
 ## Coverage record
 
-The final isolated regression run passes **449 tests** across the implemented feature families. The native Linux run passes **25 cases**. Existing regression coverage is distinguished from dedicated native exploratory checks; this first validated batch does not complete the full buyer acceptance audit.
+The first published batch passed **449 isolated tests** and **25 native Linux cases**. Its ongoing continuation now passes **546 isolated tests**, with native account (52), return/evidence (39), and earlier buyer/collection (26) runs. These native groups overlap and are not summed as distinct cases. See [the continuing return/account review](buyer-return-identity-regressions.md) for its current evidence. The complete buyer acceptance audit remains open.
 
 | Feature family | Misuse and recovery cases | Status / evidence |
 | --- | --- | --- |
 | Email login, registration and policies | Empty/malformed/long fields, age/policy gates, repeated taps, rejected credentials, retained drafts | Isolated auth/account regressions and native login/contact cases pass; desktop email/registration input feedback observed |
 | Native Google | Unsupported platform, cancelled provider, link proof, expiry, retry delay, stale callbacks | Isolated Google contract/provider/controller/widget regressions pass; real Android/iOS provider acceptance remains pending |
 | Recovery and verification | Invalid/long codes, password mismatch, resend/repeated submission, expired links | Shared verification/recovery regression coverage passes; dedicated native recovery/link exploration remains pending |
-| Profile, identity, contact email, sessions | Invalid phone/evidence/code/password, original identity, duplicate mutations, failed saves | Account/session regressions and native contact/password cases pass; native identity/email/security exploration remains pending |
+| Profile, identity, contact email, sessions | Invalid phone/evidence/code/password, original identity, duplicate mutations, failed saves | Native account/contact/password/credit cases pass; real typing, repeated submits, code rejection, identity proposals, session expiry and throttled resend feedback inspected; provider/device acceptance remains separate |
 | Addresses, location and checkout | Invalid phone/postcode/coordinates, required selections, approval, stale quotes, duplicate placement | Quote/logistics/checkout regressions and a native invalid-contact-to-reviewed-order journey pass; manual address/GPS exploration remains pending |
-| Bag and product purchase actions | Text/negative/zero/excess quantity, stale stock/options, duplicate add/remove, errors | Bag/stock/option/model/widget regressions pass; native product-to-checkout journey passes; further manual quantity exploration remains pending |
+| Bag and product purchase actions | Text/negative/zero/excess quantity, stale stock/options, duplicate add/remove, errors | Shared integer filtering rejects mixed edits; Bag/stock/option/widget regressions and native product-to-checkout journey pass; deeper native stock/option exploration remains pending |
 | Search, home, campaigns, shop and collections | Invalid prices/pages, long query, rapid changes, empty/error/cache/retry, duplicate toggles | Discovery/search/cache/page regressions pass; desktop keyboard search observed; broader native shop exploration remains pending |
 | Wallet, vouchers, orders and reviews | Nonfinite/out-of-range money, codes/photos, repeated financial actions, server eligibility/status | Invalid wallet amounts, duplicate/retry cases and post-purchase/voucher regressions pass; broader native order/review exploration remains pending |
 | Inbox, product chat and support | Whitespace/long drafts, repeated send, attachment validation, failed/uncertain delivery | Chat/support validation, repeated-send and lifecycle regressions pass; native attachment exploration remains pending |
-| Returns and private evidence | Invalid codes/uploads, duplicate actions, wrong destination/origin, server-permitted actions | Return-label/post-purchase regressions pass; native return-form/upload misuse cases remain pending |
+| Returns and private evidence | Invalid codes/uploads, duplicate actions, wrong destination/origin, server-permitted actions | Native creation/decision/account/evidence cases and bounded picker regressions pass; actual file selection and visible feedback inspected; repayment and actual PDF-rendering exploration remain pending |
 | Notifications, public tracking and incoming links | Invalid IDs/numbers/URLs, read-only lookup, stale identities, explicit mutation confirmation | Link, tracking, notification and session regressions pass; native exploratory link/notification acceptance remains pending |
-| Native Linux interaction/layout | Login and registration, navigation, phone entry, repeated taps, keyboard, narrow/large text | 25 native SDK cases pass; real desktop keyboard/clipboard checks cover login, registration contacts and search |
+| Native Linux interaction/layout | Login and registration, navigation, phone entry, repeated taps, keyboard, narrow/large text | Three native SDK groups pass on a private display; actual keyboard/clipboard/picker feedback inspected; preview dialogs stay inside the phone with accessible side options; further checks respect the owner's desktop-input restriction |
 
 ## Findings
 
