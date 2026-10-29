@@ -1,0 +1,3 @@
+BAGOO_LINK_HOST = buyer.example.invalid
+BAGOO_GOOGLE_REVERSED_CLIENT_ID = invalid.bagoo.google-disabled
+#include? "Bagoo.local.xcconfig"

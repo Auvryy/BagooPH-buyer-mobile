@@ -1,0 +1,6 @@
+# Copy to ignored android/key.properties and supply your owner-managed release key.
+# Paths are relative to android/app, or absolute. Do not use the debug keystore.
+storeFile=<PATH_TO_RELEASE_KEYSTORE>
+storePassword=<STORE_PASSWORD>
+keyAlias=<RELEASE_KEY_ALIAS>
+keyPassword=<KEY_PASSWORD>
