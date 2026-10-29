@@ -1,6 +1,6 @@
 # Buyer returns, evidence and account misuse review
 
-This continues the active review after published batch `fix/buyer-misuse-regressions` (`5ac5dc4`). Start from current merged main `5b021f2` on `fix/buyer-return-identity-regressions`; the first batch remains separately published for review. Keep this branch local until publication is explicitly requested.
+This continues the active review after published batch `fix/buyer-misuse-regressions` (`5ac5dc4`). The branch started from merged main `5b021f2`, then locally integrated the published first batch so further tests cover the cumulative buyer changes. GitHub main still awaits the owner's review/merge. Keep `fix/buyer-return-identity-regressions` local until publication is explicitly requested.
 
 ## Acceptance and sequence
 
@@ -10,7 +10,7 @@ This continues the active review after published batch `fix/buyer-misuse-regress
 4. Continue the remaining Bag/product/shop, vouchers/orders/reviews, recovery, notifications/tracking and messaging scenarios from the broader coverage record. Keep evidence by feature; existing passing regressions alone do not complete native exploration.
 5. Use the actual Linux app for desktop keyboard, paste, file-dialog and visible-feedback checks. Repeat confirmed cases in the native runner with synthetic fixtures and blocked outbound requests. Pass the full isolated suite, analysis, formatting and relevant native builds before handoff.
 
-Only buyer mobile is writable. Backend source/configuration/Git/database remain read-only. No production accounts, messages, emails, orders, payments or synthetic spam. No website redirect replaces a buyer function. The first batch's reusable SDK fixture tooling may be reused without claiming its unmerged fixes are present on this branch.
+Only buyer mobile is writable. Backend source/configuration/Git/database remain read-only. No production accounts, messages, emails, orders, payments or synthetic spam. No website redirect replaces a buyer function. The locally integrated first batch supplies its existing validation fixes and native test tooling without publishing a main-branch merge.
 
 ## Coverage and evidence
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/contact_input.dart';
 import '../../core/widgets.dart';
+export '../../core/auth_validation.dart';
 
 class AuthShell extends StatelessWidget {
   const AuthShell({
@@ -241,10 +243,17 @@ class _AuthFieldState extends State<AuthField> {
       enableSuggestions: !widget.password,
       autocorrect: !widget.password,
       keyboardType: widget.keyboardType,
+      inputFormatters: widget.keyboardType == TextInputType.phone
+          ? [mobileNumberFormatter]
+          : null,
       autofillHints: widget.autofillHints,
       maxLength: widget.maxLength,
       style: const TextStyle(fontSize: 16),
-      validator: widget.validator,
+      validator: (value) =>
+          widget.validator?.call(value) ??
+          (widget.keyboardType == TextInputType.phone
+              ? mobileNumberValidator(value)
+              : null),
       forceErrorText: widget.error,
       onChanged: widget.onChanged,
       onFieldSubmitted: widget.onSubmitted,
@@ -274,28 +283,4 @@ class _AuthFieldState extends State<AuthField> {
       ),
     ),
   );
-}
-
-String? emailValidator(String? value) {
-  final email = value?.trim() ?? '';
-  if (email.isEmpty) {
-    return 'Enter your email address.';
-  }
-  if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
-    return 'Enter a valid email address.';
-  }
-  return null;
-}
-
-String? passwordValidator(String? value) {
-  final password = value ?? '';
-  if (password.length < 8 ||
-      password.length > 128 ||
-      !RegExp('[a-z]').hasMatch(password) ||
-      !RegExp('[A-Z]').hasMatch(password) ||
-      !RegExp('[0-9]').hasMatch(password) ||
-      !RegExp(r'[^a-zA-Z0-9\s]').hasMatch(password)) {
-    return 'Use 8–128 characters with uppercase, lowercase, a number, and a symbol.';
-  }
-  return null;
 }

@@ -80,6 +80,22 @@ Use the left sidebar to choose a device, rotate it, adjust text size or hide the
 
 This debug-only layout tool uses `device_frame` presets and is not an Android/iOS emulator. Google sign-in, native device permissions and real provider acceptance use the actual phone. Normal `flutter run -d linux` and the regular mobile entrypoint keep their existing UI. Details: [device preview plan](docs/plans/buyer-device-preview.md).
 
+For input and navigation checks with synthetic buyer data and all network requests blocked:
+
+```sh
+flutter run -d linux -t tool/qa_preview.dart
+```
+
+This separate debug entrypoint displays an **ISOLATED QA** banner. It uses the real buyer widgets with test fixtures; unimplemented fixture actions fail locally. It cannot create a real account, send email or place a real order. Use the normal preview command above for your configured backend.
+
+Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
+
+```sh
+flutter test integration_test/buyer_misuse_test.dart -d linux
+```
+
+These SDK integration checks open a native window. They supplement the isolated `flutter test` suite and desktop keyboard/clipboard checks; real Google, permission dialogs, backend authorization and physical-device acceptance remain separate. See the [misuse review and coverage record](docs/plans/buyer-misuse-regressions.md).
+
 Linux builds require Clang, CMake, Ninja, pkg-config, GTK 3, libsecret and jsoncpp development libraries. Persistent sessions also need a working desktop Secret Service; ordinary login remains usable if secure storage is unavailable. Build without opening a window with `flutter build linux --debug`.
 
 ## Native link setup
