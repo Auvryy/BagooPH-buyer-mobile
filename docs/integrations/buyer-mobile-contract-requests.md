@@ -28,6 +28,8 @@ The website maintainer should define a buyer-only endpoint that accepts a Google
 
 New-account completion should reuse current buyer age, name, address, policy-version, approval, and account-linking rules. Document the request/response schema, validation errors, session regeneration, expiration, retry behavior, and allowed OAuth client IDs before the mobile SDK is connected. Keep provider secrets on the server.
 
+The latest agreed next-slice proposal adds optional boolean `remember` (default false) and existing-account `account_password` proof when a verified Google identity would first link an email/password buyer. Missing proof returns HTTP 409 with `code: GOOGLE_ACCOUNT_LINK_REQUIRED`; invalid proof returns 422 field feedback for `account_password`. Already-linked subjects do not require that proof. Registration uses `registration_nonce`; its response includes integer `expiresAt` in UTC Unix seconds, and its session-bound native challenge lasts at most 600 seconds without outliving the verified ID token. Keep native and browser challenge purposes separate. These details await their own implemented/tested server handoff before native SDK integration; credentials and challenges remain in memory and failed POSTs are not replayed automatically.
+
 ## 2. Optional device push delivery
 
 The current website does not expose a buyer device-token registration/revocation contract or a Firebase sender. The app therefore retains its native inbox without presenting push as an available feature.
@@ -38,7 +40,9 @@ Keep push delivery optional and independently retryable. A disabled feature, mis
 
 ## 3. A versioned mobile capability contract
 
-Provide a small read-only capability/version response so the app can identify supported native authentication and push contracts before displaying their controls. Publish supported contract versions and explicit unavailable states. Agree route names and schemas with the mobile maintainer; proposed routes must not be treated as already deployed.
+The web maintainer agreed and implemented guest-safe `GET /buyer/mobile-capabilities` version one in local web commit `91795f5`. It returns integer `contract_version: 1` and required boolean `features.native_google_sign_in` and `features.device_push`, with private/no-store caching and no submitted CSRF requirement. Mobile has a strict on-demand reader; unavailable, invalid, unsupported and redirected responses enable no optional capability. The shared disabled fixture is retained in `test/fixtures/buyer-mobile-capabilities-disabled.json`.
+
+This confirms local source/schema support, not deployment, native SDK setup or device acceptance. The backend probe reports optional discovery separately from core checks; startup and email login do not wait for it. Device push is deferred by the owner and remains false. Google still needs its separately implemented and verified exchange, native SDK and approved owner configuration.
 
 Longer term, stable buyer JSON contracts can reduce the app's dependency on Inertia page props. Preserve the existing web authorization and buyer business rules while providing mobile contracts for the same server-owned results.
 
@@ -48,21 +52,20 @@ The earlier native Google and Firebase SDK integrations were removed from this m
 
 ## Proposed route and response handoff
 
-The names below are proposals for the website maintainer to approve. They are absent from the inspected website source and are not called by the current mobile app. Existing website pages and browser OAuth routes should keep their current contracts.
+The names below remain proposals pending their own implementation/schema verification and mobile integration. The confirmed capability route is documented above. Existing website pages and browser OAuth routes should keep their current contracts; a locally implemented capability response does not establish the other routes as deployed.
 
 | Proposed route | Request | Confirmed response |
 | --- | --- | --- |
-| `GET /buyer/mobile-capabilities` | Read-only request; allow a guest response without account data | Contract version and explicit Google/push enabled flags; default each feature to unavailable until its dependencies are ready |
-| `POST /auth/google/native` | Google `id_token`, using the agreed session/CSRF contract | Exactly one outcome: authenticated buyer session, or registration required; no browser redirect or client-trusted identity |
-| `GET /auth/google/native/registration` | Same session that received the registration challenge | Verified name/email, expiring registration nonce, adult birth-date limits, and current policy URLs/versions |
-| `POST /auth/google/native/register` | Nonce, native personal/address fields, accepted policy versions | Confirmed registered buyer session using the existing buyer registration service; no client-supplied Google subject or role |
+| `POST /auth/google/native` | Google `id_token`, optional boolean `remember`, and `account_password` only when existing-account link proof is required, using the agreed session/CSRF contract | Authenticated buyer session or registration required; explicit 409 link-proof challenge where applicable; no browser redirect or client-trusted identity |
+| `GET /auth/google/native/registration` | Same session that received the registration challenge | Verified identity, registration nonce, integer `expiresAt`, adult birth-date limits, and current policy URLs/versions |
+| `POST /auth/google/native/register` | `registration_nonce`, native personal/address fields, accepted policy versions | Confirmed registered buyer session using the existing buyer registration service; no client-supplied Google subject or role |
 | `POST /buyer/push-device` | Authenticated opt-in buyer; device token and Android/iOS platform | Explicit registration acknowledgement and opaque device handle tied to the authenticated owner; repeated registration is idempotent |
 | `DELETE /buyer/push-device` | Authenticated owner and registered device handle; agree token-based compatibility if needed | Explicit revocation acknowledgement; repeated revocation is harmless and does not depend on Firebase returning a fresh token |
 | `GET /notifications/{uuid}` (optional) | Authenticated buyer | One currently owned, permitted notice and its existing buyer destination; supports opening a specific push notice without searching paginated inbox pages |
 
 Agree field names, nullability, versions, and examples with the mobile maintainer before implementation. Return JSON validation errors using the existing message/errors shape. Specify 401 for expired authentication, 403 for denied access, 422 for rejected input/challenges, 429 for rate limits, and 503 for unavailable provider configuration. Keep authentication and private responses non-cacheable. The app must never infer success from a redirect or a missing acknowledgement.
 
-Suggested capability response before provider setup:
+Confirmed version-one disabled capability response before provider setup:
 
 ```json
 {
