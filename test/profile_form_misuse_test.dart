@@ -109,6 +109,29 @@ void main() {
     });
   }
 
+  testWidgets('password limits count Unicode characters like the server', (
+    tester,
+  ) async {
+    await open(tester);
+    final password = 'Aa1!${String.fromCharCode(0x10428) * 100}';
+    for (final entry in {
+      'Current password': 'Original!123',
+      'New password': password,
+      'Confirm new password': password,
+    }.entries) {
+      tester
+          .widget<TextFormField>(find.widgetWithText(TextFormField, entry.key))
+          .controller!
+          .text = entry
+          .value;
+    }
+    final submit = find.widgetWithText(FilledButton, 'Update password');
+    await reveal(tester, submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(repository.mutations, hasLength(1));
+  });
+
   testWidgets('invalid wallet amounts never create a credit request', (
     tester,
   ) async {

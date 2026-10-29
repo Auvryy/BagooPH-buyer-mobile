@@ -245,11 +245,12 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       ),
       validator: (v) {
         final value = secret ? v ?? '' : v?.trim() ?? '';
+        final length = value.runes.length;
         if (required && value.isEmpty) return 'Enter ${label.toLowerCase()}.';
-        if (value.isNotEmpty && value.length < min) {
+        if (value.isNotEmpty && length < min) {
           return 'Use at least $min characters.';
         }
-        if (max != null && value.length > max) {
+        if (max != null && length > max) {
           return 'Use at most $max characters.';
         }
         return check?.call(value) ??

@@ -135,6 +135,25 @@ void main() {
   });
 
   testWidgets(
+    'return reason minimum counts Unicode characters like the server',
+    (tester) async {
+      await command(tester);
+      tester
+              .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Reason or receipt details'),
+              )
+              .controller!
+              .text =
+          String.fromCharCode(0x10428) * 5;
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Withdraw request'),
+      );
+      expect(session.submissions, isEmpty);
+    },
+  );
+
+  testWidgets(
     'uncertain command retry preserves its exact token, version and reason',
     (tester) async {
       await command(tester);
