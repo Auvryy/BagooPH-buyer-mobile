@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../app/theme.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -345,74 +346,138 @@ class PrivateDocumentPage extends StatefulWidget {
   State<PrivateDocumentPage> createState() => _PrivateDocumentPageState();
 }
 
-class _PrivateDocumentPageState extends State<PrivateDocumentPage> {
-  late Future<RemoteDocument> _document;
+class _PrivateDocumentPageState extends State<PrivateDocumentPage>
+    with WidgetsBindingObserver {
+  late BuyerAccountScope _account;
+  Future<RemoteDocument>? _document;
   @override
   void initState() {
     super.initState();
+    _account = BuyerAccountScope(widget.repository.session);
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
-  void _load() {
-    _document = widget.repository.session.documentBytes(widget.path);
+  @override
+  void didUpdateWidget(PrivateDocumentPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository) {
+      _account.invalidate();
+      _account = BuyerAccountScope(widget.repository.session);
+      _load();
+    } else if (oldWidget.path != widget.path) {
+      _load();
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.title)),
-    body: SafeArea(
-      child: FutureBuilder(
-        future: _document,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Notice(
-                      snapshot.error is BackendException
-                          ? (snapshot.error as BackendException).message
-                          : 'The document could not load.',
-                      error: true,
-                    ),
-                    TextButton(
-                      onPressed: () => setState(_load),
-                      child: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          final document = snapshot.data;
-          if (document == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return document.mime == 'application/pdf'
-              ? PdfViewer.data(
-                  document.bytes,
-                  sourceName: widget.title,
-                  params: PdfViewerParams(
-                    linkHandlerParams: PdfLinkHandlerParams(onLinkTap: (_) {}),
-                  ),
-                )
-              : Center(
-                  child: InteractiveViewer(
-                    maxScale: 5,
-                    child: Image.memory(
-                      document.bytes,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Notice(
-                        'This image cannot be displayed.',
-                        error: true,
-                      ),
-                    ),
-                  ),
-                );
-        },
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_account.isCurrent && mounted) {
+      setState(() => _document = null);
+    }
+  }
+
+  @override
+  void dispose() {
+    _account.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _load() {
+    final account = _account;
+    final session = widget.repository.session;
+    final path = widget.path;
+    _document = () async {
+      account.check();
+      try {
+        final document = await session.documentBytes(path);
+        account.check();
+        return document;
+      } on BackendException catch (e) {
+        if ([401, 403, 404, 419].contains(e.status)) account.invalidate();
+        rethrow;
+      }
+    }();
+  }
+
+  Widget _failure(String message, {bool retry = true}) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Notice(message, error: true),
+          TextButton(
+            onPressed: retry
+                ? () => setState(_load)
+                : () => Navigator.of(context).maybePop(),
+            child: Text(retry ? 'Try again' : 'Close document'),
+          ),
+        ],
       ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(
+        _account.isCurrent ? widget.title : 'Private document unavailable',
+      ),
+    ),
+    body: SafeArea(
+      child: !_account.isCurrent
+          ? _failure(
+              'Your buyer account changed or access ended. Close this document and reopen it from your account.',
+              retry: false,
+            )
+          : FutureBuilder(
+              key: ObjectKey(_document),
+              future: _document,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  if (!_account.isCurrent) {
+                    return _failure(
+                      'Your buyer account changed or access ended. Close this document and reopen it from your account.',
+                      retry: false,
+                    );
+                  }
+                  return _failure(
+                    snapshot.error is BackendException
+                        ? (snapshot.error as BackendException).message
+                        : 'The document could not load.',
+                  );
+                }
+                final document = snapshot.data;
+                if (document == null) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return document.mime == 'application/pdf'
+                    ? PdfViewer.data(
+                        document.bytes,
+                        sourceName: widget.title,
+                        params: PdfViewerParams(
+                          linkHandlerParams: PdfLinkHandlerParams(
+                            onLinkTap: (_) {},
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: InteractiveViewer(
+                          maxScale: 5,
+                          child: Image.memory(
+                            document.bytes,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Notice(
+                              'This image cannot be displayed.',
+                              error: true,
+                            ),
+                          ),
+                        ),
+                      );
+              },
+            ),
     ),
   );
 }

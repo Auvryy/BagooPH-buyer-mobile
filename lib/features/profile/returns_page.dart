@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/web_session.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
 import '../../core/request_id.dart';
 import '../../core/widgets.dart';
@@ -27,6 +28,7 @@ class ReturnsPage extends StatefulWidget {
 }
 
 class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
+  late final BuyerAccountScope _account;
   WebPage? _page;
   int _number = 1;
   int? _createdId;
@@ -41,11 +43,13 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   @override
   void initState() {
     super.initState();
+    _account = BuyerAccountScope(widget.repository.session);
     _load();
   }
 
   @override
   void dispose() {
+    _account.invalidate();
     _description.dispose();
     for (final c in _quantities.values) {
       c.dispose();
@@ -54,6 +58,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   }
 
   void _accept(WebPage page) {
+    _account.check(page: page);
     widget.repository.buyer.requireNoErrors(page);
     if (page.user?['role'] != 'buyer' ||
         ![
@@ -66,7 +71,8 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
       );
     }
     if (page.component == 'Returns/Show' &&
-        (mapOf(page.props['returnCase'])['id'] is! num ||
+        (mapOf(page.props['returnCase'])['id'] is! int ||
+            (mapOf(page.props['returnCase'])['id'] as int) < 1 ||
             (caseId != null &&
                 mapOf(page.props['returnCase'])['id'] != caseId))) {
       throw const BackendException('This return could not be confirmed.');
@@ -86,6 +92,46 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     }
   }
 
+  void _discardPrivate() {
+    _account.invalidate();
+    _page = null;
+    _createdId = null;
+    _submitted = null;
+    _photos.clear();
+    _selected.clear();
+    _reason = null;
+    _description.clear();
+    for (final controller in _quantities.values) {
+      controller.clear();
+    }
+    errors = {};
+    success = null;
+    problem = 'These return details are no longer available for this account. Reopen the return from your purchases.';
+  }
+
+  void _accessLost() {
+    if (mounted) setState(_discardPrivate);
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if (!_account.isCurrent || [401, 403, 404, 419].contains(error.status)) {
+      _discardPrivate();
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (!_account.isCurrent) {
+      _accessLost();
+      return Future.value(false);
+    }
+    return super.perform(action, validate: validate);
+  }
+
   Future<void> _load() async => perform(() async {
     final path = caseId != null
         ? '/buyer-returns/$caseId'
@@ -93,6 +139,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
         ? '/buyer-returns/orders/${widget.orderId}/create'
         : '/buyer-returns?page=$_number';
     final page = await widget.repository.buyer.document(path);
+    _account.check(page: page);
     final expected = caseId != null
         ? 'Returns/Show'
         : widget.orderId != null
@@ -144,11 +191,14 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
             ),
         ],
       );
+      _account.check(page: page);
       widget.repository.buyer.requireNoErrors(page);
+      final confirmation = mapOf(page.props['flash'])['success'];
       if (page.component != 'Returns/Show' ||
           mapOf(mapOf(page.props['returnCase'])['order'])['id'] !=
               widget.orderId ||
-          mapOf(page.props['flash'])['success'] is! String) {
+          confirmation is! String ||
+          confirmation.trim().isEmpty) {
         throw const BackendException(
           'The return request was not confirmed. Check existing returns before retrying.',
         );
@@ -173,6 +223,10 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     ),
   );
   Future<void> _command(String group, String action, String label) async {
+    if (!_account.isCurrent) {
+      _accessLost();
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _ReturnCommandPage(
@@ -181,6 +235,8 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
           group: group,
           action: action,
           label: label,
+          account: _account,
+          onAccessLost: _accessLost,
           onSaved: _accept,
         ),
       ),
@@ -643,11 +699,15 @@ class _ReturnCommandPage extends StatefulWidget {
     required this.action,
     required this.label,
     required this.onSaved,
+    required this.account,
+    required this.onAccessLost,
   });
   final ProfileRepository repository;
   final Map<String, dynamic> item;
   final String group, action, label;
   final ValueChanged<WebPage> onSaved;
+  final BuyerAccountScope account;
+  final VoidCallback onAccessLost;
   @override
   State<_ReturnCommandPage> createState() => _ReturnCommandPageState();
 }
@@ -656,9 +716,37 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
   final _reason = TextEditingController();
   final _token = requestId();
   Map<String, dynamic>? _submitted;
+  bool _accessLost = false;
   @override
   void onFailure(BackendException error) {
+    if (!widget.account.isCurrent ||
+        [401, 403, 404, 419].contains(error.status)) {
+      widget.account.invalidate();
+      _accessLost = true;
+      _submitted = null;
+      _reason.clear();
+      widget.onAccessLost();
+      return;
+    }
     if (error.status == 422 || error.fields.isNotEmpty) _submitted = null;
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (_accessLost || !widget.account.isCurrent) {
+      if (mounted) {
+        setState(
+          () => onFailure(
+            const BackendException('Your buyer account changed.', status: 401),
+          ),
+        );
+      }
+      return Future.value(false);
+    }
+    return super.perform(action, validate: validate);
   }
 
   @override
@@ -668,82 +756,104 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy,
-    child: Scaffold(
-      appBar: AppBar(title: Text(widget.label)),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: content([
-              ProfileHeading(
-                widget.label,
-                '${widget.item['reference']}\n${widget.action == 'confirm-receipt'
-                    ? 'Confirm only money you actually received. This records your receipt of the repayment.'
-                    : widget.action == 'report-nonreceipt'
-                    ? 'Describe the repayment you have not received. The recorded payment remains available for investigation.'
-                    : widget.action == 'prepare-label'
-                    ? 'Prepare the separate return label using the current approved authority.'
-                    : 'Explain the actual reason for this return update.'}',
-                Icons.assignment_return_outlined,
+  Widget build(BuildContext context) => _accessLost
+      ? Scaffold(
+          appBar: AppBar(title: const Text('Return update unavailable')),
+          body: const SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(24),
+              child: Notice(
+                'Your buyer account changed or access ended. Close this update and reopen the return from your purchases.',
+                error: true,
               ),
-              field(
-                'reason',
-                'Reason or receipt details',
-                _reason,
-                min: 10,
-                max: 1000,
-                lines: 4,
-                enabled: _submitted == null,
-              ),
-              if (_submitted != null)
-                const Notice(
-                  'The last response is uncertain. Retry this exact update or close and refresh the return history.',
-                  error: true,
-                ),
-              SubmitButton(
-                label: _submitted == null ? widget.label : 'Retry same update',
-                busy: busy,
-                onPressed: () => perform(() async {
-                  final payment = mapsOf(mapOf(widget.item['money'])['history'])
-                      .where(
-                        (event) => event['event_type'] == 'record-repayment',
-                      )
-                      .lastOrNull;
-                  _submitted ??= {
-                    'action': widget.action,
-                    'expected_version': widget.item['version'],
-                    'request_token': _token,
-                    'reason': _reason.text.trim(),
-                    if (widget.group == 'money')
-                      'source_event_id': payment?['id'],
-                  };
-                  final id = widget.item['id'];
-                  final page = await widget.repository.session.submit(
-                    '/buyer-returns/$id/${widget.group}',
-                    _submitted!,
-                    referer: '/buyer-returns/$id',
-                  );
-                  widget.repository.buyer.requireNoErrors(page);
-                  if (page.component != 'Returns/Show' ||
-                      mapOf(page.props['returnCase'])['id'] != id ||
-                      mapOf(page.props['flash'])['success'] is! String) {
-                    throw const BackendException(
-                      'This return update was not confirmed. Refresh its history before retrying.',
-                    );
-                  }
-                  if (context.mounted) {
-                    widget.onSaved(page);
-                    Navigator.pop(context);
-                  }
-                  return null;
-                }),
-              ),
-            ]),
+            ),
           ),
-        ),
-      ),
-    ),
-  );
+        )
+      : PopScope(
+          canPop: !busy,
+          child: Scaffold(
+            appBar: AppBar(title: Text(widget.label)),
+            body: SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: content([
+                    ProfileHeading(
+                      widget.label,
+                      '${widget.item['reference']}\n${widget.action == 'confirm-receipt'
+                          ? 'Confirm only money you actually received. This records your receipt of the repayment.'
+                          : widget.action == 'report-nonreceipt'
+                          ? 'Describe the repayment you have not received. The recorded payment remains available for investigation.'
+                          : widget.action == 'prepare-label'
+                          ? 'Prepare the separate return label using the current approved authority.'
+                          : 'Explain the actual reason for this return update.'}',
+                      Icons.assignment_return_outlined,
+                    ),
+                    field(
+                      'reason',
+                      'Reason or receipt details',
+                      _reason,
+                      min: 10,
+                      max: 1000,
+                      lines: 4,
+                      enabled: _submitted == null,
+                    ),
+                    if (_submitted != null)
+                      const Notice(
+                        'The last response is uncertain. Retry this exact update or close and refresh the return history.',
+                        error: true,
+                      ),
+                    SubmitButton(
+                      label: _submitted == null
+                          ? widget.label
+                          : 'Retry same update',
+                      busy: busy,
+                      onPressed: () => perform(() async {
+                        final payment =
+                            mapsOf(mapOf(widget.item['money'])['history'])
+                                .where(
+                                  (event) =>
+                                      event['event_type'] == 'record-repayment',
+                                )
+                                .lastOrNull;
+                        _submitted ??= {
+                          'action': widget.action,
+                          'expected_version': widget.item['version'],
+                          'request_token': _token,
+                          'reason': _reason.text.trim(),
+                          if (widget.group == 'money')
+                            'source_event_id': payment?['id'],
+                        };
+                        final id = widget.item['id'];
+                        final page = await widget.repository.session.submit(
+                          '/buyer-returns/$id/${widget.group}',
+                          _submitted!,
+                          referer: '/buyer-returns/$id',
+                        );
+                        widget.account.check(page: page);
+                        widget.repository.buyer.requireNoErrors(page);
+                        final confirmation = mapOf(
+                          page.props['flash'],
+                        )['success'];
+                        if (page.component != 'Returns/Show' ||
+                            mapOf(page.props['returnCase'])['id'] != id ||
+                            confirmation is! String ||
+                            confirmation.trim().isEmpty) {
+                          throw const BackendException(
+                            'This return update was not confirmed. Refresh its history before retrying.',
+                          );
+                        }
+                        if (context.mounted) {
+                          widget.onSaved(page);
+                          Navigator.pop(context);
+                        }
+                        return null;
+                      }),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        );
 }

@@ -28,4 +28,10 @@ Only buyer mobile is writable. Backend source/configuration/Git/database remain 
 
 ## Findings and checks
 
-No completion is claimed by this plan. Record reproduced failures, fixes, exact commands/results and remaining gates as work progresses. Real provider/OS/device acceptance remains distinct from native Linux fixture tests.
+No completion is claimed by this plan. Real provider/OS/device acceptance remains distinct from native Linux fixture tests.
+
+The initial return suite reproduced eight failures: access-denied refreshes retained private details/actions, another buyer's response was accepted, old-session actions could open, late reads could reveal details, and missing buyer IDs were accepted. Return work now binds to its opening buyer/session and clears private drafts, evidence and actions on access loss. Two existing boundary cases (temporary failure retention and mismatched case rejection) remain covered.
+
+Private-document checks reproduced an overflowing long error message, an image accepted after a session change, and a changed evidence path retaining its previous read. The viewer now binds reads to its session, resets snapshots when the resource changes, rejects late data and keeps failure feedback/retry scrollable at large text sizes. All thirteen isolated return/document widget cases pass; native exploration is still required.
+
+File-picker checks separately reproduced accepting an emptied file, reading a growing file without a bound, and exposing raw filesystem/platform failures. The picker now streams with its existing size limit and reports safe, recoverable failures. Twelve picker checks pass alongside the thirteen widget cases; server content and ownership validation remain authoritative.
