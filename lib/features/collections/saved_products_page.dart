@@ -65,7 +65,9 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
     _scope++;
     setState(() {
       _page = null;
-      _error = message;
+      _error = _identityEpoch != widget.repository.session.identityEpoch
+          ? 'Your account changed. Reopen your saved products after signing in.'
+          : message;
       _loading = false;
       _removing.clear();
     });
@@ -110,7 +112,8 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        if ([401, 403, 404, 419].contains(e.status)) {
+        if ([401, 403, 404, 419].contains(e.status) ||
+            _identityEpoch != widget.repository.session.identityEpoch) {
           _deny(e.message);
         } else {
           setState(() => _error = e.message);
@@ -124,7 +127,7 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
   }
 
   Future<void> _remove(int id) async {
-    if (_removing.contains(id)) return;
+    if (_removing.contains(id) || _page == null) return;
     if (_identityEpoch != widget.repository.session.identityEpoch) {
       _deny(
         'Your account changed. Reopen your saved products after signing in.',
@@ -148,7 +151,8 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
       await _load(page: _number);
     } on BackendException catch (e) {
       if (mounted && scope == _scope) {
-        if ([401, 403, 404, 419].contains(e.status)) {
+        if ([401, 403, 404, 419].contains(e.status) ||
+            _identityEpoch != widget.repository.session.identityEpoch) {
           _deny(e.message);
         } else {
           ScaffoldMessenger.of(context)

@@ -65,7 +65,9 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
     _scope++;
     setState(() {
       _page = null;
-      _error = message;
+      _error = _identityEpoch != widget.repository.session.identityEpoch
+          ? 'Your account changed. Reopen followed shops after signing in.'
+          : message;
       _loading = false;
       _unfollowing.clear();
     });
@@ -108,7 +110,8 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        if ([401, 403, 404, 419].contains(e.status)) {
+        if ([401, 403, 404, 419].contains(e.status) ||
+            _identityEpoch != widget.repository.session.identityEpoch) {
           _deny(e.message);
         } else {
           setState(() => _error = e.message);
@@ -122,7 +125,7 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
   }
 
   Future<void> _unfollow(int id) async {
-    if (_unfollowing.contains(id)) return;
+    if (_unfollowing.contains(id) || _page == null) return;
     if (_identityEpoch != widget.repository.session.identityEpoch) {
       _deny('Your account changed. Reopen followed shops after signing in.');
       return;
@@ -149,7 +152,8 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
       await _load(page: _number);
     } on BackendException catch (e) {
       if (mounted && scope == _scope) {
-        if ([401, 403, 404, 419].contains(e.status)) {
+        if ([401, 403, 404, 419].contains(e.status) ||
+            _identityEpoch != widget.repository.session.identityEpoch) {
           _deny(e.message);
         } else {
           ScaffoldMessenger.of(context)

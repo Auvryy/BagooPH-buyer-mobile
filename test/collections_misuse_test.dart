@@ -160,6 +160,19 @@ void main() {
               throw const BackendException('Offline', status: 503);
           await tester.tap(refresh);
           await tester.pumpAndSettle();
+          if (getPrivate().evaluate().isEmpty) {
+            await tester.scrollUntilVisible(
+              getPrivate(),
+              180,
+              scrollable: find
+                  .descendant(
+                    of: find.byType(ListView).first,
+                    matching: find.byType(Scrollable),
+                  )
+                  .first,
+            );
+            await tester.pumpAndSettle();
+          }
           expect(getPrivate(), findsOneWidget);
           session.onPage = (_) async =>
               throw const BackendException('Access denied', status: 403);
@@ -169,6 +182,21 @@ void main() {
           expect(getRemove(), findsNothing);
         },
       );
+
+      testWidgets('failed removal after a session change clears private rows', (
+        tester,
+      ) async {
+        final pending = Completer<Map<String, dynamic>>();
+        session.onPost = (_) => pending.future;
+        await open(tester);
+        await remove(tester);
+        session.clear();
+        pending.completeError(const BackendException('Offline', status: 503));
+        await tester.pumpAndSettle();
+        expect(getPrivate(), findsNothing);
+        expect(getRemove(), findsNothing);
+        expect(session.pageRequests, hasLength(1));
+      });
     });
   }
 }
