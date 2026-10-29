@@ -70,6 +70,16 @@ The Linux preview opens in a resizable 430 × 860 window. Widen it to inspect th
 flutter run -d linux --dart-define=BAGOO_BASE_URL='https://<BUYER_HOST>'
 ```
 
+For selectable Samsung, iPhone, Pixel and iPad frames, run the separate desktop preview entrypoint:
+
+```sh
+flutter run -d linux -t tool/preview.dart --dart-define-from-file=config/buyer.local.json
+```
+
+Use the left sidebar to choose a device, rotate it, adjust text size or hide the frame. Portrait phones use the available window height while preserving their aspect ratio. Narrow windows put the options in a side drawer. Resize the window as needed; changing devices keeps useful buyer form/navigation state. The preview uses the existing buyer app and the backend in your ignored owner configuration; see [setup](docs/release-setup.md) if that file is not present. Press `r` in the running Flutter terminal after code changes to hot reload.
+
+This debug-only layout tool uses `device_frame` presets and is not an Android/iOS emulator. Google sign-in, native device permissions and real provider acceptance use the actual phone. Normal `flutter run -d linux` and the regular mobile entrypoint keep their existing UI. Details: [device preview plan](docs/plans/buyer-device-preview.md).
+
 Linux builds require Clang, CMake, Ninja, pkg-config, GTK 3, libsecret and jsoncpp development libraries. Persistent sessions also need a working desktop Secret Service; ordinary login remains usable if secure storage is unavailable. Build without opening a window with `flutter build linux --debug`.
 
 ## Native link setup

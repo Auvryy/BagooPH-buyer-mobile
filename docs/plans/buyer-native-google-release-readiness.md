@@ -6,7 +6,7 @@ Connect the Flutter buyer app to the implemented native Google exchange and regi
 
 The baseline is mobile main `73407f5` (merged PR #9). The web handoff is the implemented `BUYER_NATIVE_GOOGLE.md`, `BUYER_APP_ASSOCIATIONS.md` and synthetic fixture pack in the web repository, with Google source delivered in `02a887d`. Verify executable source before implementing each operation; do not restore the superseded unsupported auth/push branch.
 
-The owner will connect an Android phone later. Physical-device acceptance is therefore deferred by the owner, not established by isolated tests or Linux preview. Approved buyer hostname and Google public client IDs are supplied only through ignored owner records; no provider secret, signing key or private infrastructure value belongs in tracked files. Device push and the later efficiency proposals remain deferred.
+The owner has now connected an Android phone and requested a selectable Linux layout preview before the real Google test. Physical-device acceptance is not established by isolated tests or the Linux preview. Approved buyer hostname and Google public client IDs are supplied only through ignored owner records; no provider secret, signing key or private infrastructure value belongs in tracked files. Device push and the later efficiency proposals remain deferred.
 
 ## Deliverables and acceptance
 
@@ -30,8 +30,8 @@ Complete coherent slices before starting another. Keep commits local; a previous
 
 ## Current evidence and pending inputs
 
-- `flutter devices --machine` reports Linux and Chrome only. Flutter web is not a configured buyer target; no Android/iOS device is connected.
-- The owner confirmed an Android phone can be connected in the future. No iOS/macOS build host is currently available.
+- The latest `flutter devices --machine` read detects a supported physical Android16/arm64 device alongside Linux and Chrome. Flutter web is not a configured buyer target. No iOS/macOS build host is currently available.
+- The owner requested the [selectable desktop preview](buyer-device-preview.md) before continuing actual Android Google sign-in. No real provider exchange has been performed by this session.
 - Existing Google Web application client IDs can be reused as the server audience after owner/backend configuration; Android needs its own package/signing registration. Do not read backend secret files to discover owner configuration.
 - The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. They also confirmed creating the requested Android development OAuth client and provided its public ID. All actual values are saved only in ignored owner notes/configuration and the existing shared handoff. The backend owner has now confirmed the deployed native Google settings contain both approved entries. Flutter continues using the Web ID as its server client. After an independent successful app-transport readiness check, the ignored mobile configuration now enables Android Google. Runtime provider acceptance is still pending.
 
@@ -86,7 +86,7 @@ Only GET requests were made by this mobile check. The backend maintainer separat
 
 A fresh debug APK compiled with that configuration. APK inspection confirms its application ID and signing SHA-1 match the owner's development registration, its native link host matches the configured buyer origin, and the approved Web/server ID and origin are present in the bundled Flutter debug kernel. This verifies the prepared artifact, not a real Google token exchange. Build outputs and certificate/owner values remain ignored.
 
-Flutter still detects Linux and Chrome only. Google sign-in requires a supported Android device for the next acceptance step; the owner previously deferred connecting a phone. iOS remains unconfigured pending its public client ID and a macOS/Xcode host. Domain associations and production release signing remain separate from this Android development registration.
+A physical Android device is now detected. The owner requested the [selectable desktop preview](buyer-device-preview.md) before continuing actual Google sign-in. iOS remains unconfigured pending its public client ID and a macOS/Xcode host. Domain associations and production release signing remain separate from this Android development registration.
 
 ## Handoff
 

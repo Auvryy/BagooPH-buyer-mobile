@@ -1,6 +1,6 @@
 # PR title
 
-Add native Google buyer authentication and owner release setup
+Add native Google buyer auth, device previews and release setup
 
 # PR description
 
@@ -10,9 +10,11 @@ Google is available only on configured Android/iOS builds with valid owner publi
 
 The owner build helper validates a public-only local configuration and derives matching Android link hosts and iOS Google callbacks. Android release builds require an owner keystore and cannot silently use debug signing. Local identities, credentials and keystores remain ignored. Setup and the concrete device/deployed buyer checklist are in [release setup](../release-setup.md).
 
+An optional Linux entrypoint adds Samsung, iPhone, Pixel and iPad frames with controls in a left sidebar, rotation, text scaling and fitting to the full available height. Narrow windows use a side drawer. The preview preserves buyer drafts and uses a pure Flutter development dependency; regular startup keeps its defaults. Run `flutter run -d linux -t tool/preview.dart --dart-define-from-file=config/buyer.local.json`.
+
 ## Validation
 
-- Full isolated Flutter suite: **379 passed**; `flutter analyze`, edited Dart formatting and whitespace checks pass.
+- Full isolated Flutter suite: **386 passed**; `flutter analyze`, edited Dart formatting and whitespace checks pass. Seven new preview checks cover device metrics/theme, drafts, controls, full-height/sidebar layout and compact/large-text windows.
 - Android debug APK and Linux debug bundle compile successfully.
 - A fresh configured Android debug APK bundles the approved buyer origin/Web client ID, with a matching native link host and registered development package/signing fingerprint.
 - An actual release attempt without owner signing is correctly blocked by the release guard.
@@ -21,6 +23,6 @@ The owner build helper validates a public-only local configuration and derives m
 
 ## Owner prerequisites
 
-The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement are now confirmed, and the ignored Android configuration enables Google. Real device/provider acceptance, owner release certificates and association identities remain pending. The owner deferred connecting an Android phone; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
+The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement are now confirmed, and the ignored Android configuration enables Google. A physical Android device is now detected; the owner requested the desktop preview before continuing real provider acceptance. Owner release certificates and association identities remain pending; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
 
 This is a **local PR draft**. No branch push, GitHub PR creation or merge has been performed for this mobile branch.
