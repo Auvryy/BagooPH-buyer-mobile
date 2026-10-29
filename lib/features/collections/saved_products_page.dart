@@ -32,6 +32,8 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
   bool _loading = true;
   int _number = 1;
   int _generation = 0;
+  int _scope = 0;
+  late int _identityEpoch;
   final Set<int> _removing = {};
 
   Map<String, dynamic> get _entries => mapOf(_page?.props['entries']);
@@ -40,7 +42,33 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
   @override
   void initState() {
     super.initState();
+    _identityEpoch = widget.repository.session.identityEpoch;
     _load();
+  }
+
+  @override
+  void didUpdateWidget(SavedProductsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository ||
+        oldWidget.ownerId != widget.ownerId) {
+      _scope++;
+      _identityEpoch = widget.repository.session.identityEpoch;
+      _page = null;
+      _removing.clear();
+      _load();
+    }
+  }
+
+  void _deny(String message) {
+    if (!mounted) return;
+    _generation++;
+    _scope++;
+    setState(() {
+      _page = null;
+      _error = message;
+      _loading = false;
+      _removing.clear();
+    });
   }
 
   @override
@@ -50,6 +78,13 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
   }
 
   Future<void> _load({int page = 1}) async {
+    if (!mounted) return;
+    if (_identityEpoch != widget.repository.session.identityEpoch) {
+      _deny(
+        'Your account changed. Reopen your saved products after signing in.',
+      );
+      return;
+    }
     final generation = ++_generation;
     setState(() {
       _loading = true;
@@ -61,7 +96,8 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
       if (!mounted || generation != _generation) {
         return;
       }
-      if (result.user?['id'] != widget.ownerId) {
+      if (result.user?['id'] != widget.ownerId ||
+          _identityEpoch != widget.repository.session.identityEpoch) {
         throw const BackendException(
           'Your account changed. Sign in again to view your saved products.',
           status: 401,
@@ -74,7 +110,11 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = e.message);
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _deny(e.message);
+        } else {
+          setState(() => _error = e.message);
+        }
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -85,22 +125,38 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
 
   Future<void> _remove(int id) async {
     if (_removing.contains(id)) return;
+    if (_identityEpoch != widget.repository.session.identityEpoch) {
+      _deny(
+        'Your account changed. Reopen your saved products after signing in.',
+      );
+      return;
+    }
+    final scope = _scope;
     setState(() => _removing.add(id));
     try {
       await widget.repository.saveProduct(id, false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product removed from saved products.')),
+      if (!mounted || scope != _scope) return;
+      if (_identityEpoch != widget.repository.session.identityEpoch) {
+        _deny(
+          'Your account changed. Reopen your saved products after signing in.',
         );
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product removed from saved products.')),
+      );
       await _load(page: _number);
     } on BackendException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted && scope == _scope) {
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _deny(e.message);
+        } else {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
       }
     } finally {
-      if (mounted) setState(() => _removing.remove(id));
+      if (mounted && scope == _scope) setState(() => _removing.remove(id));
     }
   }
 

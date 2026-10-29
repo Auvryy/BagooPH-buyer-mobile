@@ -34,8 +34,13 @@ class BuyerEngagementRepository {
     final page = await buyer.document(path);
     buyer.requireNoErrors(page);
     final entries = mapOf(page.props['entries']);
+    if (page.user?['role'] != 'buyer') {
+      throw const BackendException(
+        'Sign in to your buyer account to view this saved list.',
+        status: 401,
+      );
+    }
     if (page.component != component ||
-        page.user?['role'] != 'buyer' ||
         entries['data'] is! List ||
         entries['current_page'] is! num ||
         entries['last_page'] is! num) {

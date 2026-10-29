@@ -32,6 +32,8 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
   bool _loading = true;
   int _number = 1;
   int _generation = 0;
+  int _scope = 0;
+  late int _identityEpoch;
   final Set<int> _unfollowing = {};
 
   Map<String, dynamic> get _entries => mapOf(_page?.props['entries']);
@@ -40,7 +42,33 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
   @override
   void initState() {
     super.initState();
+    _identityEpoch = widget.repository.session.identityEpoch;
     _load();
+  }
+
+  @override
+  void didUpdateWidget(FollowedShopsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository ||
+        oldWidget.ownerId != widget.ownerId) {
+      _scope++;
+      _identityEpoch = widget.repository.session.identityEpoch;
+      _page = null;
+      _unfollowing.clear();
+      _load();
+    }
+  }
+
+  void _deny(String message) {
+    if (!mounted) return;
+    _generation++;
+    _scope++;
+    setState(() {
+      _page = null;
+      _error = message;
+      _loading = false;
+      _unfollowing.clear();
+    });
   }
 
   @override
@@ -50,6 +78,11 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
   }
 
   Future<void> _load({int page = 1}) async {
+    if (!mounted) return;
+    if (_identityEpoch != widget.repository.session.identityEpoch) {
+      _deny('Your account changed. Reopen followed shops after signing in.');
+      return;
+    }
     final generation = ++_generation;
     setState(() {
       _loading = true;
@@ -61,7 +94,8 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
       if (!mounted || generation != _generation) {
         return;
       }
-      if (result.user?['id'] != widget.ownerId) {
+      if (result.user?['id'] != widget.ownerId ||
+          _identityEpoch != widget.repository.session.identityEpoch) {
         throw const BackendException(
           'Your account changed. Sign in again to view followed shops.',
           status: 401,
@@ -74,7 +108,11 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = e.message);
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _deny(e.message);
+        } else {
+          setState(() => _error = e.message);
+        }
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -85,6 +123,11 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
 
   Future<void> _unfollow(int id) async {
     if (_unfollowing.contains(id)) return;
+    if (_identityEpoch != widget.repository.session.identityEpoch) {
+      _deny('Your account changed. Reopen followed shops after signing in.');
+      return;
+    }
+    final scope = _scope;
     setState(() => _unfollowing.add(id));
     try {
       final result = await widget.repository.session.jsonPost(
@@ -92,22 +135,29 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
         {},
         method: 'DELETE',
       );
+      if (!mounted || scope != _scope) return;
+      if (_identityEpoch != widget.repository.session.identityEpoch) {
+        _deny('Your account changed. Reopen followed shops after signing in.');
+        return;
+      }
       if (result['shop_id'] != id || result['following'] != false) {
         throw const BackendException('The unfollow change was not confirmed.');
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Shop removed from followed shops.')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Shop removed from followed shops.')),
+      );
       await _load(page: _number);
     } on BackendException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted && scope == _scope) {
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _deny(e.message);
+        } else {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
       }
     } finally {
-      if (mounted) setState(() => _unfollowing.remove(id));
+      if (mounted && scope == _scope) setState(() => _unfollowing.remove(id));
     }
   }
 
