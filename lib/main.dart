@@ -10,7 +10,7 @@ import 'core/buyer_repository.dart';
 import 'core/buyer_actions.dart';
 import 'core/web_session.dart';
 import 'core/widgets.dart';
-import 'core/session_vault.dart';
+import 'core/native_session_vault.dart';
 import 'core/catalogue_cache.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/recovery_page.dart';
