@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../app/theme.dart';
+import '../../core/contact_input.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -224,6 +225,9 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       minLines: lines,
       maxLines: secret ? 1 : lines,
       keyboardType: keyboard,
+      inputFormatters: keyboard == TextInputType.phone
+          ? [mobileNumberFormatter]
+          : null,
       autofillHints: autofill,
       maxLength: max,
       onChanged: onChanged,
@@ -244,7 +248,8 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
         if (max != null && value.length > max) {
           return 'Use at most $max characters.';
         }
-        return check?.call(value);
+        return check?.call(value) ??
+            (keyboard == TextInputType.phone ? mobileNumberValidator(v) : null);
       },
     ),
   );

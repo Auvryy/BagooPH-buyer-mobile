@@ -189,7 +189,8 @@ void main() {
         TextFormField,
         'Philippine mobile number',
       );
-      await tester.enterText(phone, 'bad');
+      // Bypass keyboard filtering to check the submission guard as well.
+      tester.widget<TextFormField>(phone).controller!.text = 'bad';
       await tester.pumpAndSettle();
       tester.view.physicalSize = const Size(1200, 900);
       await tester.pumpAndSettle();

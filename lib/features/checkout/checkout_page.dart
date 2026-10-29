@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/contact_input.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -675,6 +676,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
       focusNode: _fieldFocus.putIfAbsent(key, FocusNode.new),
       controller: _fields[key],
       keyboardType: keyboard,
+      inputFormatters: keyboard == TextInputType.phone
+          ? [mobileNumberFormatter]
+          : null,
       enabled: !_submitting && !_frozen,
       onChanged: (_) {
         if (key == 'voucher_code') _voucherFeedback = null;
@@ -733,16 +737,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
           return 'Enter a four-digit postal code.';
         }
         if (key == 'recipient_phone') {
-          var phone = value.replaceAll(RegExp(r'[ ()-]'), '');
-          if (phone.startsWith('0')) {
-            phone = '+63${phone.substring(1)}';
-          } else if (phone.startsWith('63')) {
-            phone = '+$phone';
-          }
-          if (!RegExp(r'^\+?[0-9 ()-]+$').hasMatch(value) ||
-              !RegExp(r'^\+639[0-9]{9}$').hasMatch(phone)) {
-            return 'Use a Philippine mobile number, such as 09171234567.';
-          }
+          return mobileNumberValidator(v);
         }
         if (key == 'voucher_code' &&
             !RegExp(r'^[A-Z0-9_-]+$').hasMatch(value.toUpperCase())) {

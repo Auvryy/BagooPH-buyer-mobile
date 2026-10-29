@@ -38,3 +38,5 @@ Status starts as **pending**. Existing regression tests are a baseline, not a cl
 ## Findings
 
 Inspection confirms that selecting a phone keyboard does not restrict text entry. Several mobile/contact forms currently have only length checks, while the existing backend accepts canonical Philippine mobile numbers. Reproduce before changing behavior.
+
+Contact input: reproduced five baseline failures (letters accepted, and four malformed profile contacts submitted). Shared native form controls now reject an entire mixed-text edit and validate Philippine mobile formats on submission, including controller/autofill bypass. Optional blank contacts and legitimate local/international formatting remain supported. The final contact suite passes 31 cases; the earlier combined contact, Google, checkout and authentication run passed 59 cases. The checkout scrolling test now bypasses filtering intentionally to preserve its submission-validation coverage.

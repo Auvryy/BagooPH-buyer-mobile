@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/contact_input.dart';
 import '../../core/widgets.dart';
 
 class AuthShell extends StatelessWidget {
@@ -241,10 +242,17 @@ class _AuthFieldState extends State<AuthField> {
       enableSuggestions: !widget.password,
       autocorrect: !widget.password,
       keyboardType: widget.keyboardType,
+      inputFormatters: widget.keyboardType == TextInputType.phone
+          ? [mobileNumberFormatter]
+          : null,
       autofillHints: widget.autofillHints,
       maxLength: widget.maxLength,
       style: const TextStyle(fontSize: 16),
-      validator: widget.validator,
+      validator: (value) =>
+          widget.validator?.call(value) ??
+          (widget.keyboardType == TextInputType.phone
+              ? mobileNumberValidator(value)
+              : null),
       forceErrorText: widget.error,
       onChanged: widget.onChanged,
       onFieldSubmitted: widget.onSubmitted,
