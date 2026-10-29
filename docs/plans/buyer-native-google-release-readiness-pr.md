@@ -25,4 +25,4 @@ An optional Linux entrypoint adds Samsung, iPhone, Pixel and iPad frames with co
 
 The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement are now confirmed, and the ignored Android configuration enables Google. A physical Android device is now detected; the owner requested the desktop preview before continuing real provider acceptance. Owner release certificates and association identities remain pending; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
 
-This is a **local PR draft**. No branch push, GitHub PR creation or merge has been performed for this mobile branch.
+This is the prepared PR title/body for the owner's requested branch publication. Create the PR from the published branch using this description. A branch push does not establish real-device Google acceptance, release certification, a merge or deployment.
