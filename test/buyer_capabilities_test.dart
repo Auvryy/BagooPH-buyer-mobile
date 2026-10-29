@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:bagoo_buyer_mobile/core/buyer_capabilities.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,11 +19,12 @@ void expectUnavailable(Object? payload) {
 }
 
 void main() {
-  test('accepts the agreed initial disabled JSON contract', () {
-    final payload = jsonDecode(
-      '{"contract_version":1,"features":'
-      '{"native_google_sign_in":false,"device_push":false}}',
-    );
+  test('accepts the shared web fixture for the initial disabled contract', () {
+    final fixture = jsonDecode(
+      File('test/fixtures/buyer-mobile-capabilities-disabled.json')
+          .readAsStringSync(),
+    ) as Map<String, dynamic>;
+    final payload = (fixture['response'] as Map)['body'];
     final result = BuyerCapabilities.parse(payload);
     expect(result.isSupported, isTrue);
     expect(result.contractVersion, 1);

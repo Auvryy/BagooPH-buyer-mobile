@@ -12,6 +12,7 @@ class ControlledWebSession extends WebSession {
   final posts = <JsonMutation>[];
   final pageRequests = <String>[];
   final getRequests = <String>[];
+  final directGetRequests = <String>[];
   Future<Map<String, dynamic>> Function(JsonMutation request)? onPost;
   Future<Map<String, dynamic>> Function(String path)? onGet;
   Future<WebPage> Function(String path)? onPage;
@@ -38,6 +39,12 @@ class ControlledWebSession extends WebSession {
     getRequests.add(path);
     if (onGet == null) throw StateError('Unexpected JSON read: $path');
     return onGet!(path);
+  }
+
+  @override
+  Future<Map<String, dynamic>> jsonGetDirect(String path) async {
+    directGetRequests.add(path);
+    return jsonGet(path);
   }
 
   @override

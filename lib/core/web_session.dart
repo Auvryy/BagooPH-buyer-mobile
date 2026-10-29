@@ -208,6 +208,17 @@ class WebSession {
     return _json(response.body);
   }
 
+  /// Optional capability discovery must not accept a redirected JSON reply.
+  Future<Map<String, dynamic>> jsonGetDirect(String path) async {
+    final response = await _request(
+      'GET',
+      resolve(path),
+      acceptJson: true,
+      allowRedirects: false,
+    );
+    return _json(response.body);
+  }
+
   Future<Map<String, dynamic>> jsonPost(
     String path,
     Map<String, dynamic> values, {
@@ -326,6 +337,7 @@ class WebSession {
     bool inertia = false,
     bool acceptJson = false,
     bool binary = false,
+    bool allowRedirects = true,
     List<UploadPart>? files,
     String? referer,
     int redirects = 0,
@@ -412,6 +424,18 @@ class WebSession {
           status: 401,
         );
       }
+      final location =
+          response.headers.value('x-inertia-location') ??
+          response.headers.value(HttpHeaders.locationHeader);
+      if (!allowRedirects &&
+          (response.statusCode >= 300 && response.statusCode < 400 ||
+              response.statusCode == 409 && location != null)) {
+        await response.drain<void>().timeout(const Duration(seconds: 25));
+        throw BackendException(
+          'BagooPH returned an unsupported redirect.',
+          status: response.statusCode,
+        );
+      }
       for (final cookie in response.cookies) {
         final domain = cookie.domain?.replaceFirst(RegExp(r'^\.'), '');
         if (domain != null &&
@@ -447,9 +471,6 @@ class WebSession {
       final body = binary && response.statusCode < 400
           ? ''
           : utf8.decode(responseBytes, allowMalformed: true);
-      final location =
-          response.headers.value('x-inertia-location') ??
-          response.headers.value(HttpHeaders.locationHeader);
       if (([301, 302, 303, 307, 308, 409].contains(response.statusCode)) &&
           location != null &&
           !(response.statusCode == 409 && inertia && method == 'GET')) {
