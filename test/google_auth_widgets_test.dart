@@ -6,8 +6,10 @@ import 'package:bagoo_buyer_mobile/core/buyer_capabilities.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/auth/auth_shell.dart';
 import 'package:bagoo_buyer_mobile/features/auth/google_auth_page.dart';
+import 'package:bagoo_buyer_mobile/features/auth/google_auth_contract.dart';
 import 'package:bagoo_buyer_mobile/features/auth/google_auth_repository.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
+import 'package:bagoo_buyer_mobile/features/auth/google_registration_form.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
 import 'package:flutter/material.dart';
@@ -300,6 +302,43 @@ void main() {
       );
       expect(session.posts.length, 1);
       await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'optional canonical address validation remains visible beside the picker',
+    (tester) async {
+      session.onGet = (_) async => {
+        'regions': <Object>[],
+        'provinces': <Object>[],
+        'cities': <Object>[],
+        'barangays': <Object>[],
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: GoogleRegistrationForm(
+                repository: auth.buyer,
+                contract: GoogleRegistrationContract.parse(
+                  registrationData(),
+                  session,
+                ),
+                errors: const {'city': 'Choose a city within your province.'},
+                disabled: false,
+                canSubmit: true,
+                busy: false,
+                onSubmit: (_) async {},
+                onEdit: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await press(tester, find.text('Add my address now'));
+      expect(find.text('Choose a city within your province.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     },
   );
 

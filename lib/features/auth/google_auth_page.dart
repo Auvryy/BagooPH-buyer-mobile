@@ -148,11 +148,8 @@ class _GoogleAuthPageState extends State<GoogleAuthPage>
             if (c.coolingDown)
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    'Please wait ${c.retrySeconds} seconds before trying again.',
-                  ),
+                child: Text(
+                  'Please wait ${c.retrySeconds} seconds before trying again.',
                 ),
               ),
             if (c.busy &&

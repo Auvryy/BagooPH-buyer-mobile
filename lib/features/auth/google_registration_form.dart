@@ -244,12 +244,42 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
             initial: _location,
             disabled: widget.disabled,
             onChanged: (v) {
-              if (mounted) setState(() => _location = v);
+              if (!mounted) return;
+              final changed = v.keys
+                  .where((key) => v[key] != _location[key])
+                  .toList();
+              setState(() => _location = v);
+              for (final key in changed) {
+                widget.onEdit(key);
+                if (key == 'city') {
+                  widget.onEdit('municipality');
+                }
+              }
             },
             onLoading: (v) {
               if (mounted) setState(() => _loadingLocations = v);
             },
           ),
+          for (final key in [
+            'region',
+            'province',
+            'city',
+            'municipality',
+            'barangay',
+          ])
+            if (widget.errors[key] != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    widget.errors[key]!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ),
           _field(
             'address',
             'Street / house / unit',
