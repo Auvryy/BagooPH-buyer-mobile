@@ -36,10 +36,14 @@ class MainApp extends StatefulWidget {
     this.repository,
     this.incomingLinks,
     this.googleProvider,
+    this.theme,
+    this.scrollBehavior,
   });
   final BuyerRepository? repository;
   final Stream<Uri>? incomingLinks;
   final GoogleIdentityProvider? googleProvider;
+  final ThemeData? theme;
+  final ScrollBehavior? scrollBehavior;
   @override
   State<MainApp> createState() => _MainAppState();
 }
@@ -359,7 +363,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       child: child ?? const SizedBox.shrink(),
     ),
     debugShowCheckedModeBanner: false,
-    theme: BagooTheme.light,
+    theme: widget.theme ?? BagooTheme.light,
+    scrollBehavior: widget.scrollBehavior,
     themeMode: ThemeMode.light,
     home: _repository == null
         ? Scaffold(
