@@ -1,0 +1,6 @@
+{
+  "BAGOO_BASE_URL": "http://localhost:8000",
+  "BAGOO_GOOGLE_ENABLED": false,
+  "BAGOO_GOOGLE_SERVER_CLIENT_ID": "",
+  "BAGOO_GOOGLE_IOS_CLIENT_ID": ""
+}

@@ -382,7 +382,6 @@
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				BAGOO_LINK_HOST = buyer.example.invalid;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -565,7 +564,6 @@
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				BAGOO_LINK_HOST = buyer.example.invalid;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -589,7 +587,6 @@
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				BAGOO_LINK_HOST = buyer.example.invalid;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

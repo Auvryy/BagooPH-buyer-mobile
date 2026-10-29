@@ -12,12 +12,14 @@ class AuthShell extends StatelessWidget {
     required this.onBrowse,
     this.registration = false,
     this.onBack,
+    this.navigationEnabled = true,
   });
   final String title;
   final String subtitle;
   final Widget child;
   final VoidCallback onBrowse;
   final VoidCallback? onBack;
+  final bool navigationEnabled;
   final bool registration;
 
   @override
@@ -50,7 +52,7 @@ class AuthShell extends StatelessWidget {
                         children: [
                           const Brand(),
                           TextButton(
-                            onPressed: onBrowse,
+                            onPressed: navigationEnabled ? onBrowse : null,
                             child: const Text('Marketplace'),
                           ),
                         ],
@@ -60,7 +62,7 @@ class AuthShell extends StatelessWidget {
                         Align(
                           alignment: Alignment.centerLeft,
                           child: TextButton.icon(
-                            onPressed: onBack,
+                            onPressed: navigationEnabled ? onBack : null,
                             icon: const Icon(
                               Icons.arrow_back_rounded,
                               size: 18,

@@ -13,6 +13,7 @@ import 'core/widgets.dart';
 import 'core/native_session_vault.dart';
 import 'core/catalogue_cache.dart';
 import 'features/auth/login_page.dart';
+import 'features/auth/google_identity.dart';
 import 'features/auth/recovery_page.dart';
 import 'features/auth/register_page.dart';
 import 'features/home/home_page.dart';
@@ -30,9 +31,19 @@ void main() {
 enum _Screen { login, registration, recovery, home }
 
 class MainApp extends StatefulWidget {
-  const MainApp({super.key, this.repository, this.incomingLinks});
+  const MainApp({
+    super.key,
+    this.repository,
+    this.incomingLinks,
+    this.googleProvider,
+    this.theme,
+    this.scrollBehavior,
+  });
   final BuyerRepository? repository;
   final Stream<Uri>? incomingLinks;
+  final GoogleIdentityProvider? googleProvider;
+  final ThemeData? theme;
+  final ScrollBehavior? scrollBehavior;
   @override
   State<MainApp> createState() => _MainAppState();
 }
@@ -47,6 +58,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   WebPage? _initial;
   String? _notice;
   bool _restoring = false;
+  bool _providerFlowActive = false;
   int _probeGeneration = 0;
   StreamSubscription<Uri>? _links;
   BuyerLink? _pendingLink;
@@ -130,7 +142,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   }
 
   void _scheduleLink() {
-    if (!mounted || _pendingLink == null || _restoring) return;
+    if (!mounted || _pendingLink == null || _restoring || _providerFlowActive) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_openPendingLink());
     });
@@ -144,6 +158,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     if (link == null ||
         context == null ||
         !mounted ||
+        _providerFlowActive ||
         _resolvingLink == generation ||
         _restoring) {
       return;
@@ -236,6 +251,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   }
 
   Future<void> _probeSession() async {
+    if (_providerFlowActive) return;
     final generation = ++_probeGeneration;
     try {
       final page = await _repository!.currentSession();
@@ -253,6 +269,17 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       if (mounted && generation == _probeGeneration) {
         setState(() => _restoring = false);
       }
+    }
+  }
+
+  void _providerFlowChanged(bool active) {
+    if (!mounted) return;
+    _providerFlowActive = active;
+    _probeGeneration++;
+    if (active) _linkGeneration++;
+    if (!active) {
+      _scheduleLink();
+      if (_screen != _Screen.home) unawaited(_probeSession());
     }
   }
 
@@ -336,7 +363,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       child: child ?? const SizedBox.shrink(),
     ),
     debugShowCheckedModeBanner: false,
-    theme: BagooTheme.light,
+    theme: widget.theme ?? BagooTheme.light,
+    scrollBehavior: widget.scrollBehavior,
     themeMode: ThemeMode.light,
     home: _repository == null
         ? Scaffold(
@@ -370,6 +398,8 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
               _Screen.login => LoginPage(
                 repository: _repository!,
                 notice: _notice,
+                googleProvider: widget.googleProvider,
+                onProviderFlowChanged: _providerFlowChanged,
                 onAuthenticated: _authenticated,
                 onRegister: () => _go(_Screen.registration),
                 onForgot: () => _go(_Screen.recovery),

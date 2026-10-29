@@ -10,6 +10,7 @@ class ControlledWebSession extends WebSession {
   ControlledWebSession() : super(Uri.parse('http://localhost'));
 
   final posts = <JsonMutation>[];
+  final directPosts = <JsonMutation>[];
   final pageRequests = <String>[];
   final getRequests = <String>[];
   final directGetRequests = <String>[];
@@ -32,6 +33,15 @@ class ControlledWebSession extends WebSession {
     posts.add(request);
     if (onPost == null) throw StateError('Unexpected mutation: $method $path');
     return onPost!(request);
+  }
+
+  @override
+  Future<Map<String, dynamic>> jsonPostDirect(
+    String path,
+    Map<String, dynamic> values,
+  ) async {
+    directPosts.add((path: path, method: 'POST', values: Map.of(values)));
+    return jsonPost(path, values);
   }
 
   @override

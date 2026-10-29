@@ -240,6 +240,21 @@ class WebSession {
     return data;
   }
 
+  /// Native identity mutations require a direct acknowledgement, not a page.
+  Future<Map<String, dynamic>> jsonPostDirect(
+    String path,
+    Map<String, dynamic> values,
+  ) async {
+    final response = await _post(path, values, allowRedirects: false);
+    final data = _json(response.body);
+    if (data['success'] == false) {
+      throw BackendException(
+        data['message']?.toString() ?? 'The change was not confirmed.',
+      );
+    }
+    return data;
+  }
+
   /// Sends a JSON mutation whose successful response has no body (for example,
   /// an optional analytics event returning HTTP 204).
   Future<void> jsonPostNoContent(
@@ -304,6 +319,7 @@ class WebSession {
     String method = 'POST',
     String? referer,
     List<UploadPart>? files,
+    bool allowRedirects = true,
   }) async {
     _readRevision++;
     try {
@@ -324,6 +340,7 @@ class WebSession {
         values: values,
         referer: referer,
         files: files,
+        allowRedirects: allowRedirects,
       );
     } finally {
       _readRevision++;
@@ -497,6 +514,7 @@ class WebSession {
         final errors = data['errors'];
         if (errors is Map) {
           for (final entry in errors.entries) {
+            if (entry.value is List && (entry.value as List).isEmpty) continue;
             fields[entry.key.toString()] = entry.value is List
                 ? (entry.value as List).first.toString()
                 : entry.value.toString();
@@ -520,6 +538,9 @@ class WebSession {
           fields: fields,
           status: response.statusCode,
           data: data,
+          retryAt: retryDeadline(
+            response.headers.value(HttpHeaders.retryAfterHeader),
+          ),
         );
       }
       return reply;
@@ -651,14 +672,35 @@ class BackendException implements Exception {
     this.status,
     this.data = const {},
     this.connectionFailure = false,
+    this.retryAt,
   });
   final String message;
   final Map<String, String> fields;
   final int? status;
   final Map<String, dynamic> data;
   final bool connectionFailure;
+  final DateTime? retryAt;
   @override
   String toString() => message;
+}
+
+/// Parse only Retry-After metadata; response cookies/tokens are never exposed.
+DateTime? retryDeadline(String? header, {DateTime? now}) {
+  if (header == null || header.length > 128) return null;
+  final instant = (now ?? DateTime.now()).toUtc();
+  final seconds = int.tryParse(header);
+  if (seconds != null) {
+    if (seconds < 0 || seconds > 315360000) return null;
+    return instant.add(Duration(seconds: seconds));
+  }
+  try {
+    final value = HttpDate.parse(header).toUtc();
+    return value.isBefore(instant) ? instant : value;
+  } on HttpException {
+    return null;
+  } on FormatException {
+    return null;
+  }
 }
 
 class _SessionCookie {

@@ -14,7 +14,7 @@ The website working tree is evolving independently. Recheck relevant controller/
 
 | ID | Audit requirement | Delivery status |
 | --- | --- | --- |
-| P01 | Native Google authentication and registration | Dependency: native identity exchange |
+| P01 | Native Google authentication and registration | Native SDK, proof and registration implemented in the [Google release pass](buyer-native-google-release-readiness.md); owner configuration/device acceptance pending |
 | P02 | Remembered login/email and guest session continuity | Implemented; isolated account/session checks pass |
 | P03 | Recognize current sessions on authentication screens | Implemented; isolated account/session checks pass |
 | P04 | Emailed password-link recovery and token reset | Implemented; isolated account/session checks pass |

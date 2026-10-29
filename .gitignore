@@ -52,3 +52,8 @@ app.*.map.json
 
 # Local communication between buyer mobile and web agents
 /docs/local/buyer-web-coordination.md
+/docs/local/buyer-google-owner-setup.md
+
+# Owner-specific public build configuration (never put secrets in Dart defines)
+/config/*.local.json
+/ios/Flutter/Bagoo.local.xcconfig
