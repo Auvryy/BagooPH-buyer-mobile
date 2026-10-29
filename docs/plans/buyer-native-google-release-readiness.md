@@ -6,7 +6,7 @@ Connect the Flutter buyer app to the implemented native Google exchange and regi
 
 The baseline is mobile main `73407f5` (merged PR #9). The web handoff is the implemented `BUYER_NATIVE_GOOGLE.md`, `BUYER_APP_ASSOCIATIONS.md` and synthetic fixture pack in the web repository, with Google source delivered in `02a887d`. Verify executable source before implementing each operation; do not restore the superseded unsupported auth/push branch.
 
-The owner will connect an Android phone later. Physical-device acceptance is therefore deferred by the owner, not established by isolated tests or Linux preview. Approved buyer hostname and Google public client IDs are requested; no provider secret, signing key or private infrastructure value belongs in tracked files. Device push and the later efficiency proposals remain deferred.
+The owner will connect an Android phone later. Physical-device acceptance is therefore deferred by the owner, not established by isolated tests or Linux preview. Approved buyer hostname and Google public client IDs are supplied only through ignored owner records; no provider secret, signing key or private infrastructure value belongs in tracked files. Device push and the later efficiency proposals remain deferred.
 
 ## Deliverables and acceptance
 
@@ -33,11 +33,11 @@ Complete coherent slices before starting another. Keep commits local; a previous
 - `flutter devices --machine` reports Linux and Chrome only. Flutter web is not a configured buyer target; no Android/iOS device is connected.
 - The owner confirmed an Android phone can be connected in the future. No iOS/macOS build host is currently available.
 - Existing Google Web application client IDs can be reused as the server audience after owner/backend configuration; Android needs its own package/signing registration. Do not read backend secret files to discover owner configuration.
-- The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. They have now also confirmed creating the requested Android development OAuth client and provided its public ID. All actual values are saved only in ignored owner notes/configuration and the existing shared handoff. The Android ID belongs in the backend authorized-party allowlist; Flutter continues using the Web ID as its server client. Runtime provider acceptance is still pending. The local Google switch stays off until backend readiness is verified.
+- The owner supplied the public Web client ID and identified the existing buyer hostname through its web callback screenshot. They also confirmed creating the requested Android development OAuth client and provided its public ID. All actual values are saved only in ignored owner notes/configuration and the existing shared handoff. The backend owner has now confirmed the deployed native Google settings contain both approved entries. Flutter continues using the Web ID as its server client. After an independent successful app-transport readiness check, the ignored mobile configuration now enables Android Google. Runtime provider acceptance is still pending.
 
 ## Implementation and verification outcome
 
-Mobile implementation is complete on the unpublished working branch. Operational Google and installed-link acceptance remains pending owner/provider/deployment setup; the overall readiness work is still open.
+Mobile implementation is complete on the unpublished working branch. The deployed backend connection and Android configuration are now verified and prepared. Actual device/provider sign-in and installed-link release acceptance remain pending; the overall readiness work is still open.
 
 - `6336055` records the plan and boundaries.
 - `1ec87c7` adds strict native Google exchange/registration contracts, direct JSON writes, CSRF/session handling, rate metadata and explicit read-only recovery.
@@ -54,24 +54,39 @@ Observed final checks:
 | Full isolated Flutter suite | **379 passed**, including 46 additional native Google/configuration checks beyond the 333-test baseline |
 | `flutter analyze` | No issues found |
 | Edited Dart formatting / whitespace | Clean |
-| Android debug APK | Compiled successfully with the native Google dependency |
+| Android debug APK | Fresh configured APK compiles; package, certificate, native host and bundled owner configuration verified |
 | Linux debug bundle | Compiled successfully; Google remains unsupported on Linux |
 | Android release without owner signing | Correctly blocked by `validateBuyerReleaseSetup`; no signed release is certified |
 | iOS property lists / configuration references | Parse and reference the shared link/callback settings; Xcode compilation unavailable |
 | Public configuration helper | Example and ignored owner configuration validate; actual IDs/host are untracked |
-| Read-only local backend probe | Core buyer contracts pass; optional capability advertises Google false and push false |
-| Owner's public buyer origin | Guest session endpoint200; capability route and both association files404, without redirects |
+| Read-only local backend probe | Core buyer contracts passed at the original implementation cutoff |
+| Owner's hosted buyer origin | Fresh mobile reads confirm guest session200, Google capability200/version1/enabled and missing-challenge422 |
+| Post-deployment Google regression selection | 17 relevant tests passed again against unchanged application source |
 
 The new regressions cover direct HTTP/CSRF rotation, rejected redirects, strict challenge parsing, original buyer email/role confirmation, password proof, duplicate/rate/expiry/session guards, explicit uncertain-response recovery without POST replay, draft/policy preservation, paused lifecycle probes/queued links, canonical address feedback and narrow/landscape/tablet layouts with keyboard insets, 200% text and reduced motion. No browser automation, visible app launch or live account/order/payment/email/chat/database write was used.
 
-## Remaining operational acceptance
+## Operational acceptance status
 
-1. The owner has confirmed creating the development Android OAuth client and supplied its public ID. The backend owner still needs to include that approved native client in its authorized-party allowlist. The current development APK's public certificate fingerprints are recorded only in the ignored owner setup note. Release/Play signing certificates need their own approved registration; a real provider/device exchange remains unverified.
-2. Have the backend owner deploy/verify the implemented native capability/auth routes and configure approved Web audiences, native authorized parties and feature switches. The public404 response does not establish deployment of the new source. This mobile task changes no server settings or source.
+1. The owner confirmed creating the development Android OAuth client and supplied its public ID. The backend owner has verified that the deployed Web audience and Android authorized-party entries are loaded. The current development APK's public certificate fingerprints are recorded only in the ignored owner setup note. Release/Play signing certificates need their own approved registration; a real provider/device exchange remains unverified.
+2. Backend deployment/configuration readiness is now established for the existing native Google connection. The backend owner reports merged main `f001d39` with the integration commits present and post-deployment services healthy. Independent mobile HTTP evidence below supersedes the earlier missing-route observation. This mobile task changes no server settings or source.
 3. Supply owner release signing and actual association identities; verify HTTPS association responses and installed cold/warm links on signed builds. No private key was requested or generated for release.
 4. Complete native provider and full buyer-journey acceptance using approved test accounts when the owner connects a phone; use the concrete checklist in [release setup](../release-setup.md). iOS additionally needs an iOS public client ID, Apple team/provisioning and macOS/Xcode.
 
 Device push and later efficiency work remain deferred. Passing isolated tests and compilation is not a zero-bug, live-provider or production-parity certification.
+
+## Post-deployment Android preparation
+
+The owner forwarded the backend maintainer's post-deployment handoff. A fresh read-only check using the app's actual `WebSession` transport independently confirms:
+
+- Guest session HTTP200 with `authenticated=false`.
+- Direct capability HTTP200 with contract version1, `native_google_sign_in=true` and `device_push=false`.
+- Native registration GET without a challenge returns the expected HTTP422, demonstrating an enabled route.
+
+Only GET requests were made by this mobile check. The backend maintainer separately reports an invalid synthetic-token/CSRF rejection check; no real provider login is inferred from it. The owner-approved Android build configuration is now enabled in the ignored local file. The relevant identity/configuration/registration/lifecycle regression selection passed **17 tests** again; the existing full379-test and analysis evidence applies to unchanged application source.
+
+A fresh debug APK compiled with that configuration. APK inspection confirms its application ID and signing SHA-1 match the owner's development registration, its native link host matches the configured buyer origin, and the approved Web/server ID and origin are present in the bundled Flutter debug kernel. This verifies the prepared artifact, not a real Google token exchange. Build outputs and certificate/owner values remain ignored.
+
+Flutter still detects Linux and Chrome only. Google sign-in requires a supported Android device for the next acceptance step; the owner previously deferred connecting a phone. iOS remains unconfigured pending its public client ID and a macOS/Xcode host. Domain associations and production release signing remain separate from this Android development registration.
 
 ## Handoff
 

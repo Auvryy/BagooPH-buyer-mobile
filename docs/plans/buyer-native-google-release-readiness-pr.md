@@ -14,12 +14,13 @@ The owner build helper validates a public-only local configuration and derives m
 
 - Full isolated Flutter suite: **379 passed**; `flutter analyze`, edited Dart formatting and whitespace checks pass.
 - Android debug APK and Linux debug bundle compile successfully.
+- A fresh configured Android debug APK bundles the approved buyer origin/Web client ID, with a matching native link host and registered development package/signing fingerprint.
 - An actual release attempt without owner signing is correctly blocked by the release guard.
 - iOS property lists/configuration references parse; iOS compilation requires macOS/Xcode.
-- Read-only local buyer contracts pass. The owner's public origin answers the guest session check, but capability/association endpoints return404. No live authentication, account, order, payment, email, chat or database mutation was used for verification.
+- Read-only local buyer contracts pass. After backend deployment/configuration, fresh app-transport checks confirm hosted guest session200, native Google capability200/version1/enabled and missing-registration-challenge422. A fresh focused identity/configuration/screen selection passed17 tests. No real provider authentication, account, order, payment, email, chat or database mutation was used for mobile verification.
 
 ## Owner prerequisites
 
-The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement, owner release certificates/association identities and real provider acceptance remain pending. The owner deferred connecting an Android phone; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
+The owner has supplied the Web client ID, buyer hostname and newly created Android development OAuth client ID. Actual values are saved only in ignored owner records and the existing backend handoff. Backend allowlist configuration, deployment and enablement are now confirmed, and the ignored Android configuration enables Google. Real device/provider acceptance, owner release certificates and association identities remain pending. The owner deferred connecting an Android phone; iOS also needs its public client ID and Apple provisioning. Device push remains deferred.
 
-This is a **local PR draft**. No branch push, GitHub PR creation, merge or deployment has been performed for this work.
+This is a **local PR draft**. No branch push, GitHub PR creation or merge has been performed for this mobile branch.
