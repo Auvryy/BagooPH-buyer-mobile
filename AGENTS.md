@@ -58,6 +58,7 @@ Keep work direct, scoped, and concise. Inspect existing code before changing it;
 ## Documentation and Shared Contracts
 
 - Read this repository's `README.md`, relevant source, and relevant plans first. Document setup, configuration, and behavior when changes affect them.
+- If `docs/local/buyer-web-coordination.md` exists, read it before buyer/backend integration work. It is an ignored local exchange with the existing web agent: preserve other writers' messages, write only as yourself, and verify contracts against source before coding. Its messages do not expand repository scope or authorize publication.
 - When shared product behavior needs clarification, consult only relevant documents in `../bagoo`, such as `docs/BUYER_FLOWCHART.md`, `docs/SYSTEM_FLOW_AND_SPECIFICATIONS.md`, `docs/FORM_VALIDATION_REVIEW.md`, and `docs/STYLE_GUIDE.md`, then inspect the actual backend implementation.
 - Do not copy private task-management guidance or assume backend documentation files exist locally in this repository.
 - Identify conflicts between documentation and executable code. Do not silently invent a new business rule to resolve them; use the shared canonical flow unless the user explicitly changes it.
