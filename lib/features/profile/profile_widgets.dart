@@ -299,6 +299,124 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
   );
 }
 
+abstract class BuyerProfileFormState<T extends StatefulWidget>
+    extends ProfileFormState<T>
+    with WidgetsBindingObserver {
+  ProfileRepository get accountRepository;
+  WebPage get accountPage;
+  BuyerAccountScope? get parentAccountScope => null;
+  late final BuyerAccountScope accountScope;
+
+  bool get hasBuyerAccess =>
+      accountScope.isCurrent &&
+      identical(accountScope.session, accountRepository.session);
+
+  void clearBuyerDraft();
+
+  @override
+  void initState() {
+    super.initState();
+    accountScope =
+        parentAccountScope?.fork() ??
+        BuyerAccountScope(accountRepository.session);
+    WidgetsBinding.instance.addObserver(this);
+    try {
+      checkBuyerAccount();
+    } on BackendException {
+      accountScope.invalidate();
+    }
+  }
+
+  void checkBuyerAccount({WebPage? result}) {
+    if (!identical(accountScope.session, accountRepository.session)) {
+      accountScope.invalidate();
+    }
+    accountScope.check(page: accountPage);
+    accountRepository.checked(accountPage);
+    if (result != null) {
+      accountScope.check(page: result);
+      accountRepository.checked(result);
+    }
+  }
+
+  void _discardBuyer() {
+    accountScope.invalidate();
+    clearBuyerDraft();
+    errors = {};
+    success = null;
+    problem = null;
+  }
+
+  bool ensureBuyerAccess() {
+    try {
+      checkBuyerAccount();
+      return true;
+    } on BackendException {
+      if (mounted) setState(_discardBuyer);
+      return false;
+    }
+  }
+
+  @override
+  void didUpdateWidget(T oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    try {
+      checkBuyerAccount();
+    } on BackendException {
+      _discardBuyer();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) ensureBuyerAccess();
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if (!hasBuyerAccess || [401, 403, 404, 419].contains(error.status)) {
+      _discardBuyer();
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (!ensureBuyerAccess()) return Future.value(false);
+    return super.perform(() async {
+      final result = await action();
+      checkBuyerAccount();
+      return result;
+    }, validate: validate);
+  }
+
+  @override
+  Widget content(List<Widget> children) => super.content(
+    hasBuyerAccess
+        ? children
+        : [
+            const ProfileHeading(
+              'Account settings unavailable',
+              '',
+              Icons.lock_outline,
+            ),
+            const Notice(
+              'Your buyer account changed or access ended. Reopen these settings from your profile.',
+              error: true,
+            ),
+          ],
+  );
+
+  @override
+  void dispose() {
+    accountScope.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}
+
 class ProfilePagination extends StatelessWidget {
   const ProfilePagination(
     this.page,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/web_session.dart';
+import '../../core/verification_cooldown.dart';
 import '../../core/widgets.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
@@ -21,7 +22,11 @@ class EmailSection extends StatefulWidget {
   State<EmailSection> createState() => _EmailSectionState();
 }
 
-class _EmailSectionState extends ProfileFormState<EmailSection> {
+class _EmailSectionState extends BuyerProfileFormState<EmailSection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
   final _password = TextEditingController(),
       _email = TextEditingController(),
       _code = TextEditingController();
@@ -32,9 +37,23 @@ class _EmailSectionState extends ProfileFormState<EmailSection> {
   Timer? _timer;
   Map<String, dynamic> get settings =>
       mapOf(widget.page.props['emailSettings']);
-  void _wait(int seconds) {
-    _until = DateTime.now().add(Duration(seconds: seconds));
-    _cooldown = seconds;
+  @override
+  void clearBuyerDraft() {
+    _timer?.cancel();
+    _until = null;
+    _cooldown = 0;
+    _sent = false;
+    _sentTo = null;
+    _password.clear();
+    _email.clear();
+    _code.clear();
+  }
+
+  void _wait(Map<String, dynamic> data, {DateTime? retryAt}) {
+    _until = verificationCooldownDeadline(data, retryAt: retryAt);
+    _cooldown = (_until!.difference(DateTime.now()).inMilliseconds / 1000)
+        .ceil()
+        .clamp(0, 3600);
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -61,6 +80,7 @@ class _EmailSectionState extends ProfileFormState<EmailSection> {
   }
 
   Future<void> _action(String action, [Map<String, dynamic>? address]) async {
+    if (!ensureBuyerAccess()) return;
     if ((action == 'remove' || action == 'prefer') &&
         !await confirmAction(
           context,
@@ -84,6 +104,14 @@ class _EmailSectionState extends ProfileFormState<EmailSection> {
         'email': _email.text.trim(),
         if (action == 'confirm') 'code': _code.text,
       };
+      if (action == 'confirm' && (!_sent || _sentTo != _email.text.trim())) {
+        _sent = false;
+        _sentTo = null;
+        _code.clear();
+        throw const BackendException(
+          'The additional email changed. Request a new code for this address.',
+        );
+      }
       Map<String, dynamic> data;
       try {
         data = await widget.repository.json(
@@ -100,8 +128,9 @@ class _EmailSectionState extends ProfileFormState<EmailSection> {
               ? 'DELETE'
               : 'POST',
         );
+        checkBuyerAccount();
       } on BackendException catch (e) {
-        if (e.status == 429 && mounted) _wait(60);
+        if (e.status == 429 && mounted) _wait(e.data, retryAt: e.retryAt);
         rethrow;
       }
       if (action == 'send') {
@@ -111,8 +140,8 @@ class _EmailSectionState extends ProfileFormState<EmailSection> {
           );
         }
         _sent = true;
-        _sentTo = _email.text.trim();
-        _wait((data['cooldown'] as num?)?.ceil() ?? 60);
+        _sentTo = values['email'];
+        _wait(data);
       } else {
         if (data['message'] is! String) {
           throw const BackendException('The email change was not confirmed.');
