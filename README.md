@@ -88,6 +88,20 @@ flutter run -d linux -t tool/qa_preview.dart
 
 This separate debug entrypoint displays an **ISOLATED QA** banner. It uses the real buyer widgets with test fixtures; unimplemented fixture actions fail locally. It cannot create a real account, send email or place a real order. Use the normal preview command above for your configured backend.
 
+For isolated return forms, decision pages and private-evidence failure checks:
+
+```sh
+flutter run -d linux -t tool/return_review.dart
+```
+
+The sidebar selects the screen and its next synthetic response, including connection loss, access denial and changed form choices. Reset starts a fresh fixture; Change test account expires the open screen's session. This entrypoint blocks outbound requests and uses the real Linux file picker, so select a disposable test file when checking uploads. It does not test production authorization or payment/provider acceptance.
+
+Run the corresponding native regression cases with:
+
+```sh
+flutter test -d linux integration_test/return_misuse_test.dart
+```
+
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 
 ```sh

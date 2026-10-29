@@ -15,7 +15,9 @@ const privateDetails = 'Private return details for the original buyer.';
 
 Future<void> returnPress(WidgetTester tester, Finder target) async {
   if (target.hitTestable().evaluate().isEmpty) {
-    await tester.ensureVisible(target.first);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(target.first), alignment: .5);
     await tester.pumpAndSettle();
   }
   expect(target.hitTestable(), findsWidgets);

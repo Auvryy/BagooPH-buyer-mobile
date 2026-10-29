@@ -5,8 +5,13 @@ import 'package:flutter/gestures.dart';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 
 class BuyerDevicePreview extends StatefulWidget {
-  const BuyerDevicePreview({super.key, required this.builder});
+  const BuyerDevicePreview({
+    super.key,
+    required this.builder,
+    this.extraControls = const [],
+  });
   final WidgetBuilder builder;
+  final List<Widget> extraControls;
 
   static final devices = <DeviceInfo>[
     Devices.android.samsungGalaxyS25,
@@ -138,6 +143,7 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
               'The frame fits the available window. Google sign-in runs on your Android device.',
               style: TextStyle(color: BagooTheme.muted, height: 1.5),
             ),
+            ...widget.extraControls,
           ],
         ),
       ),
@@ -189,8 +195,13 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
                 ),
           body: SafeArea(
             child: Row(
+              // Nested buyer routes block preceding semantics siblings. Keep
+              // controls after the phone in traversal, visually on the left.
+              textDirection: TextDirection.rtl,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Expanded(child: _phone()),
+                const VerticalDivider(width: 1),
                 SizedBox(
                   width: sidebar ? 248 : 56,
                   child: sidebar
@@ -210,8 +221,6 @@ class _BuyerDevicePreviewState extends State<BuyerDevicePreview> {
                           ),
                         ),
                 ),
-                const VerticalDivider(width: 1),
-                Expanded(child: _phone()),
               ],
             ),
           ),
