@@ -344,9 +344,11 @@ class PrivateDocumentPage extends StatefulWidget {
     required this.repository,
     required this.path,
     required this.title,
+    this.account,
   });
   final ProfileRepository repository;
   final String path, title;
+  final BuyerAccountScope? account;
   @override
   State<PrivateDocumentPage> createState() => _PrivateDocumentPageState();
 }
@@ -358,7 +360,8 @@ class _PrivateDocumentPageState extends State<PrivateDocumentPage>
   @override
   void initState() {
     super.initState();
-    _account = BuyerAccountScope(widget.repository.session);
+    _account =
+        widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
     WidgetsBinding.instance.addObserver(this);
     _load();
   }
@@ -366,9 +369,12 @@ class _PrivateDocumentPageState extends State<PrivateDocumentPage>
   @override
   void didUpdateWidget(PrivateDocumentPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.repository != widget.repository) {
+    if (!identical(oldWidget.repository.session, widget.repository.session) ||
+        !identical(oldWidget.account, widget.account)) {
       _account.invalidate();
-      _account = BuyerAccountScope(widget.repository.session);
+      _account =
+          widget.account?.fork() ??
+          BuyerAccountScope(widget.repository.session);
       _load();
     } else if (oldWidget.path != widget.path) {
       _load();
@@ -393,6 +399,11 @@ class _PrivateDocumentPageState extends State<PrivateDocumentPage>
     final account = _account;
     final session = widget.repository.session;
     final path = widget.path;
+    if (!account.isCurrent || !identical(account.session, session)) {
+      account.invalidate();
+      _document = null;
+      return;
+    }
     _document = () async {
       account.check();
       try {

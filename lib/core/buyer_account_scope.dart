@@ -3,13 +3,28 @@ import 'web_session.dart';
 /// Binds private UI work to the session and buyer that opened it. Server
 /// authorization remains authoritative for every resource and mutation.
 class BuyerAccountScope {
-  BuyerAccountScope(this.session) : _epoch = session.identityEpoch;
+  BuyerAccountScope(this.session)
+    : _epoch = session.identityEpoch,
+      _parent = null;
+  BuyerAccountScope._from(BuyerAccountScope parent)
+    : session = parent.session,
+      _epoch = parent._epoch,
+      _owner = parent._owner,
+      _parent = parent;
   final WebSession session;
   final int _epoch;
+  final BuyerAccountScope? _parent;
   int? _owner;
   bool _invalid = false;
 
-  bool get isCurrent => !_invalid && _epoch == session.identityEpoch;
+  bool get isCurrent =>
+      !_invalid &&
+      _epoch == session.identityEpoch &&
+      (_parent?.isCurrent ?? true);
+
+  // A child retains the opening identity across a delayed route build, while
+  // closing that child must not invalidate its parent's private screen.
+  BuyerAccountScope fork() => BuyerAccountScope._from(this);
 
   void invalidate() => _invalid = true;
 

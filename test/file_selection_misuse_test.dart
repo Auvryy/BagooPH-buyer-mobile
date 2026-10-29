@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:bagoo_buyer_mobile/core/file_selection.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';

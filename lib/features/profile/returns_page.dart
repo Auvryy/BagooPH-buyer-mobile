@@ -27,9 +27,11 @@ class ReturnsPage extends StatefulWidget {
   State<ReturnsPage> createState() => _ReturnsPageState();
 }
 
-class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
+class _ReturnsPageState extends ProfileFormState<ReturnsPage>
+    with WidgetsBindingObserver {
   late final BuyerAccountScope _account;
   WebPage? _page;
+  bool _writeReady = false;
   int _number = 1;
   int? _createdId;
   final _description = TextEditingController();
@@ -44,12 +46,21 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   void initState() {
     super.initState();
     _account = BuyerAccountScope(widget.repository.session);
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_account.isCurrent) {
+      _accessLost();
+    }
   }
 
   @override
   void dispose() {
     _account.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
     _description.dispose();
     for (final c in _quantities.values) {
       c.dispose();
@@ -80,8 +91,18 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     if (!mounted) return;
     setState(() {
       _page = page;
+      _writeReady = true;
       if (page.component == 'Returns/Show') {
         _createdId = (item['id'] as num).toInt();
+      }
+      if (page.component == 'Returns/Create') {
+        final available = {
+          for (final purchase in mapsOf(page.props['items']))
+            if ((purchase['available_quantity'] as num) > 0)
+              (purchase['id'] as num).toInt(),
+        };
+        _selected.retainWhere(available.contains);
+        if (!mapOf(page.props['reasons']).containsKey(_reason)) _reason = null;
       }
     });
     for (final purchase in mapsOf(page.props['items'])) {
@@ -95,6 +116,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   void _discardPrivate() {
     _account.invalidate();
     _page = null;
+    _writeReady = false;
     _createdId = null;
     _submitted = null;
     _photos.clear();
@@ -133,6 +155,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   }
 
   Future<void> _load() async => perform(() async {
+    _writeReady = false;
     final path = caseId != null
         ? '/buyer-returns/$caseId'
         : widget.orderId != null
@@ -157,15 +180,25 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     return null;
   }, validate: false);
   Future<void> _request() async {
+    if (busy || !_writeReady) return;
     await perform(() async {
       if (_selected.isEmpty || _photos.isEmpty) {
         throw const BackendException(
           'Select at least one purchased item and add one to five photos of the problem.',
         );
       }
+      final token =
+          _submitted?['request_token'] ?? _page!.props['requestToken'];
+      if (token is! String ||
+          RegExp(r'^v1\.[a-f0-9-]{36}\.[a-f0-9]{64}$').stringMatch(token) !=
+              token) {
+        throw const BackendException(
+          'The return form could not be confirmed. Reload the current details before requesting a return.',
+        );
+      }
       _submitted ??= jsonDecode(
         jsonEncode({
-          'request_token': _page!.props['requestToken'],
+          'request_token': token,
           'reason': _reason,
           'description': _description.text.trim(),
           'items': [
@@ -213,20 +246,29 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     if (mounted && errors.isNotEmpty) setState(() => _submitted = null);
   }
 
-  void _view(String path, String title) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => PrivateDocumentPage(
-        repository: widget.repository,
-        path: path,
-        title: title,
+  void _view(String path, String title) {
+    if (!_account.isCurrent) {
+      _accessLost();
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PrivateDocumentPage(
+          repository: widget.repository,
+          path: path,
+          title: title,
+          account: _account,
+        ),
       ),
-    ),
-  );
+    );
+  }
+
   Future<void> _command(String group, String action, String label) async {
     if (!_account.isCurrent) {
       _accessLost();
       return;
     }
+    if (busy || !_writeReady) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _ReturnCommandPage(
@@ -287,6 +329,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
     ],
     const SizedBox(height: 16),
     DropdownButtonFormField<String>(
+      key: ValueKey(Object.hashAll(mapOf(_page!.props['reasons']).keys)),
       initialValue: _reason,
       isExpanded: true,
       decoration: const InputDecoration(labelText: 'Reason'),
@@ -363,7 +406,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
           ? 'Request a return'
           : 'Retry same return request',
       busy: busy,
-      onPressed: _request,
+      onPressed: _writeReady ? _request : null,
     ),
     const Padding(
       padding: EdgeInsets.only(top: 16),
@@ -484,7 +527,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
         for (final action in mapsOf(custody['actions']))
           if (action['action'] == 'prepare-label')
             OutlinedButton(
-              onPressed: busy
+              onPressed: busy || !_writeReady
                   ? null
                   : () => _command(
                       'custody',
@@ -552,7 +595,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
       for (final action in (money['actions'] as List? ?? []))
         if (['confirm-receipt', 'report-nonreceipt'].contains(action))
           FilledButton(
-            onPressed: busy
+            onPressed: busy || !_writeReady
                 ? null
                 : () => _command(
                     'money',
@@ -578,7 +621,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: OutlinedButton(
-              onPressed: busy
+              onPressed: busy || !_writeReady
                   ? null
                   : () => _command(
                       'actions',
@@ -614,81 +657,96 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy,
-    child: Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _page?.component == 'Returns/Create'
-              ? 'Request a return'
-              : 'Returns & Refunds',
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh returns',
-            onPressed: busy || _submitted != null ? null : _load,
-            icon: const Icon(Icons.refresh),
+  Widget build(BuildContext context) => !_account.isCurrent
+      ? Scaffold(
+          appBar: AppBar(title: const Text('Returns unavailable')),
+          body: const SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(24),
+              child: Notice(
+                'These return details are no longer available for this account. Reopen the return from your purchases.',
+                error: true,
+              ),
+            ),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900),
-            child: content([
-              if (_page?.component == 'Returns/Create')
-                ..._create()
-              else if (_page?.component == 'Returns/Show')
-                ..._show()
-              else if (_page != null) ...[
-                const ProfileHeading(
-                  'Returns and refunds',
-                  'If a delivered item has a problem, open its purchase and choose Request a return. Follow decisions, parcel handovers and repayment here.',
-                  Icons.assignment_return_outlined,
-                ),
-                if (mapsOf(mapOf(_page!.props['cases'])['data']).isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 48),
-                    child: Text(
-                      'No return requests',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                for (final row in mapsOf(mapOf(_page!.props['cases'])['data']))
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(row['reference'].toString()),
-                    subtitle: Text(
-                      'Purchase ${row['order_number']}\n${row['status'].toString().replaceAll('_', ' ')}\n${readableDateTime(row['created_at'])}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: busy
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => ReturnsPage(
-                                repository: widget.repository,
-                                caseId: (row['id'] as num).toInt(),
-                              ),
-                            ),
-                          ),
-                  ),
-                ProfilePagination(mapOf(_page!.props['cases']), (number) {
-                  _number = number;
-                  _load();
-                }, disabled: busy),
-              ],
-              if (problem != null)
-                TextButton(
+        )
+      : PopScope(
+          canPop: !busy,
+          child: Scaffold(
+            appBar: AppBar(
+              title: Text(
+                _page?.component == 'Returns/Create'
+                    ? 'Request a return'
+                    : 'Returns & Refunds',
+              ),
+              actions: [
+                IconButton(
+                  tooltip: 'Refresh returns',
                   onPressed: busy || _submitted != null ? null : _load,
-                  child: const Text('Reload current return details'),
+                  icon: const Icon(Icons.refresh),
                 ),
-            ]),
+              ],
+            ),
+            body: SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 900),
+                  child: content([
+                    if (_page?.component == 'Returns/Create')
+                      ..._create()
+                    else if (_page?.component == 'Returns/Show')
+                      ..._show()
+                    else if (_page != null) ...[
+                      const ProfileHeading(
+                        'Returns and refunds',
+                        'If a delivered item has a problem, open its purchase and choose Request a return. Follow decisions, parcel handovers and repayment here.',
+                        Icons.assignment_return_outlined,
+                      ),
+                      if (mapsOf(mapOf(_page!.props['cases'])['data']).isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Text(
+                            'No return requests',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      for (final row in mapsOf(
+                        mapOf(_page!.props['cases'])['data'],
+                      ))
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(row['reference'].toString()),
+                          subtitle: Text(
+                            'Purchase ${row['order_number']}\n${row['status'].toString().replaceAll('_', ' ')}\n${readableDateTime(row['created_at'])}',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: busy
+                              ? null
+                              : () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => ReturnsPage(
+                                      repository: widget.repository,
+                                      caseId: (row['id'] as num).toInt(),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ProfilePagination(mapOf(_page!.props['cases']), (number) {
+                        _number = number;
+                        _load();
+                      }, disabled: busy),
+                    ],
+                    if (problem != null)
+                      TextButton(
+                        onPressed: busy || _submitted != null ? null : _load,
+                        child: const Text('Reload current return details'),
+                      ),
+                  ]),
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
-    ),
-  );
+        );
 }
 
 class _ReturnCommandPage extends StatefulWidget {
@@ -756,7 +814,7 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
   }
 
   @override
-  Widget build(BuildContext context) => _accessLost
+  Widget build(BuildContext context) => _accessLost || !widget.account.isCurrent
       ? Scaffold(
           appBar: AppBar(title: const Text('Return update unavailable')),
           body: const SafeArea(

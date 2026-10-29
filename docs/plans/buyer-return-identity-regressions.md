@@ -16,9 +16,9 @@ Only buyer mobile is writable. Backend source/configuration/Git/database remain 
 
 | Area | Cases to establish | Evidence/status |
 | --- | --- | --- |
-| Return creation | Missing/invalid quantities, reason, description, photos; exact uncertain retry and one creation | Pending |
-| Return decisions and repayment | Server-permitted actions, case/version/source-event binding, repeated taps, uncertain retry, denied access | Pending |
-| Return privacy/lifecycle | Foreign owner/case/order, account changes, navigation, late results, failure after prior success | Pending |
+| Return creation | Missing/invalid quantities, reason, description, photos; exact uncertain retry and one creation | Focused creation cases pass; obsolete selections/reasons reset on refresh and missing signed form tokens block submission |
+| Return decisions and repayment | Server-permitted actions, case/version/source-event binding, repeated taps, uncertain retry, denied access | Decision validation, duplicate taps and exact uncertain retries pass; deeper repayment cases remain open |
+| Return privacy/lifecycle | Foreign owner/case/order, account changes, navigation, late results, failure after prior success | Account/resume/evidence-navigation cases pass; confirmed details survive temporary refresh failure with decisions disabled |
 | Private image/PDF viewing | Trusted-origin transport, empty/unsupported/corrupt files, changed account/path, long failure feedback/retry and small/large-text layout | Pending |
 | Native picker | Cancel, empty, maximum and oversized files, unsupported extension/content, read failure, changing file, bounded reads | Pending |
 | Identity corrections | Required evidence, dates/choices/text, source conflict, stale identity, failed/repeated submission | Pending |
@@ -35,3 +35,9 @@ The initial return suite reproduced eight failures: access-denied refreshes reta
 Private-document checks reproduced an overflowing long error message, an image accepted after a session change, and a changed evidence path retaining its previous read. The viewer now binds reads to its session, resets snapshots when the resource changes, rejects late data and keeps failure feedback/retry scrollable at large text sizes. All thirteen isolated return/document widget cases pass; native exploration is still required.
 
 File-picker checks separately reproduced accepting an emptied file, reading a growing file without a bound, and exposing raw filesystem/platform failures. The picker now streams with its existing size limit and reports safe, recoverable failures. Twelve picker checks pass alongside the thirteen widget cases; server content and ownership validation remain authoritative.
+
+The next return pass reproduced five form/action issues: an empty signed request token reached submission, failed refreshes left decision buttons enabled, removed or unavailable purchases remained selected, and removed reason choices crashed the dropdown. Creation and decisions now require current confirmed form details; refreshed options discard obsolete selections without dropping useful descriptions/photos. Existing duplicate-tap and uncertain-retry cases retain their exact original intent.
+
+Four additional boundary cases reproduced old private return details on resume, evidence opening against a changed account during navigation, and a new repository wrapper resetting an expired document scope. Evidence viewers now inherit the opening scope without invalidating their parent when closed; replacing a thin wrapper around the same session cannot renew access. The combined return/document/action suite passes 38 widget cases. Native repayment and remaining account exploration are still pending.
+
+Actual Linux desktop checks used OS keyboard input, the clipboard and the real native file dialog against synthetic data with outbound requests blocked. Invalid quantities/descriptions and short decision reasons showed visible validation, a known temporary PNG was selected through the native picker, and changing the test account removed the open private decision form. Inspection images remain temporary and untracked. Quantity letters were accepted as a draft before submission validation; a dedicated input-filter follow-up remains required.

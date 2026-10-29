@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
+import 'package:bagoo_buyer_mobile/core/uploads.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
 import 'package:bagoo_buyer_mobile/features/profile/returns_page.dart';
@@ -132,4 +133,47 @@ void main() {
     expect(find.textContaining(privateDetails), findsNothing);
     expect(find.text('Withdraw request'), findsNothing);
   });
+
+  testWidgets(
+    'resuming a return after account change clears loaded private data',
+    (tester) async {
+      await open(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      session.clear();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.textContaining(privateDetails), findsNothing);
+      expect(session.pageRequests, hasLength(1));
+    },
+  );
+
+  for (final beforeNavigation in [true, false]) {
+    testWidgets(
+      'private return evidence keeps the opening account across navigation: $beforeNavigation',
+      (tester) async {
+        final page = returnDetail();
+        (page.props['returnCase'] as Map)['evidence'] = [
+          {'url': '/buyer-returns/4/evidence/1', 'purpose': 'request'},
+        ];
+        session.onPage = (_) async => page;
+        session.onDocument = (_) async =>
+            RemoteDocument(returnPhotoBytes(), 'image/png');
+        await open(tester);
+        final view = find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              (widget.data?.startsWith('View ') ?? false) &&
+              (widget.data?.endsWith(' photo') ?? false),
+        );
+        await tester.ensureVisible(view);
+        await tester.pumpAndSettle();
+        if (beforeNavigation) session.clear();
+        await tester.tap(view);
+        if (!beforeNavigation) session.clear();
+        await tester.pumpAndSettle();
+        expect(session.documentRequests, isEmpty);
+        expect(find.byType(Image), findsNothing);
+      },
+    );
+  }
 }

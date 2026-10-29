@@ -85,4 +85,20 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets(
+    'a fresh repository wrapper cannot reset an expired document account',
+    (tester) async {
+      session.onDocument = (_) async =>
+          RemoteDocument(returnPhotoBytes(), 'image/png');
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      session.clear();
+      repository = ProfileRepository(BuyerRepository(session));
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsNothing);
+      expect(session.documentRequests, hasLength(1));
+    },
+  );
 }
