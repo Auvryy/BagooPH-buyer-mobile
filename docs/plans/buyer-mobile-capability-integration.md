@@ -30,7 +30,7 @@ The owner's device-push work is deferred, as are chat pagination/read separation
 - Both existing agents have authored introductions and acknowledged the capability/session schema in their local exchange.
 - The pure version-one parser is implemented. All seven focused contract checks pass, including strict versions, independent booleans, malformed/partial replies and compatible extra fields. `flutter analyze --no-pub` reports no issues; formatting and whitespace checks pass.
 - The on-demand discovery adapter is implemented behind `BuyerRepository.discoverCapabilities()`. A direct same-origin JSON read rejects redirects before accepting their cookies or JSON bodies. Existing login/page redirects remain unchanged. Discovery adds no startup wait, periodic poll or persistent cache; the diagnostic probe reports it separately from core checks.
-- All 35 focused capability, direct transport, existing web-session and persistence checks pass. They include the shared web fixture, malformed replies, HTTP errors, redirect grants/cookies, lost connection, stale identity responses and ordinary email login after discovery fails. The final full suite passes all 330 isolated tests, including the standalone CLI regression.
+- All 35 focused capability, direct transport, existing web-session and persistence checks pass. They include the shared web fixture, malformed replies, HTTP errors, redirect grants/cookies, lost connection, stale identity responses and ordinary email login after discovery fails. The publication full suite passes all 333 isolated tests, including the standalone CLI and session-alias regressions.
 - No Google SDK, push SDK or new provider control has been added by this slice. The agreed next Google proposal includes explicit existing-account password proof and a server-expiring native challenge; implementation and SDK acceptance remain separately scoped.
 - The documented standalone probe initially could not compile because the vault interface imported the Flutter secure-storage plugin. The interface is now pure Dart; the native implementation moved unchanged to `native_session_vault.dart` with the app import updated. All 21 focused storage/session/cache checks and a CLI subprocess regression pass. Native key names and settings are unchanged.
 - The anonymous read-only probe passed against the existing local backend: Home, registration/policies, catalogue/search/filters, product/shop, guest Bag and checkout locations, followed by supported capability v1 with both optional flags false. It used no account, email, order/payment/message or database mutation. Azure, native provider configuration, association setup and Android/iOS device acceptance remain separate unperformed checks.
@@ -39,9 +39,13 @@ This plan describes only the selected first integration slice. Implemented statu
 
 ## Final verification
 
-- `flutter test --no-pub --reporter expanded`: all 330 tests passed in 1 minute 53 seconds. Evidence: `.git/buyer-capability-final-tests.log`.
-- `flutter analyze --no-pub`: no issues. Evidence: `.git/buyer-capability-final-analyze.log`.
+- `flutter test --no-pub --reporter expanded`: all 333 tests passed in 1 minute 34 seconds after the session compatibility follow-up. Evidence: `.git/buyer-capability-push-tests.log`.
+- `flutter analyze --no-pub`: no issues. Evidence: `.git/buyer-capability-push-analyze.log`.
 - Dart formatting and `git diff --check`: passed. No dependency, platform build setting or native storage behavior changed; Android/iOS packaging was not rebuilt for this Dart/transport slice.
 - `dart run tool/check_backend.dart` against the existing local service: public buyer checks and capability v1 passed, with Google and push both advertised false. Evidence: `.git/buyer-capability-local-probe.log`. No production/private/mutation acceptance was performed.
 - The local exchange is ignored and untracked; both existing agents authored their own introductions, agreed the schema, reviewed the actual server slice and exchanged test evidence. It contains no provider credentials and is not part of a commit.
 - All implementation is mobile-owned. The web agent independently owns its backend branch and verification. Google SDK, final Google contracts, provider identities, signing/domain associations, Azure and physical-device acceptance remain subsequent work.
+
+## Publication compatibility follow-up
+
+The web maintainer's later executed session fixtures revealed that approved and pending buyers restore through the exact `/buyer` Home alias. Before publishing this branch, mobile added that alias while retaining same-origin resolution and the fetched buyer-role/numeric-owner checks. The shared synthetic account-state fixture is retained in `test/fixtures/buyer-session-states.json`; regression checks cover approved/pending/restricted/rejected states, wrong roles, malformed owner IDs and unsupported/foreign paths. Existing `/` support is retained. No server redirect was changed.

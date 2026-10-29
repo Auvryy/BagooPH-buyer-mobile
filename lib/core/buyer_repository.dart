@@ -171,6 +171,7 @@ class BuyerRepository {
     }
     final target = session.resolve(status['redirect']);
     if (target.path != '/' &&
+        target.path != '/buyer' &&
         target.path != '/account/status' &&
         target.path != '/buyer/orders' &&
         !RegExp(r'^/buyer/orders/[0-9]+$').hasMatch(target.path)) {
