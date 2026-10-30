@@ -20,9 +20,11 @@ class ReturnsPage extends StatefulWidget {
     required this.repository,
     this.orderId,
     this.caseId,
+    this.account,
   });
   final ProfileRepository repository;
   final int? orderId, caseId;
+  final BuyerAccountScope? account;
   @override
   State<ReturnsPage> createState() => _ReturnsPageState();
 }
@@ -42,17 +44,32 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
   Map<String, dynamic>? _submitted;
   int? get caseId => _createdId ?? widget.caseId;
   Map<String, dynamic> get item => mapOf(_page?.props['returnCase']);
+  bool get _current =>
+      _account.isCurrent &&
+      identical(_account.session, widget.repository.session);
   @override
   void initState() {
     super.initState();
-    _account = BuyerAccountScope(widget.repository.session);
+    _account =
+        widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
     WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_account.isCurrent) {
+    if (state == AppLifecycleState.resumed && !_current) {
+      _accessLost();
+    }
+  }
+
+  @override
+  void didUpdateWidget(ReturnsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.repository.session, widget.repository.session) ||
+        !identical(oldWidget.account, widget.account) ||
+        oldWidget.orderId != widget.orderId ||
+        oldWidget.caseId != widget.caseId) {
       _accessLost();
     }
   }
@@ -137,7 +154,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
 
   @override
   void onFailure(BackendException error) {
-    if (!_account.isCurrent || [401, 403, 404, 419].contains(error.status)) {
+    if (!_current || [401, 403, 404, 419].contains(error.status)) {
       _discardPrivate();
     }
   }
@@ -147,7 +164,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
     Future<String?> Function() action, {
     bool validate = true,
   }) {
-    if (!_account.isCurrent) {
+    if (!_current) {
       _accessLost();
       return Future.value(false);
     }
@@ -247,7 +264,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
   }
 
   void _view(String path, String title) {
-    if (!_account.isCurrent) {
+    if (!_current) {
       _accessLost();
       return;
     }
@@ -263,8 +280,25 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
     );
   }
 
+  void _openCase(int id) {
+    if (!_current) {
+      _accessLost();
+      return;
+    }
+    if (busy) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReturnsPage(
+          repository: widget.repository,
+          caseId: id,
+          account: _account,
+        ),
+      ),
+    );
+  }
+
   Future<void> _command(String group, String action, String label) async {
-    if (!_account.isCurrent) {
+    if (!_current) {
       _accessLost();
       return;
     }
@@ -657,7 +691,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
   }
 
   @override
-  Widget build(BuildContext context) => !_account.isCurrent
+  Widget build(BuildContext context) => !_current
       ? Scaffold(
           appBar: AppBar(title: const Text('Returns unavailable')),
           body: const SafeArea(
@@ -722,14 +756,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
                           trailing: const Icon(Icons.chevron_right),
                           onTap: busy
                               ? null
-                              : () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => ReturnsPage(
-                                      repository: widget.repository,
-                                      caseId: (row['id'] as num).toInt(),
-                                    ),
-                                  ),
-                                ),
+                              : () => _openCase((row['id'] as num).toInt()),
                         ),
                       ProfilePagination(mapOf(_page!.props['cases']), (number) {
                         _number = number;
@@ -874,13 +901,23 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
                                       event['event_type'] == 'record-repayment',
                                 )
                                 .lastOrNull;
+                        final version = widget.item['version'];
+                        final source = payment?['id'];
+                        if (version is! int ||
+                            version < 1 ||
+                            widget.group == 'money' &&
+                                (source is! int || source < 1)) {
+                          throw const BackendException(
+                            'The current return version or repayment could not be confirmed. Close this update and reload its saved history.',
+                          );
+                        }
                         _submitted ??= {
                           'action': widget.action,
-                          'expected_version': widget.item['version'],
+                          'expected_version': version,
                           'request_token': _token,
                           'reason': _reason.text.trim(),
                           if (widget.group == 'money')
-                            'source_event_id': payment?['id'],
+                            'source_event_id': source,
                         };
                         final id = widget.item['id'];
                         final page = await widget.repository.session.submit(
