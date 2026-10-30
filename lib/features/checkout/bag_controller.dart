@@ -102,20 +102,22 @@ class BagController extends ChangeNotifier {
       quoteError == null;
 
   void invalidate({String? message, bool notify = true}) {
-    if (_disposed || _invalid) return;
-    _invalid = true;
-    data = null;
-    selected.clear();
-    itemErrors.clear();
-    busy = false;
-    _invalidateQuote();
-    error = message ?? 'Your Bag session changed or access ended. Reopen your Bag to continue.';
+    if (_disposed) return;
+    if (!_invalid) {
+      _invalid = true;
+      data = null;
+      selected.clear();
+      itemErrors.clear();
+      busy = false;
+      _invalidateQuote();
+      error = message ?? 'Your Bag session changed or access ended. Reopen your Bag to continue.';
+    }
     if (notify) notifyListeners();
   }
 
   bool ensureCurrent({bool notify = true}) {
     if (isCurrent) return true;
-    invalidate(notify: notify);
+    if (!_invalid) invalidate(notify: notify);
     return false;
   }
 

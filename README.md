@@ -121,6 +121,15 @@ flutter test -d linux integration_test/checkout_misuse_test.dart
 
 The checkout review shows quote attempts and synthetic order writes. Its sidebar selects successful, failed, denied or wrong-buyer replies and an invalid GPS reading. GPS uses a synthetic position; outbound requests are blocked. Native device permissions, real backend authorization and actual order/payment acceptance remain separate checks.
 
+For isolated Shopping Bag quantity/removal dialogs, stock limits and account changes:
+
+```sh
+flutter run -d linux -t tool/bag_review.dart
+flutter test -d linux integration_test/bag_misuse_test.dart
+```
+
+The Bag review uses synthetic rows and reports read, quote and mutation attempts. Its sidebar selects successful, failed, denied or wrong-buyer replies. Change test account expires the open Bag; close any masked dialog, then use Reopen Bag for a fresh session. Reset starts a new fixture. All outbound requests are blocked, so these checks do not change a real Bag or establish backend authorization.
+
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 
 ```sh

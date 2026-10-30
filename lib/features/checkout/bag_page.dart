@@ -33,14 +33,48 @@ class BagPage extends StatefulWidget {
 }
 
 class _BagPageState extends State<BagPage> {
+  int _revision = 0;
+
+  @override
+  Widget build(BuildContext context) => _BagContents(
+    key: ValueKey(_revision),
+    settings: widget,
+    onReopen: () => setState(() => _revision++),
+  );
+}
+
+// Reopening creates a new session-bound state. Retained callbacks belong to the
+// disposed contents and cannot apply their old item or draft to the new Bag.
+class _BagContents extends StatefulWidget {
+  const _BagContents({
+    super.key,
+    required this.settings,
+    required this.onReopen,
+  });
+  final BagPage settings;
+  final VoidCallback onReopen;
+  BuyerRepository get repository => settings.repository;
+  String? get voucherCode => settings.voucherCode;
+  List<int> get initialSelection => settings.initialSelection;
+  bool get active => settings.active;
+  VoidCallback? get onBrowse => settings.onBrowse;
+
+  @override
+  State<_BagContents> createState() => _BagContentsState();
+}
+
+class _BagContentsState extends State<_BagContents>
+    with WidgetsBindingObserver {
   late final BuyerAccountScope _checkoutAccount;
   late final BagController _bag;
   final _search = TextEditingController();
   String _sort = 'recent', _filter = 'all';
-  bool _opening = false, _refreshOnIdle = false;
+  bool _opening = false, _refreshOnIdle = false, _modalOpen = false;
+  bool _accessEnded = false, _reopening = false;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkoutAccount = BuyerAccountScope(widget.repository.session);
     _bag = BagController(
       widget.repository,
@@ -51,28 +85,63 @@ class _BagPageState extends State<BagPage> {
   }
 
   void _onIdle() {
+    if (!_ensureAccount(notify: false)) return;
     if (_refreshOnIdle && !_bag.busy && widget.active) {
       _refreshOnIdle = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _bag.load();
+        if (mounted && _ensureAccount()) _bag.load();
       });
     }
   }
 
   @override
-  void didUpdateWidget(BagPage oldWidget) {
+  void didUpdateWidget(_BagContents oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!_ensureAccount(notify: false)) {
+      // Notify an independent dialog route after the current build finishes.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _bag.invalidate();
+      });
+      return;
+    }
     if (widget.active && !oldWidget.active) {
       if (_bag.busy) {
         _refreshOnIdle = true;
       } else {
-        _bag.load();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.active && _ensureAccount()) _bag.load();
+        });
       }
+    }
+  }
+
+  bool _ensureAccount({bool notify = true}) {
+    if (!mounted) return false;
+    if (!identical(_bag.repository, widget.repository)) {
+      _bag.invalidate(notify: notify);
+    }
+    final current = _bag.ensureCurrent(notify: notify);
+    if (!current && !_accessEnded) {
+      _accessEnded = true;
+      _checkoutAccount.invalidate();
+      _search.clear();
+      _sort = 'recent';
+      _filter = 'all';
+      _refreshOnIdle = false;
+    }
+    return current;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_ensureAccount()) {
+      setState(() => _opening = false);
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _checkoutAccount.invalidate();
     _bag.removeListener(_onIdle);
     _bag.dispose();
@@ -121,6 +190,7 @@ class _BagPageState extends State<BagPage> {
   }
 
   Future<void> _product(Map<String, dynamic> item) async {
+    if (!_ensureAccount() || _modalOpen) return;
     final slug = mapOf(item['product'])['slug'];
     if (slug == null || _bag.busy || _opening) return;
     await Navigator.of(context).push(
@@ -129,19 +199,51 @@ class _BagPageState extends State<BagPage> {
             ProductPage(repository: widget.repository, slug: slug.toString()),
       ),
     );
-    if (mounted) await _bag.load();
+    if (mounted && _ensureAccount()) await _bag.load();
+  }
+
+  Future<void> _step(int id, int quantity) async {
+    if (!_ensureAccount() || _modalOpen || _opening) return;
+    await _bag.change(id, quantity);
+  }
+
+  void _editFilters(VoidCallback update) {
+    if (!_ensureAccount() || _modalOpen) return;
+    setState(update);
+  }
+
+  void _reopen() {
+    if (!mounted || _reopening || _modalOpen) return;
+    _reopening = true;
+    widget.onReopen();
   }
 
   Future<void> _quantity(Map<String, dynamic> item) async {
-    final maximum = bagMaximumQuantity(item, _bag.items);
+    if (!_ensureAccount() || _modalOpen || _opening || !_bag.canChange) return;
+    final id = item['id'];
+    final current = _bag.items.where((row) => row['id'] == id).firstOrNull;
+    if (id is! int || current == null) return;
+    final maximum = bagMaximumQuantity(current, _bag.items);
     if (maximum < 1 || _bag.busy) return;
-    final quantity = await showDialog<int>(
-      context: context,
-      builder: (_) => _BagQuantityDialog(item: item, maximum: maximum),
-    );
-    if (mounted && quantity != null && quantity != item['quantity']) {
-      final saved = await _bag.change((item['id'] as num).toInt(), quantity);
-      if (mounted && saved) {
+    setState(() => _modalOpen = true);
+    int? quantity;
+    try {
+      quantity = await showDialog<int>(
+        context: context,
+        builder: (_) => _BagQuantityDialog(
+          bag: _bag,
+          id: id,
+          ensureAccount: _ensureAccount,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _modalOpen = false);
+    }
+    if (!mounted || !_ensureAccount()) return;
+    final latest = _bag.items.where((row) => row['id'] == id).firstOrNull;
+    if (quantity != null && quantity != latest?['quantity']) {
+      final saved = await _bag.change(id, quantity);
+      if (mounted && _ensureAccount() && saved) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Bag quantity updated.')));
@@ -150,28 +252,73 @@ class _BagPageState extends State<BagPage> {
   }
 
   Future<void> _remove(Map<String, dynamic> item) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Remove from your Bag?'),
-        content: Text(
-          mapOf(item['product'])['name']?.toString() ?? 'This item',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialog, false),
-            child: const Text('Keep item'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true && mounted) {
-      final saved = await _bag.change((item['id'] as num).toInt(), null);
-      if (mounted && saved) {
+    if (!_ensureAccount() ||
+        _modalOpen ||
+        _opening ||
+        _bag.busy ||
+        !_bag.canChange) {
+      return;
+    }
+    final id = item['id'];
+    if (id is! int || !_bag.items.any((row) => row['id'] == id)) return;
+    setState(() => _modalOpen = true);
+    bool? confirmed;
+    var decided = false;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) {
+          void decide(bool remove) {
+            if (decided ||
+                !dialog.mounted ||
+                ModalRoute.of(dialog)?.isCurrent != true) {
+              return;
+            }
+            if (remove && (!_ensureAccount() || !_bag.canChange || _bag.busy)) {
+              return;
+            }
+            decided = true;
+            Navigator.pop(dialog, remove);
+          }
+
+          return ListenableBuilder(
+            listenable: _bag,
+            builder: (_, _) {
+              final current = _bag.items
+                  .where((row) => row['id'] == id)
+                  .firstOrNull;
+              if (!_ensureAccount(notify: false) ||
+                  !_bag.canChange ||
+                  current == null) {
+                return _changedBagDialog(onClose: () => decide(false));
+              }
+              return AlertDialog(
+                title: const Text('Remove from your Bag?'),
+                content: Text(
+                  mapOf(current['product'])['name']?.toString() ?? 'This item',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => decide(false),
+                    child: const Text('Keep item'),
+                  ),
+                  FilledButton(
+                    onPressed: _bag.busy ? null : () => decide(true),
+                    child: const Text('Remove'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      if (mounted) setState(() => _modalOpen = false);
+    }
+    if (!mounted || !_ensureAccount()) return;
+    if (confirmed == true) {
+      final saved = await _bag.change(id, null);
+      if (mounted && _ensureAccount() && saved) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Item removed from your Bag.')),
         );
@@ -180,6 +327,7 @@ class _BagPageState extends State<BagPage> {
   }
 
   Future<void> _checkout({String? code}) async {
+    if (!_ensureAccount() || _modalOpen) return;
     if (_bag.data?.user == null) {
       BuyerActions.login(context, destination: 'cart');
       return;
@@ -209,7 +357,7 @@ class _BagPageState extends State<BagPage> {
           ),
         ),
       );
-      if (mounted) await _bag.load();
+      if (mounted && _ensureAccount()) await _bag.load();
     } on BackendException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -260,7 +408,10 @@ class _BagPageState extends State<BagPage> {
       : pesos(_bag.quote![key]);
   Widget _button() => FilledButton.icon(
     onPressed:
-        !_bag.ready || _opening || (_bag.data?.user != null && !_bag.approved)
+        !_bag.ready ||
+            _opening ||
+            _modalOpen ||
+            (_bag.data?.user != null && !_bag.approved)
         ? null
         : _checkout,
     icon: const Icon(Icons.arrow_forward),
@@ -344,7 +495,7 @@ class _BagPageState extends State<BagPage> {
                   onSignIn: _bag.data?.user == null
                       ? () => BuyerActions.login(context, destination: 'cart')
                       : null,
-                  onUse: _bag.approved && _bag.ready && !_opening
+                  onUse: _bag.approved && _bag.ready && !_opening && !_modalOpen
                       ? () => _checkout(code: offer['code']?.toString())
                       : null,
                 ),
@@ -358,7 +509,7 @@ class _BagPageState extends State<BagPage> {
     final id = (item['id'] as num).toInt();
     final available = item['available_for_purchase'] == true;
     final maximum = bagMaximumQuantity(item, _bag.items);
-    final disabled = _bag.busy || _opening || !_bag.canChange;
+    final disabled = _bag.busy || _opening || _modalOpen || !_bag.canChange;
     final priced = mapsOf(_bag.quote?['items'])
         .where((row) => row['id'] == id)
         .firstOrNull;
@@ -373,7 +524,7 @@ class _BagPageState extends State<BagPage> {
               Checkbox(
                 value: _bag.selected.contains(id),
                 semanticLabel: 'Select ${product['name'] ?? 'Bag item'}',
-                onChanged: _bag.busy || _opening || !available
+                onChanged: _bag.busy || _opening || _modalOpen || !available
                     ? null
                     : (v) => _bag.select([id], v == true),
               ),
@@ -397,7 +548,10 @@ class _BagPageState extends State<BagPage> {
                   children: [
                     TextButton(
                       onPressed:
-                          _bag.busy || _opening || product['slug'] == null
+                          _bag.busy ||
+                              _opening ||
+                              _modalOpen ||
+                              product['slug'] == null
                           ? null
                           : () => _product(item),
                       style: TextButton.styleFrom(
@@ -456,10 +610,7 @@ class _BagPageState extends State<BagPage> {
                 onPressed:
                     disabled || !available || (item['quantity'] as num) <= 1
                     ? null
-                    : () => _bag.change(
-                        id,
-                        (item['quantity'] as num).toInt() - 1,
-                      ),
+                    : () => _step(id, (item['quantity'] as num).toInt() - 1),
                 icon: const Icon(Icons.remove),
               ),
               OutlinedButton(
@@ -475,10 +626,7 @@ class _BagPageState extends State<BagPage> {
                         !available ||
                         (item['quantity'] as num) >= maximum
                     ? null
-                    : () => _bag.change(
-                        id,
-                        (item['quantity'] as num).toInt() + 1,
-                      ),
+                    : () => _step(id, (item['quantity'] as num).toInt() + 1),
                 icon: const Icon(Icons.add),
               ),
               TextButton.icon(
@@ -552,7 +700,7 @@ class _BagPageState extends State<BagPage> {
               const SizedBox(height: 20),
               TextField(
                 controller: _search,
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => _editFilters(() {}),
                 decoration: InputDecoration(
                   labelText: 'Search your Bag',
                   prefixIcon: const Icon(Icons.search),
@@ -560,7 +708,7 @@ class _BagPageState extends State<BagPage> {
                       ? null
                       : IconButton(
                           tooltip: 'Clear Bag search',
-                          onPressed: () => setState(_search.clear),
+                          onPressed: () => _editFilters(_search.clear),
                           icon: const Icon(Icons.close),
                         ),
                 ),
@@ -579,7 +727,7 @@ class _BagPageState extends State<BagPage> {
                   }.entries)
                     DropdownMenuItem(value: sort.key, child: Text(sort.value)),
                 ],
-                onChanged: (v) => setState(() => _sort = v!),
+                onChanged: (v) => _editFilters(() => _sort = v!),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -594,7 +742,8 @@ class _BagPageState extends State<BagPage> {
                     ChoiceChip(
                       label: Text(filter.value),
                       selected: _filter == filter.key,
-                      onSelected: (_) => setState(() => _filter = filter.key),
+                      onSelected: (_) =>
+                          _editFilters(() => _filter = filter.key),
                     ),
                 ],
               ),
@@ -609,7 +758,11 @@ class _BagPageState extends State<BagPage> {
                   value:
                       _bag.selected.isNotEmpty &&
                       _bag.selected.length == _bag.selectable.length,
-                  onChanged: _bag.busy || _opening || _bag.selectable.isEmpty
+                  onChanged:
+                      _bag.busy ||
+                          _opening ||
+                          _modalOpen ||
+                          _bag.selectable.isEmpty
                       ? null
                       : (v) => _bag.select(
                           _bag.selectable.map((i) => (i['id'] as num).toInt()),
@@ -649,7 +802,7 @@ class _BagPageState extends State<BagPage> {
               children: [
                 const ProductHeading('No matching Bag items'),
                 TextButton(
-                  onPressed: () => setState(() {
+                  onPressed: () => _editFilters(() {
                     _search.clear();
                     _filter = 'all';
                   }),
@@ -689,7 +842,7 @@ class _BagPageState extends State<BagPage> {
                       group
                           .where((i) => i['available_for_purchase'] == true)
                           .every((i) => _bag.selected.contains(i['id'])),
-                  onChanged: _bag.busy || _opening
+                  onChanged: _bag.busy || _opening || _modalOpen
                       ? null
                       : (v) => _bag.select(
                           group.map((i) => (i['id'] as num).toInt()),
@@ -709,84 +862,130 @@ class _BagPageState extends State<BagPage> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _bag,
-    builder: (context, _) => Scaffold(
-      appBar: AppBar(
-        title: const Text('Shopping Bag'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh Bag',
-            onPressed: _bag.busy || _opening ? null : _bag.load,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, box) {
-            final wide =
-                box.maxWidth >= 1050 &&
-                MediaQuery.textScalerOf(context).scale(16) < 24;
-            final content = RefreshIndicator(
-              onRefresh: _bag.load,
-              child: _items(wide),
-            );
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1320),
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: content),
-                          SizedBox(
-                            width: 340,
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
-                              child: _summary(),
-                            ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          Expanded(child: content),
-                          if (_bag.items.isNotEmpty &&
-                              MediaQuery.viewInsetsOf(context).bottom == 0)
-                            Material(
-                              color: Colors.white,
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    _row(
-                                      'Selected (${_bag.selected.length})',
-                                      _price('total'),
-                                      total: true,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    _button(),
-                                  ],
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-              ),
-            );
-          },
+    builder: (context, _) {
+      final current = _ensureAccount(notify: false);
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Shopping Bag'),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh Bag',
+              onPressed: !current || _bag.busy || _opening || _modalOpen
+                  ? null
+                  : _bag.load,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
         ),
-      ),
-    ),
+        body: !current
+            ? SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Notice(
+                          _bag.error ?? 'Your Bag session ended.',
+                          error: true,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: _reopen,
+                          child: const Text('Reopen Bag'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final wide =
+                        box.maxWidth >= 1050 &&
+                        MediaQuery.textScalerOf(context).scale(16) < 24;
+                    final content = RefreshIndicator(
+                      onRefresh: _bag.load,
+                      child: _items(wide),
+                    );
+                    return Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1320),
+                        child: wide
+                            ? Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: content),
+                                  SizedBox(
+                                    width: 340,
+                                    child: SingleChildScrollView(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        0,
+                                        16,
+                                        16,
+                                        16,
+                                      ),
+                                      child: _summary(),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                children: [
+                                  Expanded(child: content),
+                                  if (_bag.items.isNotEmpty &&
+                                      MediaQuery.viewInsetsOf(context).bottom ==
+                                          0)
+                                    Material(
+                                      color: Colors.white,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            _row(
+                                              'Selected (${_bag.selected.length})',
+                                              _price('total'),
+                                              total: true,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _button(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+      );
+    },
   );
 }
 
+Widget _changedBagDialog({required VoidCallback onClose}) => AlertDialog(
+  title: const Text('Bag changed'),
+  content: const SingleChildScrollView(
+    child: Text('Close this dialog and review your Bag before continuing.'),
+  ),
+  actions: [TextButton(onPressed: onClose, child: const Text('Close'))],
+);
+
 class _BagQuantityDialog extends StatefulWidget {
-  const _BagQuantityDialog({required this.item, required this.maximum});
-  final Map<String, dynamic> item;
-  final int maximum;
+  const _BagQuantityDialog({
+    required this.bag,
+    required this.id,
+    required this.ensureAccount,
+  });
+  final BagController bag;
+  final int id;
+  final bool Function({bool notify}) ensureAccount;
   @override
   State<_BagQuantityDialog> createState() => _BagQuantityDialogState();
 }
@@ -794,10 +993,36 @@ class _BagQuantityDialog extends StatefulWidget {
 class _BagQuantityDialogState extends State<_BagQuantityDialog> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _field;
+  bool _decided = false;
+
+  Map<String, dynamic>? get _item =>
+      widget.bag.items.where((row) => row['id'] == widget.id).firstOrNull;
+  bool get _canDecide =>
+      mounted && !_decided && ModalRoute.of(context)?.isCurrent == true;
+
   @override
   void initState() {
     super.initState();
-    _field = TextEditingController(text: '${widget.item['quantity']}');
+    _field = TextEditingController(text: '${_item?['quantity'] ?? ''}');
+  }
+
+  void _close() {
+    if (!_canDecide) return;
+    _decided = true;
+    Navigator.pop(context);
+  }
+
+  void _update() {
+    if (!_canDecide ||
+        !widget.ensureAccount() ||
+        !widget.bag.canChange ||
+        widget.bag.busy ||
+        _item == null) {
+      return;
+    }
+    if (_form.currentState?.validate() != true) return;
+    _decided = true;
+    Navigator.pop(context, int.parse(_field.text));
   }
 
   @override
@@ -807,53 +1032,60 @@ class _BagQuantityDialogState extends State<_BagQuantityDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Update quantity'),
-    content: SingleChildScrollView(
-      child: Form(
-        key: _form,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              mapOf(widget.item['product'])['name']?.toString() ?? 'Bag item',
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.bag,
+    builder: (_, _) {
+      final item = _item;
+      final maximum = item == null
+          ? 0
+          : bagMaximumQuantity(item, widget.bag.items);
+      if (!widget.ensureAccount(notify: false) ||
+          !widget.bag.canChange ||
+          item == null ||
+          maximum < 1) {
+        _field.clear();
+        return _changedBagDialog(onClose: _close);
+      }
+      return AlertDialog(
+        title: const Text('Update quantity'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: _form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(mapOf(item['product'])['name']?.toString() ?? 'Bag item'),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _field,
+                  autofocus: true,
+                  maxLength: 2,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [unsignedIntegerFormatter],
+                  decoration: InputDecoration(
+                    labelText: 'Quantity',
+                    helperText: 'Up to $maximum available',
+                    counterText: '',
+                  ),
+                  validator: (value) =>
+                      RegExp(r'^[1-9][0-9]?$').hasMatch(value ?? '') &&
+                          int.parse(value!) <= maximum
+                      ? null
+                      : 'Choose 1 to $maximum units.',
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _field,
-              autofocus: true,
-              maxLength: 2,
-              keyboardType: TextInputType.number,
-              inputFormatters: [unsignedIntegerFormatter],
-              decoration: InputDecoration(
-                labelText: 'Quantity',
-                helperText: 'Up to ${widget.maximum} available',
-                counterText: '',
-              ),
-              validator: (value) =>
-                  RegExp(r'^[1-9][0-9]?$').hasMatch(value ?? '') &&
-                      int.parse(value!) <= widget.maximum
-                  ? null
-                  : 'Choose 1 to ${widget.maximum} units.',
-            ),
-          ],
+          ),
         ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: () {
-          if (_form.currentState!.validate()) {
-            Navigator.pop(context, int.parse(_field.text));
-          }
-        },
-        child: const Text('Update'),
-      ),
-    ],
+        actions: [
+          TextButton(onPressed: _close, child: const Text('Cancel')),
+          FilledButton(
+            onPressed: widget.bag.busy ? null : _update,
+            child: const Text('Update'),
+          ),
+        ],
+      );
+    },
   );
 }

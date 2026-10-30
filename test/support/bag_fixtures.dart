@@ -87,6 +87,10 @@ class ReviewBagRepository extends FakeBuyerRepository {
   Future<Map<String, dynamic>> bagQuote(List<int> ids) async {
     quotes.add([...ids]);
     if (selectedQuote != null) return selectedQuote!(ids);
+    return quoteRows(ids);
+  }
+
+  Map<String, dynamic> quoteRows(List<int> ids) {
     final selected = rows.where((row) => ids.contains(row['id'])).toList();
     final subtotal = selected.fold<int>(
       0,
