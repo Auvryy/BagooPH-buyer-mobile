@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
@@ -31,6 +32,7 @@ class ProductPage extends StatefulWidget {
 }
 
 class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
+  late final BuyerAccountScope _checkoutAccount;
   ProductSelection? _selection;
   String? _error;
   String? _feedback;
@@ -64,6 +66,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _checkoutAccount = BuyerAccountScope(repo.session);
     WidgetsBinding.instance.addObserver(this);
     _updates = ForegroundRead(
       interval: const Duration(seconds: 30),
@@ -301,6 +304,12 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     });
     _generation++;
     try {
+      if (buyNow) {
+        if (!identical(_checkoutAccount.session, repo.session)) {
+          _checkoutAccount.invalidate();
+        }
+        _checkoutAccount.check(page: s.page);
+      }
       final result = await repo.addToBag(
         s.product,
         s.quantity,
@@ -313,9 +322,17 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         return;
       }
       if (buyNow) {
+        if (!identical(_checkoutAccount.session, repo.session)) {
+          _checkoutAccount.invalidate();
+        }
+        _checkoutAccount.check(page: result);
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => CheckoutPage(repository: repo, initial: result),
+            builder: (_) => CheckoutPage(
+              repository: repo,
+              initial: result,
+              account: _checkoutAccount,
+            ),
           ),
         );
         if (mounted) {
@@ -377,6 +394,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _checkoutAccount.invalidate();
     WidgetsBinding.instance.removeObserver(this);
     _updates.dispose();
     _quantity.dispose();

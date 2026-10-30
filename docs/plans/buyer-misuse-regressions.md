@@ -18,7 +18,7 @@ Acceptance requires a coverage record for each family, passing formatting/analys
 
 ## Coverage record
 
-The first published batch passed **449 isolated tests** and **25 native Linux cases**. Its ongoing continuation now passes **588 isolated tests**, with native account/address/layout (80), return/evidence (53), actual PDF rendering (4), and earlier buyer/collection (26) runs. These native groups overlap and are not summed as distinct cases. See [the continuing return/account review](buyer-return-identity-regressions.md) for its current evidence. The complete buyer acceptance audit remains open.
+The first published batch passed **449 isolated tests** and **25 native Linux cases**. Its ongoing continuation now passes **618 isolated tests**, with native checkout/product/Bag/payment/voucher/layout (71), account/address/layout (80), return/evidence (53), actual PDF rendering (4), and earlier buyer/collection (26) runs. These native groups overlap and are not summed as distinct cases. See the [return/account review](buyer-return-identity-regressions.md) and [checkout review](buyer-checkout-misuse-regressions.md) for their current evidence. The complete buyer acceptance audit remains open.
 
 | Feature family | Misuse and recovery cases | Status / evidence |
 | --- | --- | --- |

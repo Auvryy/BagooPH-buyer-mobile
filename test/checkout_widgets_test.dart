@@ -267,6 +267,8 @@ void main() {
         );
       }
       return const WebPage('Buyer/Profile', {
+        'auth': {'user': buyer},
+        'user': buyer,
         'flash': {'success': 'Order recorded.'},
         'orders': {'data': []},
       });

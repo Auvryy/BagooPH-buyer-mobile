@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../home/search_controller.dart';
 import '../products/product_page.dart';
@@ -101,7 +102,9 @@ class BuyerDestinationRouter {
       return;
     }
     if (target.path == '/checkout') {
+      final account = BuyerAccountScope(repository.session);
       final page = await repository.document(target.toString());
+      account.check(page: page);
       repository.requireNoErrors(page);
       if (page.component != 'Checkout/Index' ||
           page.props['items'] is! List ||
@@ -113,7 +116,11 @@ class BuyerDestinationRouter {
       if (context.mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => CheckoutPage(repository: repository, initial: page),
+            builder: (_) => CheckoutPage(
+              repository: repository,
+              initial: page,
+              account: account,
+            ),
           ),
         );
       }

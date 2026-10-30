@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
 import '../../core/web_session.dart';
@@ -32,6 +33,7 @@ class BagPage extends StatefulWidget {
 }
 
 class _BagPageState extends State<BagPage> {
+  late final BuyerAccountScope _checkoutAccount;
   late final BagController _bag;
   final _search = TextEditingController();
   String _sort = 'recent', _filter = 'all';
@@ -39,6 +41,7 @@ class _BagPageState extends State<BagPage> {
   @override
   void initState() {
     super.initState();
+    _checkoutAccount = BuyerAccountScope(widget.repository.session);
     _bag = BagController(
       widget.repository,
       initialSelection: widget.initialSelection,
@@ -70,6 +73,7 @@ class _BagPageState extends State<BagPage> {
 
   @override
   void dispose() {
+    _checkoutAccount.invalidate();
     _bag.removeListener(_onIdle);
     _bag.dispose();
     _search.dispose();
@@ -183,16 +187,25 @@ class _BagPageState extends State<BagPage> {
     if (!_bag.approved || !_bag.ready || _opening) return;
     setState(() => _opening = true);
     try {
+      if (!identical(_checkoutAccount.session, widget.repository.session)) {
+        _checkoutAccount.invalidate();
+      }
+      _checkoutAccount.check(page: _bag.data!);
       final page = await widget.repository.checkout(
         _bag.selected.toList()..sort(),
       );
       if (!mounted) return;
+      if (!identical(_checkoutAccount.session, widget.repository.session)) {
+        _checkoutAccount.invalidate();
+      }
+      _checkoutAccount.check(page: page);
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => CheckoutPage(
             repository: widget.repository,
             initial: page,
             voucherCode: code ?? widget.voucherCode,
+            account: _checkoutAccount,
           ),
         ),
       );

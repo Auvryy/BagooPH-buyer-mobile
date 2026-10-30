@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/contact_input.dart';
 import '../../core/numeric_input.dart';
@@ -27,16 +28,119 @@ class CheckoutPage extends StatefulWidget {
     required this.initial,
     this.voucherCode,
     this.captureLocation = captureBuyerLocation,
+    this.account,
   });
   final BuyerRepository repository;
   final WebPage initial;
   final String? voucherCode;
   final Future<BuyerLocation> Function() captureLocation;
+  final BuyerAccountScope? account;
   @override
   State<CheckoutPage> createState() => _CheckoutPageState();
 }
 
-class _CheckoutPageState extends State<CheckoutPage> {
+class _CheckoutPageState extends State<CheckoutPage>
+    with WidgetsBindingObserver {
+  late final BuyerAccountScope _account;
+  String _unavailable =
+      'Your buyer account changed or access ended. Close checkout and reopen it from your Bag.';
+  bool _reviewOpen = false;
+  StateSetter? _reviewUpdate;
+  bool get _current =>
+      _account.isCurrent &&
+      identical(_account.session, widget.repository.session);
+
+  void _validatePage(WebPage page) {
+    _account.check(page: page);
+    widget.repository.requireNoErrors(page);
+    final token = page.props['checkoutToken'];
+    if (page.component != 'Checkout/Index' ||
+        mapOf(page.props['user'])['id'] != page.user?['id'] ||
+        token is! String ||
+        token.length != 132 ||
+        !RegExp(r'^v[12]\.[A-Za-z0-9]{64}\.[a-f0-9]{64}$').hasMatch(token)) {
+      throw const BackendException(
+        'These checkout details could not be confirmed. Close checkout and reopen it from your Bag.',
+      );
+    }
+  }
+
+  void _discardPrivate([String? message]) {
+    _account.invalidate();
+    if (message != null) _unavailable = message;
+    _generation++;
+    _debounce?.cancel();
+    for (final field in _fields.values) {
+      field.clear();
+    }
+    _page = const WebPage('Checkout/Unavailable', {});
+    _quote = {};
+    _offers = [];
+    _companies = [];
+    _location = {};
+    _fieldErrors = {};
+    _submittedPayload = null;
+    _shopVouchers.clear();
+    _platformVoucher = null;
+    _company = null;
+    _hub = null;
+    _locationFeedback = null;
+    _voucherFeedback = null;
+    _ready = false;
+    _quoting = false;
+    _locating = false;
+    _choosingBest = false;
+    _submitting = false;
+    _saveAddress = false;
+    _error = null;
+  }
+
+  void _accessLost([String? message]) {
+    if (!mounted) return;
+    setState(() => _discardPrivate(message));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _reviewOpen) _reviewUpdate?.call(() {});
+    });
+  }
+
+  bool _ensureAccount() {
+    if (!mounted) return false;
+    if (_current) {
+      try {
+        _validatePage(_page);
+        return true;
+      } on BackendException catch (error) {
+        _accessLost(error.message);
+        return false;
+      }
+    }
+    _accessLost();
+    return false;
+  }
+
+  bool _lostAccess(BackendException error) {
+    if (!_current || [401, 403, 404, 419].contains(error.status)) {
+      _accessLost();
+      return true;
+    }
+    return false;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _ensureAccount();
+  }
+
+  @override
+  void didUpdateWidget(CheckoutPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_current ||
+        !identical(oldWidget.initial, widget.initial) ||
+        !identical(oldWidget.account, widget.account)) {
+      _accessLost();
+    }
+  }
+
   final _form = GlobalKey<FormState>();
   final _summary = GlobalKey();
   final _contentKey = GlobalKey();
@@ -97,6 +201,15 @@ class _CheckoutPageState extends State<CheckoutPage> {
   void initState() {
     super.initState();
     _page = widget.initial;
+    _account =
+        widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
+    WidgetsBinding.instance.addObserver(this);
+    try {
+      _validatePage(_page);
+    } on BackendException catch (error) {
+      _discardPrivate(error.message);
+      return;
+    }
     _hasCompanyContract = _page.props.containsKey('logisticsCompanies');
     _quote = mapOf(_page.props['quote']);
     _offers = mapsOf(_page.props['availableVouchers']);
@@ -186,7 +299,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   void _edit() {
-    if (_frozen) {
+    if (!_ensureAccount() || _frozen) {
       return;
     }
     _generation++;
@@ -238,7 +351,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   ]);
 
   Future<void> _captureLocation() async {
-    if (_locating || _frozen || _submitting) return;
+    if (!_ensureAccount() || _locating || _frozen || _submitting) return;
     final address = _locationDraft;
     setState(() {
       _locating = true;
@@ -246,7 +359,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
     });
     try {
       final position = await widget.captureLocation();
-      if (!mounted || _frozen || address != _locationDraft) {
+      if (!mounted ||
+          !_ensureAccount() ||
+          _frozen ||
+          address != _locationDraft) {
         return;
       }
       setState(() {
@@ -260,9 +376,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
       });
       _edit();
     } on BackendException catch (e) {
-      if (mounted) setState(() => _locationFeedback = e.message);
+      if (mounted && _ensureAccount()) {
+        setState(() => _locationFeedback = e.message);
+      }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _ensureAccount()) {
         setState(
           () => _locationFeedback =
               'Location is unavailable. You can enter coordinates manually.',
@@ -294,6 +412,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<bool> _updateQuote({bool repair = true}) async {
+    if (!_ensureAccount()) return false;
     if (_frozen) return _ready;
     final generation = ++_generation;
     final body = _quoteInput;
@@ -307,6 +426,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       try {
         data = await widget.repository.quote(body);
       } on BackendException catch (e) {
+        if (mounted && _lostAccess(e)) return false;
         if (mounted && generation == _generation) {
           setState(() => _readCompanies(e.data));
         }
@@ -317,7 +437,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
         }
         data = e.data;
       }
-      if (!mounted || generation != _generation) return false;
+      if (!mounted || !_ensureAccount() || generation != _generation) {
+        return false;
+      }
       setState(() => _readCompanies(data));
       final quote = checkedPurchaseQuote(data['quote'], itemIds: _ids);
       final errors = mapOf(data['selectionErrors']);
@@ -359,6 +481,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       });
       return _ready;
     } on BackendException catch (e) {
+      if (mounted && _lostAccess(e)) return false;
       if (mounted && generation == _generation) {
         setState(() {
           _error = e.fields.isEmpty ? e.message : e.fields.values.join('\n');
@@ -374,6 +497,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _pickVoucher({int? shopId, required String title}) async {
+    if (!_ensureAccount()) return;
     final requested = jsonEncode(_quoteInput);
     final current = shopId == null
         ? _platformVoucher
@@ -389,7 +513,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         ),
       ),
     );
-    if (!mounted || selected == null) return;
+    if (!mounted || !_ensureAccount() || selected == null) return;
     if (requested != jsonEncode(_quoteInput) || _frozen || _submitting) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -412,6 +536,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _bestVouchers() async {
+    if (!_ensureAccount()) return;
     if (_choosingBest || !_ready || _frozen || _submitting) return;
     final requested = jsonEncode(_quoteInput);
     setState(() {
@@ -421,7 +546,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     });
     try {
       final result = await widget.repository.bestVouchers(_quoteInput);
-      if (!mounted) return;
+      if (!mounted || !_ensureAccount()) return;
       if (requested != jsonEncode(_quoteInput) || _frozen) {
         setState(() {
           _voucherProblem = true;
@@ -437,6 +562,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       });
       _edit();
     } on BackendException catch (e) {
+      if (mounted && _lostAccess(e)) return;
       if (mounted && requested == jsonEncode(_quoteInput)) {
         setState(() {
           _voucherProblem = true;
@@ -449,7 +575,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _reload() async {
-    if (_submitting) {
+    if (!_ensureAccount() || _submitting) {
       return;
     }
     _submittedPayload = null;
@@ -464,7 +590,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       final fresh = await widget.repository.document(
         '/checkout?items=${_ids.join(',')}${quantity == null ? '' : '&quantity=$quantity'}',
       );
-      widget.repository.requireNoErrors(fresh);
+      if (!mounted || !_ensureAccount()) return;
+      _validatePage(fresh);
       if (fresh.component != 'Checkout/Index') {
         throw const BackendException(
           'Checkout is no longer available. Check your Bag and orders.',
@@ -479,6 +606,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         await _updateQuote();
       }
     } on BackendException catch (e) {
+      if (mounted && _lostAccess(e)) return;
       if (mounted) {
         setState(() => _error = e.message);
       }
@@ -490,7 +618,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _review() async {
-    if (_submitting || _quoting || _choosingBest) {
+    if (!_ensureAccount() ||
+        _reviewOpen ||
+        _submitting ||
+        _quoting ||
+        _choosingBest) {
       return;
     }
     if (!_frozen) {
@@ -526,100 +658,124 @@ class _CheckoutPageState extends State<CheckoutPage> {
         _submittedPayload ??
         jsonDecode(jsonEncode(_values)) as Map<String, dynamic>;
     bool agreed = false;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) => AlertDialog(
-          title: const Text('Confirm your order'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '${payload['recipient_name']} · ${payload['recipient_phone']}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    [
-                      payload['shipping_address'],
-                      payload['destination_barangay'],
-                      payload['shipping_city'],
-                      payload['shipping_province'],
-                      payload['shipping_postal_code'],
-                    ].join(', '),
-                  ),
-                  const SizedBox(height: 16),
-                  for (final item in _items) ...[
-                    Text(
-                      '${mapOf(item['product'])['name']} × ${mapOf(payload['item_quantities'])[item['id'].toString()] ?? item['quantity']}',
-                    ),
-                    PriceSegments(
-                      segments: mapsOf(
-                        mapsOf(_quote['items'])
-                            .where((row) => row['id'] == item['id'])
-                            .firstOrNull?['price_segments'],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (_hasCompanyContract)
-                    Text(
-                      'Logistics: ${_companies.where((row) => row['id'] == payload['logistics_company_id']).firstOrNull?['name'] ?? 'Recorded company'}',
-                    ),
-                  const SizedBox(height: 12),
-                  Text(
-                    payload['delivery_type'] == 'hub_self_pickup'
-                        ? 'Self-pickup: ${mapsOf(_page.props['pickupHubs']).where((h) => h['id'] == payload['pickup_hub_id']).firstOrNull?['name'] ?? 'Selected Bayan Hub'}'
-                        : 'Doorstep delivery',
-                  ),
-                  const SizedBox(height: 12),
-                  CheckoutDiscounts(quote: _quote),
-                  Text(
-                    'Total: ${pesos(_quote['total'])}',
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: BagooTheme.strong,
-                    ),
-                  ),
-                  Text(
-                    payload['payment_method'] == 'wallet'
-                        ? 'Bagoo Wallet · virtual credits. Confirm payment after placing the order.'
-                        : 'Cash on Delivery. Pay the assigned rider or counter when receiving your parcel.',
-                    style: const TextStyle(height: 1.6),
-                  ),
-                  CheckboxListTile(
-                    value: agreed,
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    onChanged: (v) => update(() => agreed = v ?? false),
-                    title: const Text(
-                      'I reviewed the recipient, selected items, delivery method, payment method, and total.',
-                      style: TextStyle(fontSize: 13, height: 1.6),
-                    ),
+    bool? confirmed;
+    _reviewOpen = true;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) {
+            _reviewUpdate = update;
+            if (!_current) {
+              return AlertDialog(
+                title: const Text('Checkout unavailable'),
+                content: Text(_unavailable),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Close'),
                   ),
                 ],
+              );
+            }
+            return AlertDialog(
+              title: const Text('Confirm your order'),
+              content: SizedBox(
+                width: 460,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '${payload['recipient_name']} · ${payload['recipient_phone']}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        [
+                          payload['shipping_address'],
+                          payload['destination_barangay'],
+                          payload['shipping_city'],
+                          payload['shipping_province'],
+                          payload['shipping_postal_code'],
+                        ].join(', '),
+                      ),
+                      const SizedBox(height: 16),
+                      for (final item in _items) ...[
+                        Text(
+                          '${mapOf(item['product'])['name']} × ${mapOf(payload['item_quantities'])[item['id'].toString()] ?? item['quantity']}',
+                        ),
+                        PriceSegments(
+                          segments: mapsOf(
+                            mapsOf(_quote['items'])
+                                .where((row) => row['id'] == item['id'])
+                                .firstOrNull?['price_segments'],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      if (_hasCompanyContract)
+                        Text(
+                          'Logistics: ${_companies.where((row) => row['id'] == payload['logistics_company_id']).firstOrNull?['name'] ?? 'Recorded company'}',
+                        ),
+                      const SizedBox(height: 12),
+                      Text(
+                        payload['delivery_type'] == 'hub_self_pickup'
+                            ? 'Self-pickup: ${mapsOf(_page.props['pickupHubs']).where((h) => h['id'] == payload['pickup_hub_id']).firstOrNull?['name'] ?? 'Selected Bayan Hub'}'
+                            : 'Doorstep delivery',
+                      ),
+                      const SizedBox(height: 12),
+                      CheckoutDiscounts(quote: _quote),
+                      Text(
+                        'Total: ${pesos(_quote['total'])}',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: BagooTheme.strong,
+                        ),
+                      ),
+                      Text(
+                        payload['payment_method'] == 'wallet'
+                            ? 'Bagoo Wallet · virtual credits. Confirm payment after placing the order.'
+                            : 'Cash on Delivery. Pay the assigned rider or counter when receiving your parcel.',
+                        style: const TextStyle(height: 1.6),
+                      ),
+                      CheckboxListTile(
+                        value: agreed,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: (v) => update(() => agreed = v ?? false),
+                        title: const Text(
+                          'I reviewed the recipient, selected items, delivery method, payment method, and total.',
+                          style: TextStyle(fontSize: 13, height: 1.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Back'),
-            ),
-            FilledButton(
-              onPressed: agreed ? () => Navigator.pop(context, true) : null,
-              child: Text(_frozen ? 'Retry same order' : 'Place order'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Back'),
+                ),
+                FilledButton(
+                  onPressed: agreed
+                      ? () => Navigator.pop(context, _current)
+                      : null,
+                  child: Text(_frozen ? 'Retry same order' : 'Place order'),
+                ),
+              ],
+            );
+          },
         ),
-      ),
-    );
-    if (confirmed != true || !mounted || _submitting) {
+      );
+    } finally {
+      _reviewOpen = false;
+      _reviewUpdate = null;
+    }
+    if (!mounted || !_ensureAccount() || confirmed != true || _submitting) {
       return;
     }
     FocusScope.of(context).unfocus();
@@ -633,16 +789,23 @@ class _CheckoutPageState extends State<CheckoutPage> {
       if (!mounted) {
         return;
       }
+      _account.check(page: page);
+      final resultAccount = BuyerAccountScope(widget.repository.session)
+        ..check(page: page);
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              OrderResultPage(repository: widget.repository, initial: page),
+          builder: (_) => OrderResultPage(
+            repository: widget.repository,
+            initial: page,
+            account: resultAccount,
+          ),
         ),
       );
     } on BackendException catch (e) {
       if (!mounted) {
         return;
       }
+      if (_lostAccess(e)) return;
       setState(() {
         _error = e.fields.isEmpty ? e.message : e.fields.values.join('\n');
         _fieldErrors = e.fields;
@@ -752,6 +915,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
   );
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _account.invalidate();
+    _reviewUpdate = null;
     _generation++;
     _debounce?.cancel();
     for (final c in _fields.values) {
@@ -1439,7 +1605,31 @@ class _CheckoutPageState extends State<CheckoutPage> {
   );
 
   @override
-  Widget build(BuildContext context) => PopScope(
+  Widget build(BuildContext context) =>
+      _current ? _checkoutContent(context) : _unavailablePage(context);
+
+  Widget _unavailablePage(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Checkout unavailable')),
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Notice(_unavailable, error: true),
+              TextButton(
+                onPressed: () => Navigator.maybePop(context),
+                child: const Text('Close checkout'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _checkoutContent(BuildContext context) => PopScope(
     canPop: !_submitting,
     child: Scaffold(
       appBar: AppBar(title: const Text('Checkout')),
