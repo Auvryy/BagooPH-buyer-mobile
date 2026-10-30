@@ -164,10 +164,56 @@ class OfferTile extends StatefulWidget {
   State<OfferTile> createState() => _OfferTileState();
 }
 
-class _OfferTileState extends State<OfferTile> {
+typedef _BookmarkIntent = ({int generation, Object? revision, Object? saved});
+
+class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
   bool _busy = false;
-  dynamic _saved;
+  bool _accessEnded = false;
+  late final WebSession _session;
+  late final int _epoch;
+  Object? _saved, _sourceSaved, _revision;
+  int _generation = 0;
   String? _error;
+
+  bool _sameId(Object? a, Object? b) =>
+      a == b && a.runtimeType == b.runtimeType;
+  bool _validId(Object? value) => value is int && value > 0;
+  _BookmarkIntent get _intent =>
+      (generation: _generation, revision: _revision, saved: _saved);
+
+  void _expire({bool rebuild = true}) {
+    if (!mounted || _accessEnded) return;
+    void clear() {
+      _accessEnded = true;
+      _generation++;
+      _busy = false;
+      _saved = null;
+      _error = 'Your account changed or voucher access ended. Reopen these offers to continue.';
+    }
+
+    if (rebuild) {
+      setState(clear);
+    } else {
+      clear();
+    }
+  }
+
+  bool _current({bool rebuild = true}) {
+    if (!mounted) return false;
+    if (!_accessEnded &&
+        identical(_session, widget.repository.session) &&
+        _epoch == _session.identityEpoch) {
+      return true;
+    }
+    _expire(rebuild: rebuild);
+    return false;
+  }
+
+  bool _active(_BookmarkIntent intent) =>
+      _current() &&
+      widget.canSave &&
+      intent.generation == _generation &&
+      _sameId(intent.revision, widget.offer['revision_id']);
   String? _eligibleSlug(Map<String, dynamic> product) {
     try {
       final url = product['url'];
@@ -188,44 +234,96 @@ class _OfferTileState extends State<OfferTile> {
   @override
   void initState() {
     super.initState();
-    _saved = widget.offer['saved_id'];
+    WidgetsBinding.instance.addObserver(this);
+    _session = widget.repository.session;
+    _epoch = _session.identityEpoch;
+    _revision = widget.offer['revision_id'];
+    _saved = _sourceSaved = widget.offer['saved_id'];
   }
 
-  Future<void> _save() async {
-    if (_busy) {
+  @override
+  void didUpdateWidget(OfferTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_current(rebuild: false)) return;
+    if (!_sameId(_revision, widget.offer['revision_id']) ||
+        !_sameId(_sourceSaved, widget.offer['saved_id']) ||
+        oldWidget.canSave != widget.canSave ||
+        (oldWidget.onSignIn != null) != (widget.onSignIn != null)) {
+      _generation++;
+      _revision = widget.offer['revision_id'];
+      _saved = _sourceSaved = widget.offer['saved_id'];
+      _busy = false;
+      _error = null;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _current();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _generation++;
+    super.dispose();
+  }
+
+  Future<void> _save(_BookmarkIntent intent) async {
+    if (!_current() ||
+        _busy ||
+        !_active(intent) ||
+        !_sameId(intent.saved, _saved)) {
+      return;
+    }
+    if (!_validId(intent.revision) ||
+        intent.saved != null && !_validId(intent.saved)) {
+      setState(
+        () => _error = 'This voucher could not be confirmed. Refresh these offers before trying again.',
+      );
       return;
     }
     if (widget.onSignIn != null) {
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      setState(() => _busy = true);
       widget.onSignIn!();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _active(intent)) setState(() => _busy = false);
+      });
       return;
     }
+    final removing = intent.saved != null;
+    final target = removing ? intent.saved : intent.revision;
+    final onSaved = widget.onSaved;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final data = await widget.repository.session.jsonPost(
-        _saved == null
-            ? '/buyer/saved-vouchers/${widget.offer['revision_id']}'
-            : '/buyer/saved-vouchers/$_saved',
+      final data = await _session.jsonPost(
+        '/buyer/saved-vouchers/$target',
         {},
-        method: _saved == null ? 'POST' : 'DELETE',
+        method: removing ? 'DELETE' : 'POST',
       );
-      if (_saved == null
-          ? data['saved_id'] is! num
+      if (!_active(intent)) return;
+      if (!removing
+          ? !_validId(data['saved_id'])
           : data['saved_id'] != null || !data.containsKey('saved_id')) {
         throw const BackendException('The voucher change was not confirmed.');
       }
-      if (mounted) {
-        setState(() => _saved = data['saved_id']);
-        await widget.onSaved?.call();
-      }
+      setState(() => _saved = data['saved_id']);
+      await onSaved?.call();
+      _current();
     } on BackendException catch (e) {
-      if (mounted) {
+      if (_active(intent)) {
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _expire();
+          return;
+        }
         setState(() => _error = e.message);
       }
     } finally {
-      if (mounted) {
+      if (_active(intent)) {
         setState(() => _busy = false);
       }
     }
@@ -233,6 +331,10 @@ class _OfferTileState extends State<OfferTile> {
 
   @override
   Widget build(BuildContext context) {
+    final current = _current(rebuild: false);
+    final intent = _intent;
+    final validIds =
+        _validId(_revision) && (_saved == null || _validId(_saved));
     final o = widget.offer;
     final value = amount(o['discount_value']) ?? 0;
     final cap = amount(o['max_discount']);
@@ -335,10 +437,14 @@ class _OfferTileState extends State<OfferTile> {
                 ),
               if (o['revision_id'] != null)
                 TextButton(
-                  onPressed: _busy || !widget.canSave ? null : _save,
+                  onPressed: _busy || !widget.canSave || !current || !validIds
+                      ? null
+                      : () => _save(intent),
                   child: Text(
                     _busy
-                        ? 'Saving…'
+                        ? widget.onSignIn != null
+                              ? 'Opening sign-in…'
+                              : 'Saving…'
                         : _saved == null
                         ? 'Save voucher'
                         : 'Remove voucher',
@@ -347,6 +453,11 @@ class _OfferTileState extends State<OfferTile> {
             ],
           ),
           if (_error != null) Notice(_error!, error: true),
+          if (current && !validIds)
+            const Notice(
+              'This voucher could not be confirmed. Refresh these offers before trying again.',
+              error: true,
+            ),
         ],
       ),
     );

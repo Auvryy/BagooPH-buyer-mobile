@@ -130,6 +130,15 @@ flutter test -d linux integration_test/bag_misuse_test.dart
 
 The Bag review uses synthetic rows and reports read, quote and mutation attempts. Its sidebar selects successful, failed, denied or wrong-buyer replies. Change test account expires the open Bag; close any masked dialog, then use Reopen Bag for a fresh session. Reset starts a new fixture. All outbound requests are blocked, so these checks do not change a real Bag or establish backend authorization.
 
+For isolated voucher bookmarks, changed offers and late or malformed acknowledgements:
+
+```sh
+flutter run -d linux -t tool/voucher_review.dart
+flutter test -d linux integration_test/voucher_misuse_test.dart
+```
+
+The voucher review controls the next synthetic reply, save permission, displayed offer and session. It reports mutation attempts and confirmed refreshes. Reset starts a fresh fixture; outbound requests stay blocked. Bookmark changes do not reserve a discount, place an order or prove live backend acceptance.
+
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 
 ```sh
