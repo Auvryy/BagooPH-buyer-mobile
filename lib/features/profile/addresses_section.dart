@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../checkout/location_picker.dart';
@@ -22,44 +23,79 @@ class AddressesSection extends StatefulWidget {
   State<AddressesSection> createState() => _AddressesSectionState();
 }
 
-class _AddressesSectionState extends ProfileFormState<AddressesSection> {
+class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
+  @override
+  void clearBuyerDraft() => _confirming = false;
+  bool _confirming = false;
+  bool get _pending => busy || _confirming;
+
   List<Map<String, dynamic>> get addresses =>
       mapsOf(widget.page.props['addresses']);
   bool get eligible => widget.page.props['canUsePortal'] == true;
   int get limit =>
       (widget.page.props['addressBookLimit'] as num?)?.toInt() ?? 10;
   Future<void> _edit([Map<String, dynamic>? address]) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _AddressEditor(
-          repository: widget.repository,
-          user: mapOf(widget.page.props['user']),
-          address: address,
-          count: addresses.length,
-          limit: limit,
-          onChanged: widget.onChanged,
+    if (_pending || !eligible || !ensureBuyerAccess()) return;
+    await perform(() async {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _AddressEditor(
+            repository: widget.repository,
+            page: widget.page,
+            account: accountScope,
+            canChange: () =>
+                mounted &&
+                hasBuyerAccess &&
+                eligible &&
+                (address == null
+                    ? addresses.length < limit
+                    : addresses.any((saved) => saved['id'] == address['id'])),
+            address: address,
+            count: addresses.length,
+            limit: limit,
+            onChanged: widget.onChanged,
+          ),
         ),
-      ),
-    );
+      );
+      return null;
+    }, validate: false);
   }
 
   Future<void> _change(Map<String, dynamic> address, bool remove) async {
-    if (remove &&
-        !await confirmAction(
-          context,
-          'Delete this address?',
-          '${address['recipient_name']} · ${address['street']}, ${address['city']}\nExisting orders keep their delivery details.',
-          'Delete address',
-        )) {
-      return;
+    if (_pending || !eligible || !ensureBuyerAccess()) return;
+    if (remove) {
+      setState(() => _confirming = true);
+      try {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (_) => _AddressDeleteConfirmation(
+            account: accountScope,
+            address: address,
+          ),
+        );
+        if (confirmed != true) return;
+      } finally {
+        if (mounted) setState(() => _confirming = false);
+      }
     }
+    if (!mounted) return;
     await perform(() async {
+      if (!eligible) {
+        throw const BackendException(
+          'An active approved buyer account is required to change delivery addresses.',
+        );
+      }
       final page = await widget.repository.mutate(
         '/buyer/addresses/${address['id']}${remove ? '' : '/default'}',
         {},
         method: remove ? 'DELETE' : 'POST',
         tab: 'addresses',
       );
+      checkBuyerAccount(result: page);
       if (mounted) widget.onChanged(page);
       return mapOf(page.props['flash'])['success']?.toString();
     }, validate: false);
@@ -80,7 +116,9 @@ class _AddressesSectionState extends ProfileFormState<AddressesSection> {
         ),
       ),
     OutlinedButton.icon(
-      onPressed: busy || !eligible || addresses.length >= limit ? null : _edit,
+      onPressed: _pending || !eligible || addresses.length >= limit
+          ? null
+          : _edit,
       icon: const Icon(Icons.add),
       label: const Text('Add delivery address'),
     ),
@@ -142,18 +180,20 @@ class _AddressesSectionState extends ProfileFormState<AddressesSection> {
               runSpacing: 8,
               children: [
                 TextButton(
-                  onPressed: busy || !eligible ? null : () => _edit(address),
+                  onPressed: _pending || !eligible
+                      ? null
+                      : () => _edit(address),
                   child: const Text('Edit'),
                 ),
                 if (address['is_default'] != true) ...[
                   TextButton(
-                    onPressed: busy || !eligible
+                    onPressed: _pending || !eligible
                         ? null
                         : () => _change(address, false),
                     child: const Text('Set as default'),
                   ),
                   TextButton(
-                    onPressed: busy || !eligible
+                    onPressed: _pending || !eligible
                         ? null
                         : () => _change(address, true),
                     child: const Text('Delete'),
@@ -173,17 +213,83 @@ class _AddressesSectionState extends ProfileFormState<AddressesSection> {
   ]);
 }
 
+class _AddressDeleteConfirmation extends StatefulWidget {
+  const _AddressDeleteConfirmation({
+    required this.account,
+    required this.address,
+  });
+  final BuyerAccountScope account;
+  final Map<String, dynamic> address;
+  @override
+  State<_AddressDeleteConfirmation> createState() =>
+      _AddressDeleteConfirmationState();
+}
+
+class _AddressDeleteConfirmationState extends State<_AddressDeleteConfirmation>
+    with WidgetsBindingObserver {
+  late final BuyerAccountScope _account;
+  @override
+  void initState() {
+    super.initState();
+    _account = widget.account.fork();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_account.isCurrent) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _account.invalidate();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      _account.isCurrent ? 'Delete this address?' : 'Address unavailable',
+    ),
+    content: SingleChildScrollView(
+      child: Text(
+        _account.isCurrent
+            ? '${widget.address['recipient_name']} · ${widget.address['street']}, ${widget.address['city']}\nExisting orders keep their delivery details.'
+            : 'Your buyer account changed or access ended. Reopen the address book from your account.',
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context, false),
+        child: Text(_account.isCurrent ? 'Cancel' : 'Close'),
+      ),
+      if (_account.isCurrent)
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _account.isCurrent),
+          child: const Text('Delete address'),
+        ),
+    ],
+  );
+}
+
 class _AddressEditor extends StatefulWidget {
   const _AddressEditor({
     required this.repository,
-    required this.user,
+    required this.page,
+    required this.account,
+    required this.canChange,
     required this.address,
     required this.count,
     required this.limit,
     required this.onChanged,
   });
   final ProfileRepository repository;
-  final Map<String, dynamic> user;
+  final WebPage page;
+  final BuyerAccountScope account;
+  final bool Function() canChange;
   final Map<String, dynamic>? address;
   final int count, limit;
   final ValueChanged<WebPage> onChanged;
@@ -191,16 +297,36 @@ class _AddressEditor extends StatefulWidget {
   State<_AddressEditor> createState() => _AddressEditorState();
 }
 
-class _AddressEditorState extends ProfileFormState<_AddressEditor> {
+class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
+  @override
+  BuyerAccountScope get parentAccountScope => widget.account;
+
+  @override
+  void clearBuyerDraft() {
+    for (final field in _fields.values) {
+      field.clear();
+    }
+    _location = {};
+    _default = false;
+    _keepCoordinates = false;
+    _needsReview = false;
+  }
+
   late final Map<String, TextEditingController> _fields;
   late Map<String, String> _location;
   late bool _default;
   late String _type;
-  bool _loading = true, _initialized = false, _keepCoordinates = true;
+  bool _loading = true, _keepCoordinates = true;
+  bool _needsReview = false;
   @override
   void initState() {
     super.initState();
     final address = widget.address ?? {};
+    final user = mapOf(widget.page.props['user']);
     _fields = {
       for (final key in [
         'recipient_name',
@@ -213,9 +339,9 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
           text:
               address[key]?.toString() ??
               (key == 'recipient_name'
-                  ? widget.user['name']?.toString()
+                  ? user['name']?.toString()
                   : key == 'phone'
-                  ? widget.user['phone']?.toString()
+                  ? user['phone']?.toString()
                   : '') ??
               '',
         ),
@@ -237,6 +363,16 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
   }
 
   Future<void> _save() async => perform(() async {
+    if (_needsReview) {
+      throw const BackendException(
+        'Review your saved addresses before adding this address again.',
+      );
+    }
+    if (!widget.canChange()) {
+      throw const BackendException(
+        'Your address permissions or saved addresses changed. Close this editor and reopen your address book.',
+      );
+    }
     if (_loading) {
       throw const BackendException(
         'Wait for the current location choices to load.',
@@ -253,18 +389,43 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
       'latitude': _keepCoordinates ? mapOf(widget.address)['latitude'] : null,
       'longitude': _keepCoordinates ? mapOf(widget.address)['longitude'] : null,
     };
-    final page = await widget.repository.mutate(
-      '/buyer/addresses${widget.address == null ? '' : '/${widget.address!['id']}'}',
-      values,
-      method: widget.address == null ? 'POST' : 'PATCH',
-      tab: 'addresses',
-    );
+    late WebPage page;
+    try {
+      page = await widget.repository.mutate(
+        '/buyer/addresses${widget.address == null ? '' : '/${widget.address!['id']}'}',
+        values,
+        method: widget.address == null ? 'POST' : 'PATCH',
+        tab: 'addresses',
+      );
+    } on BackendException catch (error) {
+      if (widget.address == null &&
+          (error.status == null ||
+              error.status == 408 ||
+              error.status! >= 500)) {
+        _needsReview = true;
+      }
+      rethrow;
+    } catch (_) {
+      if (widget.address == null) _needsReview = true;
+      rethrow;
+    }
+    checkBuyerAccount(result: page);
     if (mounted) {
       widget.onChanged(page);
       Navigator.pop(context);
     }
     return null;
   });
+
+  Future<void> _reviewSaved() async => perform(() async {
+    final page = await widget.repository.load(tab: 'addresses');
+    checkBuyerAccount(result: page);
+    if (mounted) {
+      widget.onChanged(page);
+      Navigator.pop(context);
+    }
+    return null;
+  }, validate: false);
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
@@ -290,6 +451,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                 'recipient_name',
                 'Recipient name',
                 _fields['recipient_name']!,
+                enabled: !_needsReview,
                 min: 2,
                 max: 100,
                 autofill: const [AutofillHints.name],
@@ -298,6 +460,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                 'phone',
                 'Mobile number',
                 _fields['phone']!,
+                enabled: !_needsReview,
                 max: 20,
                 keyboard: TextInputType.phone,
                 autofill: const [AutofillHints.telephoneNumber],
@@ -305,24 +468,26 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
               LocationPicker(
                 repository: widget.repository.buyer,
                 initial: _location,
-                disabled: busy,
+                disabled: busy || _needsReview,
                 onLoading: (loading) {
-                  if (mounted) setState(() => _loading = loading);
+                  if (mounted && ensureBuyerAccess()) {
+                    setState(() => _loading = loading);
+                  }
                 },
                 onChanged: (value) {
-                  if (_initialized &&
-                      jsonEncode(value) != jsonEncode(_location)) {
+                  if (!mounted || !ensureBuyerAccess()) return;
+                  if (jsonEncode(value) != jsonEncode(_location)) {
                     _keepCoordinates = false;
                     _fields['postal_code']!.clear();
                   }
-                  _initialized = true;
-                  if (mounted) setState(() => _location = value);
+                  setState(() => _location = value);
                 },
               ),
               field(
                 'street',
                 'Street / house / unit number',
                 _fields['street']!,
+                enabled: !_needsReview,
                 min: 5,
                 max: 500,
                 lines: 3,
@@ -333,6 +498,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                 'postal_code',
                 'Postal code (optional)',
                 _fields['postal_code']!,
+                enabled: !_needsReview,
                 required: false,
                 max: 4,
                 keyboard: TextInputType.number,
@@ -344,6 +510,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                 'landmark',
                 'Landmark (optional)',
                 _fields['landmark']!,
+                enabled: !_needsReview,
                 required: false,
                 min: 5,
                 max: 255,
@@ -356,7 +523,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                   for (final type in ['Home', 'Office', 'Other'])
                     DropdownMenuItem(value: type, child: Text(type)),
                 ],
-                onChanged: busy
+                onChanged: busy || _needsReview
                     ? null
                     : (value) => setState(() => _type = value!),
               ),
@@ -368,6 +535,7 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                 title: const Text('Use as default delivery address'),
                 onChanged:
                     busy ||
+                        _needsReview ||
                         widget.address?['is_default'] == true ||
                         widget.count == 0
                     ? null
@@ -379,8 +547,19 @@ class _AddressEditorState extends ProfileFormState<_AddressEditor> {
                     ? 'Add address'
                     : 'Save delivery address',
                 busy: busy,
-                onPressed: _loading ? null : _save,
+                onPressed: _loading || _needsReview ? null : _save,
               ),
+              if (_needsReview) ...[
+                const SizedBox(height: 16),
+                const Notice(
+                  'The save result is uncertain. Check your address book before adding this address again.',
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: busy ? null : _reviewSaved,
+                  child: const Text('Review saved addresses'),
+                ),
+              ],
             ]),
           ),
         ),

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:bagoo_buyer_mobile/core/uploads.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/features/profile/addresses_section.dart';
 import 'package:bagoo_buyer_mobile/features/profile/email_section.dart';
 import 'package:bagoo_buyer_mobile/features/profile/identity_section.dart';
 import 'package:bagoo_buyer_mobile/features/profile/personal_section.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../test/support/account_fixtures.dart';
+import '../test/support/address_fixtures.dart';
 import '../test/support/no_network.dart';
 import '../test/support/return_fixtures.dart';
 import 'preview/buyer_device_preview.dart';
@@ -37,6 +39,7 @@ class _AccountReviewState extends State<_AccountReview> {
     'identity': 'Reviewed identity',
     'application': 'Rejected application',
     'sessions': 'Login sessions',
+    'addresses': 'Delivery addresses',
     'personal': 'Personal details',
     'password': 'Password',
     'wallet': 'Demo wallet',
@@ -96,13 +99,25 @@ class _AccountReviewState extends State<_AccountReview> {
       }
     }
 
-    _page = _screen == 'application' ? applicationPage() : accountPage();
+    _page = switch (_screen) {
+      'application' => applicationPage(),
+      'addresses' => addressPage(),
+      _ => accountPage(),
+    };
     _revision++;
     _revoked = false;
     final session = repository.session as ReturnSession;
-    session.onGet = (_) async {
+    session.onPage = (_) async {
       await _response();
       requireCurrentScene();
+      return _copyPage();
+    };
+    session.onGet = (path) async {
+      await _response();
+      requireCurrentScene();
+      if (path.startsWith('/address-locations')) {
+        return addressLocationOptions();
+      }
       final data = accountSessions();
       if (_revoked) {
         ((data['sessions'] as Map)['data'] as List).removeWhere(
@@ -195,6 +210,48 @@ class _AccountReviewState extends State<_AccountReview> {
       final next = _copyPage();
       if (request.path == '/buyer/profile') {
         (next.props['user'] as Map)['phone'] = request.values['phone'];
+      } else if (request.path.startsWith('/buyer/addresses')) {
+        final rows = mapsOf(next.props['addresses']);
+        final id = int.tryParse(request.path.split('/').last);
+        if (request.path.endsWith('/default')) {
+          final selected = int.parse(request.path.split('/')[3]);
+          for (final row in rows) {
+            row['is_default'] = row['id'] == selected;
+          }
+        } else if (request.method == 'DELETE') {
+          rows.removeWhere((row) => row['id'] == id);
+        } else if (request.method == 'PATCH') {
+          final row = rows.singleWhere((row) => row['id'] == id);
+          final wasDefault = row['is_default'] == true;
+          row.addAll(request.values);
+          row['is_default'] = wasDefault || row['is_default'] == true;
+          if (row['is_default'] == true) {
+            for (final other in rows.where((other) => other['id'] != id)) {
+              other['is_default'] = false;
+            }
+          }
+        } else if (request.path == '/buyer/addresses' &&
+            request.method == 'POST') {
+          final nextId =
+              rows.fold<int>(
+                0,
+                (max, row) => (row['id'] as int) > max ? row['id'] as int : max,
+              ) +
+              1;
+          final isDefault =
+              rows.isEmpty || request.values['is_default'] == true;
+          if (isDefault) {
+            for (final row in rows) {
+              row['is_default'] = false;
+            }
+          }
+          rows.add({...request.values, 'id': nextId, 'is_default': isDefault});
+        } else {
+          throw StateError('Unsupported isolated address action.');
+        }
+        next.props['addresses'] = rows;
+      } else {
+        throw StateError('Unsupported isolated profile action.');
       }
       next.props['flash'] = {'success': 'Synthetic profile update saved.'};
       _page = next;
@@ -218,6 +275,11 @@ class _AccountReviewState extends State<_AccountReview> {
         reload: _reload,
       ),
       'sessions' => SessionsSection(repository: repository, owner: 7),
+      'addresses' => AddressesSection(
+        repository: repository,
+        page: _page,
+        onChanged: changed,
+      ),
       'personal' => PersonalSection(
         repository: repository,
         page: _page,

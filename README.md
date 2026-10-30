@@ -103,7 +103,7 @@ flutter test -d linux integration_test/return_misuse_test.dart
 flutter test -d linux integration_test/private_pdf_misuse_test.dart
 ```
 
-To review contact emails, reviewed identity, rejected applications, login sessions, personal details, password changes and demo credits with synthetic replies:
+To review contact emails, reviewed identity, rejected applications, login sessions, delivery addresses, personal details, password changes and demo credits with synthetic replies:
 
 ```sh
 flutter run -d linux -t tool/account_review.dart
