@@ -45,6 +45,7 @@ class _CheckoutReviewState extends State<_CheckoutReview> {
     'offline': 'Connection failure',
     'denied': 'Access denied',
     'foreign-result': 'Wrong buyer reply',
+    'invalid-location': 'Invalid GPS reading',
   };
   _ReviewRepository? _repository;
   late WebPage _initial;
@@ -73,6 +74,8 @@ class _CheckoutReviewState extends State<_CheckoutReview> {
     _repository?.session.close();
     final repository = _repository = _ReviewRepository()..signedIn = true;
     _initial = ownedCheckout();
+    ((_initial.props['addresses'] as List).first as Map<String, dynamic>)
+        .addAll({'latitude': '14.0689', 'longitude': '121.3250'});
     _revision++;
     _quotes = 0;
     void checkScene() {
@@ -170,6 +173,13 @@ class _CheckoutReviewState extends State<_CheckoutReview> {
             captureLocation: () async {
               final mode = _mode;
               await _response(mode);
+              if (mode == 'invalid-location') {
+                return (
+                  latitude: double.nan,
+                  longitude: 121.3250,
+                  accuracy: 8.0,
+                );
+              }
               return (latitude: 14.0689, longitude: 121.3250, accuracy: 8.0);
             },
           ),

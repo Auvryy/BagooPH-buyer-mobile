@@ -351,7 +351,13 @@ class _CheckoutPageState extends State<CheckoutPage>
   ]);
 
   Future<void> _captureLocation() async {
-    if (!_ensureAccount() || _locating || _frozen || _submitting) return;
+    if (!_ensureAccount() ||
+        _locating ||
+        _reviewOpen ||
+        _frozen ||
+        _submitting) {
+      return;
+    }
     final address = _locationDraft;
     setState(() {
       _locating = true;
@@ -361,9 +367,20 @@ class _CheckoutPageState extends State<CheckoutPage>
       final position = await widget.captureLocation();
       if (!mounted ||
           !_ensureAccount() ||
+          _reviewOpen ||
           _frozen ||
           address != _locationDraft) {
         return;
+      }
+      if (!position.latitude.isFinite ||
+          position.latitude.abs() > 90 ||
+          !position.longitude.isFinite ||
+          position.longitude.abs() > 180 ||
+          !position.accuracy.isFinite ||
+          position.accuracy < 0) {
+        throw const BackendException(
+          'This location could not be confirmed. Try again or enter the recipient coordinates manually.',
+        );
       }
       setState(() {
         _fields['shipping_latitude']!.text = position.latitude.toStringAsFixed(
@@ -621,6 +638,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     if (!_ensureAccount() ||
         _reviewOpen ||
         _submitting ||
+        _locating ||
         _quoting ||
         _choosingBest) {
       return;
@@ -650,7 +668,7 @@ class _CheckoutPageState extends State<CheckoutPage>
         return;
       }
       _debounce?.cancel();
-      if (!await _updateQuote() || !mounted) {
+      if (!await _updateQuote() || !mounted || _locating) {
         return;
       }
     }
@@ -712,6 +730,15 @@ class _CheckoutPageState extends State<CheckoutPage>
                           payload['shipping_postal_code'],
                         ].join(', '),
                       ),
+                      if ((payload['shipping_latitude']?.toString() ?? '')
+                              .isNotEmpty &&
+                          (payload['shipping_longitude']?.toString() ?? '')
+                              .isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Recipient coordinates: ${payload['shipping_latitude']}, ${payload['shipping_longitude']}',
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       for (final item in _items) ...[
                         Text(
@@ -895,11 +922,11 @@ class _CheckoutPageState extends State<CheckoutPage>
           if (value.isEmpty) return null;
           final coordinate = double.tryParse(value);
           final limit = key == 'shipping_latitude' ? 90 : 180;
-          if (!RegExp(r'^-?[0-9]{1,3}(\.[0-9]{1,6})?$').hasMatch(value) ||
+          if (!RegExp(r'^-?[0-9]+(?:\.[0-9]{1,7})?$').hasMatch(value) ||
               coordinate == null ||
               !coordinate.isFinite ||
               coordinate.abs() > limit) {
-            return 'Use a coordinate from -$limit to $limit, up to six decimal places.';
+            return 'Use a coordinate from -$limit to $limit, up to seven decimal places.';
           }
           return null;
         }

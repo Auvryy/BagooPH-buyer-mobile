@@ -8,6 +8,7 @@ import '../test/buyer_post_purchase_test.dart' as payments;
 import '../test/checkout_account_misuse_test.dart' as accounts;
 import '../test/checkout_confirmation_misuse_test.dart' as confirmations;
 import '../test/checkout_logistics_test.dart' as logistics;
+import '../test/checkout_location_misuse_test.dart' as location_inputs;
 import '../test/checkout_navigation_misuse_test.dart' as navigation;
 import '../test/checkout_widgets_test.dart' as checkout;
 import '../test/location_picker_misuse_test.dart' as locations;
@@ -23,6 +24,7 @@ void main() {
   group('Native checkout navigation', navigation.main);
   group('Native checkout quote and retry', checkout.main);
   group('Native checkout logistics', logistics.main);
+  group('Native recipient location', location_inputs.main);
   group('Native purchase controls', products.main);
   group('Native shopping Bag', bag.main);
   group('Native payment and purchase replies', payments.main);

@@ -119,7 +119,7 @@ flutter run -d linux -t tool/checkout_review.dart
 flutter test -d linux integration_test/checkout_misuse_test.dart
 ```
 
-The checkout review shows quote attempts and synthetic order writes. Its sidebar selects successful, failed, denied or wrong-buyer replies. GPS uses a synthetic position; outbound requests are blocked. Native device permissions, real backend authorization and actual order/payment acceptance remain separate checks.
+The checkout review shows quote attempts and synthetic order writes. Its sidebar selects successful, failed, denied or wrong-buyer replies and an invalid GPS reading. GPS uses a synthetic position; outbound requests are blocked. Native device permissions, real backend authorization and actual order/payment acceptance remain separate checks.
 
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 
