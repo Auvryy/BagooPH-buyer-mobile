@@ -94,12 +94,13 @@ For isolated return forms, decision pages and private-evidence failure checks:
 flutter run -d linux -t tool/return_review.dart
 ```
 
-The sidebar selects the screen and its next synthetic response, including connection loss, access denial and changed form choices. Reset starts a fresh fixture; Change test account expires the open screen's session. This entrypoint blocks outbound requests and uses the real Linux file picker, so select a disposable test file when checking uploads. It does not test production authorization or payment/provider acceptance.
+The sidebar selects the screen and its next synthetic response, including connection loss, access denial, changed form choices, a local PDF and a corrupt PDF. Reset starts a fresh fixture; Change test account expires the open screen's session. This entrypoint blocks outbound requests and uses the real Linux file picker, so select a disposable test file when checking uploads. It does not test production authorization or payment/provider acceptance.
 
 Run the corresponding native regression cases with:
 
 ```sh
 flutter test -d linux integration_test/return_misuse_test.dart
+flutter test -d linux integration_test/private_pdf_misuse_test.dart
 ```
 
 To review contact emails, reviewed identity, rejected applications, login sessions, personal details, password changes and demo credits with synthetic replies:

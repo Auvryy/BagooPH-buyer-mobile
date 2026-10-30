@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../test/support/no_network.dart';
+import '../test/support/pdf_fixture.dart';
 import '../test/support/return_fixtures.dart';
 import 'preview/buyer_device_preview.dart';
 
@@ -33,6 +34,8 @@ class _ReturnReviewState extends State<_ReturnReview> {
     'return-request': 'Request a return',
     'return-case': 'Return decisions',
     'private-image': 'Private image',
+    'private-pdf': 'Private PDF',
+    'private-invalid-pdf': 'Corrupt PDF',
     'private-failure': 'Private document failure',
   };
   static const modes = {
@@ -96,6 +99,15 @@ class _ReturnReviewState extends State<_ReturnReview> {
     };
     session.onDocument = (_) async {
       await _response(_mode);
+      if (_screen == 'private-pdf') {
+        return RemoteDocument(
+          evidencePdf('Buyer QA evidence'),
+          'application/pdf',
+        );
+      }
+      if (_screen == 'private-invalid-pdf') {
+        return RemoteDocument(returnPhotoBytes(), 'application/pdf');
+      }
       return RemoteDocument(returnPhotoBytes(), 'image/png');
     };
   }

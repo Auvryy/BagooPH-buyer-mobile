@@ -592,10 +592,20 @@ class _PrivateDocumentPageState extends State<PrivateDocumentPage>
                   return const Center(child: CircularProgressIndicator());
                 }
                 return document.mime == 'application/pdf'
-                    ? PdfViewer.data(
-                        document.bytes,
-                        sourceName: widget.title,
+                    ? PdfViewer(
+                        PdfDocumentRefData(
+                          document.bytes,
+                          sourceName: 'buyer-private-evidence',
+                          // Each authenticated read owns its viewer cache,
+                          // including simultaneous routes with the same title.
+                          key: PdfDocumentRefKey('buyer-private-evidence', [
+                            _document,
+                          ]),
+                        ),
                         params: PdfViewerParams(
+                          errorBannerBuilder: (_, _, _, _) => _failure(
+                            'This PDF cannot be displayed. Try again or reopen it from your account.',
+                          ),
                           linkHandlerParams: PdfLinkHandlerParams(
                             onLinkTap: (_) {},
                           ),
