@@ -7,61 +7,8 @@ import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/bag_fixtures.dart' show line, priced;
 import 'support/fake_buyer_repository.dart';
-
-Map<String, dynamic> line(int id, {String color = 'Red', int quantity = 1}) => {
-  'id': id,
-  'product_id': 10,
-  'color': color,
-  'size': 'M',
-  'quantity': quantity,
-  'unit_price': 100,
-  'available_for_purchase': true,
-  'product': {
-    'id': 10,
-    'name': 'Test product',
-    'slug': 'test-product',
-    'price': 100,
-    'stock': 20,
-    'shop_id': 1,
-    'shop': {'id': 1, 'name': 'Test shop'},
-    'variants': {
-      'colors': [
-        {'name': 'Red'},
-        {'name': 'Blue'},
-      ],
-      'sizes': [
-        {'name': 'M', 'stock': 4},
-      ],
-      'combinations': [
-        {'color': 'Red', 'size': 'M', 'stock': 3},
-        {'color': 'Blue', 'size': 'M', 'stock': 8},
-      ],
-    },
-  },
-};
-Map<String, dynamic> priced(List<int> ids) => {
-  'quote': {
-    'subtotal': ids.length * 100,
-    'shipping_fee': 50,
-    'discount': 0,
-    'shipping_discount': 0,
-    'total': ids.length * 100 + 50,
-    'items': [
-      for (final id in ids)
-        {'id': id, 'quantity': 1, 'unit_price': 100, 'subtotal': 100},
-    ],
-    'shops': [
-      {
-        'shop_id': 1,
-        'shop_name': 'Test shop',
-        'shipping': 50,
-        'total': ids.length * 100 + 50,
-      },
-    ],
-  },
-  'availableVouchers': [],
-};
 
 class BagRepository extends FakeBuyerRepository {
   List<Map<String, dynamic>> rows = [line(1), line(2, color: 'Blue')];
