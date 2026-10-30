@@ -444,6 +444,12 @@ void main() {
       input.controller!.text = entry.value;
       await returnPress(tester, save());
       expect(repository.calls, isEmpty);
+      if (entry.key == 'Mobile number') {
+        expect(
+          find.widgetWithText(TextFormField, entry.key).hitTestable(),
+          findsOneWidget,
+        );
+      }
     });
   }
 }

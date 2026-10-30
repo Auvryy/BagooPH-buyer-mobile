@@ -138,6 +138,7 @@ class _LocationPickerState extends State<LocationPicker> {
                 ? _values[entry.key]
                 : null,
             isExpanded: true,
+            isDense: false,
             itemHeight: null,
             decoration: InputDecoration(labelText: entry.value.$2),
             items: mapsOf(_options[entry.value.$1])

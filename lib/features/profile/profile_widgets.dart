@@ -169,8 +169,18 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
     Future<String?> Function() action, {
     bool validate = true,
   }) async {
-    if (busy || (validate && formKey.currentState?.validate() == false)) {
-      return false;
+    if (busy) return false;
+    if (validate) {
+      final invalid = formKey.currentState?.validateGranularly();
+      if (invalid != null && invalid.isNotEmpty) {
+        final first = invalid.first;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && first.mounted) {
+            Scrollable.ensureVisible(first.context, alignment: .1);
+          }
+        });
+        return false;
+      }
     }
     setState(() {
       busy = true;
