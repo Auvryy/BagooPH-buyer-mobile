@@ -658,6 +658,17 @@ class _CheckoutPageState extends State<CheckoutPage>
         _submittedPayload ??
         jsonDecode(jsonEncode(_values)) as Map<String, dynamic>;
     bool agreed = false;
+    bool decided = false;
+    void finishReview(BuildContext dialogContext, bool value) {
+      if (decided ||
+          !dialogContext.mounted ||
+          ModalRoute.of(dialogContext)?.isCurrent != true) {
+        return;
+      }
+      decided = true;
+      Navigator.pop(dialogContext, value);
+    }
+
     bool? confirmed;
     _reviewOpen = true;
     try {
@@ -672,7 +683,7 @@ class _CheckoutPageState extends State<CheckoutPage>
                 content: Text(_unavailable),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.pop(context, false),
+                    onPressed: () => finishReview(context, false),
                     child: const Text('Close'),
                   ),
                 ],
@@ -757,12 +768,12 @@ class _CheckoutPageState extends State<CheckoutPage>
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context, false),
+                  onPressed: () => finishReview(context, false),
                   child: const Text('Back'),
                 ),
                 FilledButton(
                   onPressed: agreed
-                      ? () => Navigator.pop(context, _current)
+                      ? () => finishReview(context, _current)
                       : null,
                   child: Text(_frozen ? 'Retry same order' : 'Place order'),
                 ),

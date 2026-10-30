@@ -6,9 +6,9 @@ Only buyer mobile changes. No backend source, configuration, database, deploymen
 
 Validation at this checkpoint:
 
-- 618 isolated unit/widget cases; clean analysis and formatting of 66 changed/new Dart files.
-- Native Linux checkout/product/Bag/payment/voucher/layout (71), account/address/layout (80), return/evidence (53), real PDF (4), and earlier buyer/collection (26) groups pass on a separate display. Groups overlap.
+- 621 isolated unit/widget cases; clean analysis and formatting of 67 changed/new Dart files.
+- Native Linux checkout/product/Bag/payment/voucher/layout (71 checkpoint plus 3 focused repeated-decision cases), account/address/layout (80), return/evidence (53), real PDF (4), and earlier buyer/collection (26) groups pass on a separate display. Groups overlap.
 - Actual keyboard, clipboard and native picker checks showed invalid-field feedback, one request after repeated submits, private-state clearing, pending identity review and server cooldown feedback.
 - Linux review and normal Android debug builds pass.
 
-The broad feature audit remains in progress. GPS values and pending requests, repeated confirmations, deeper private Bag/purchase/voucher behavior, discovery, messaging, recovery and notification/tracking exploration are still being completed. Physical device, provider and iOS acceptance are separate. This title/body is a local draft; no GitHub PR or publication is claimed.
+The broad feature audit remains in progress. GPS values and pending requests, deeper private Bag/purchase/voucher behavior, discovery, messaging, recovery and notification/tracking exploration are still being completed. Physical device, provider and iOS acceptance are separate. This title/body is a local draft; no GitHub PR or publication is claimed.

@@ -223,6 +223,17 @@ class _OrderResultPageState extends State<OrderResultPage>
       return;
     }
     if (action == 'cancel') {
+      bool decided = false;
+      void finishConfirmation(BuildContext dialogContext, bool value) {
+        if (decided ||
+            !dialogContext.mounted ||
+            ModalRoute.of(dialogContext)?.isCurrent != true) {
+          return;
+        }
+        decided = true;
+        Navigator.pop(dialogContext, value);
+      }
+
       final consent = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -232,11 +243,11 @@ class _OrderResultPageState extends State<OrderResultPage>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => finishConfirmation(context, false),
               child: const Text('Keep payment'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => finishConfirmation(context, true),
               child: const Text('Cancel payment'),
             ),
           ],

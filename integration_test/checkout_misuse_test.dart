@@ -6,6 +6,7 @@ import 'package:integration_test/integration_test.dart';
 import '../test/bag_test.dart' as bag;
 import '../test/buyer_post_purchase_test.dart' as payments;
 import '../test/checkout_account_misuse_test.dart' as accounts;
+import '../test/checkout_confirmation_misuse_test.dart' as confirmations;
 import '../test/checkout_logistics_test.dart' as logistics;
 import '../test/checkout_navigation_misuse_test.dart' as navigation;
 import '../test/checkout_widgets_test.dart' as checkout;
@@ -18,6 +19,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = NoNetworkHttpOverrides();
   group('Native checkout account access', accounts.main);
+  group('Native confirmation decisions', confirmations.main);
   group('Native checkout navigation', navigation.main);
   group('Native checkout quote and retry', checkout.main);
   group('Native checkout logistics', logistics.main);
