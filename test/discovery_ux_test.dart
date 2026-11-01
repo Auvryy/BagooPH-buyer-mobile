@@ -66,6 +66,86 @@ void main() {
     )..addFont(rootBundle.load('assets/fonts/PlusJakartaSans.ttf'))).load();
   });
 
+  testWidgets(
+    'bottom navigation has accessible selected state and touch targets',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final semantics = tester.ensureSemantics();
+      final session = NavigationSession();
+      final repo = BuyerRepository(session);
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: HomePage(
+            repository: repo,
+            initial: homePage(signedIn: true),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      expect(tester.getSize(header).height, greaterThanOrEqualTo(48));
+      for (final tooltip in ['Notifications', 'Shopping Bag', 'Your profile']) {
+        final target = find
+            .ancestor(
+              of: find.byTooltip(tooltip),
+              matching: find.byType(IconButton),
+            )
+            .first;
+        expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+        expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
+      }
+      final nav = find.byKey(const ValueKey('buyer-bottom-navigation'));
+      for (final label in ['Home', 'Bag', 'Messages', 'Profile']) {
+        final text = find.descendant(of: nav, matching: find.text(label));
+        final target = find
+            .ancestor(of: text, matching: find.byType(InkWell))
+            .first;
+        expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+        expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
+      }
+      final home = find.descendant(of: nav, matching: find.text('Home'));
+      expect(
+        tester.getSemantics(home),
+        isSemantics(
+          label: 'Home',
+          isButton: true,
+          isSelected: true,
+          hasTapAction: true,
+        ),
+      );
+      final messages = find.descendant(
+        of: nav,
+        matching: find.text('Messages'),
+      );
+      await tester.tap(messages);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(messages),
+        isSemantics(
+          label: 'Messages',
+          isButton: true,
+          isSelected: true,
+          hasTapAction: true,
+        ),
+      );
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('header search and guest messages remain reachable', (
     tester,
   ) async {

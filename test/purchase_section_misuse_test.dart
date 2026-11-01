@@ -71,6 +71,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
     final repository = AccountFixtureRepository();
     addTearDown(repository.session.close);
     String? requested;
@@ -94,6 +95,20 @@ void main() {
     await tester.pumpAndSettle();
     final selected = tester.widget<Text>(find.text('All (0)'));
     expect(selected.style?.color, BagooTheme.strong);
+    expect(
+      tester.getSemantics(find.text('All (0)')),
+      isSemantics(
+        label: 'All (0)',
+        isButton: true,
+        isSelected: true,
+        hasTapAction: true,
+      ),
+    );
+    final target = find
+        .ancestor(of: find.text('All (0)'), matching: find.byType(InkWell))
+        .first;
+    expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+    expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
     final strip = find.byWidgetPredicate(
       (widget) =>
           widget is SingleChildScrollView &&
@@ -108,6 +123,7 @@ void main() {
     await tester.pump();
     expect(requested, 'return_refund');
     expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
   for (final resume in [true, false]) {
     testWidgets(

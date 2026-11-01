@@ -65,3 +65,7 @@ Synthetic review revealed that the verification explanation could be squeezed ou
 ## Current verification-fix Android build
 
 The configured debug APK was rebuilt after the compact verification-dialog fix with one Gradle worker and a 1.5 GB heap cap. The build succeeded with the existing Android SDK XML version warning. Package inspection confirmed the Bagoo buyer package, label and adaptive launcher resource. Whole-project analysis is clean; the earlier full run passed 861 cases, followed by 28 focused search/app cases, six verification cases and 52 responsive synthetic layout cases for the later changes. Bagoo was not confirmed in the foreground on the connected phone, so this APK has not been installed for device review. Physical acceptance and live imagery remain open.
+
+## Navigation accessibility checkpoint
+
+At a 320-pixel width with enlarged text, synthetic checks confirmed at least 48 logical pixels for header actions, the search field and bottom tabs. A separate 360-pixel check confirmed the selected purchase status meets the same minimum. The selected Home, Messages and purchase status expose button and selected semantics. The two relevant suites passed 25 cases with one worker, and focused analysis was clean. Static color calculations gave 6.21:1 for the strong brand red on white, 4.88:1 for the primary red on white, and 7.58:1 for muted text on white. The app source and APK are unchanged from the verification-fix build; device acceptance remains open.
