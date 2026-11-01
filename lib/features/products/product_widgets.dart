@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
@@ -153,6 +154,7 @@ class OfferTile extends StatefulWidget {
     this.onSignIn,
     this.canSave = true,
     this.onSaved,
+    this.account,
   });
   final Map<String, dynamic> offer;
   final BuyerRepository repository;
@@ -160,6 +162,7 @@ class OfferTile extends StatefulWidget {
   final VoidCallback? onSignIn;
   final bool canSave;
   final Future<void> Function()? onSaved;
+  final BuyerAccountScope? account;
   @override
   State<OfferTile> createState() => _OfferTileState();
 }
@@ -171,6 +174,8 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
   bool _accessEnded = false;
   late final WebSession _session;
   late final int _epoch;
+  late final BuyerAccountScope? _account;
+  late final BuyerAccountScope? _sourceAccount;
   Object? _saved, _sourceSaved, _revision;
   int _generation = 0;
   String? _error;
@@ -188,6 +193,7 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
       _generation++;
       _busy = false;
       _saved = null;
+      _sourceSaved = null;
       _error = 'Your account changed or voucher access ended. Reopen these offers to continue.';
     }
 
@@ -202,6 +208,8 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
     if (!mounted) return false;
     if (!_accessEnded &&
         identical(_session, widget.repository.session) &&
+        identical(_sourceAccount, widget.account) &&
+        (_account?.isCurrent ?? true) &&
         _epoch == _session.identityEpoch) {
       return true;
     }
@@ -237,6 +245,8 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _session = widget.repository.session;
     _epoch = _session.identityEpoch;
+    _sourceAccount = widget.account;
+    _account = _sourceAccount?.fork();
     _revision = widget.offer['revision_id'];
     _saved = _sourceSaved = widget.offer['saved_id'];
   }
@@ -266,6 +276,7 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _generation++;
+    _account?.invalidate();
     super.dispose();
   }
 

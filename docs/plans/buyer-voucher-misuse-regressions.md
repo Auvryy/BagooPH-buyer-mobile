@@ -26,3 +26,27 @@ Revision, saved-target and returned saved IDs must be positive integers. Removal
 All 39 final bookmark cases pass in isolation and the native Linux runner, including six additional completion/rebuild/race/denial/sign-in checks. The combined voucher/product/checkout run passes 59 cases. All 762 isolated tests, analysis, formatting of 80 changed/new Dart files, the Linux voucher review build and the Android debug build pass. In the private native window, a confirmed save made one request, a failed removal retained the same action with visible guidance, and session expiry removed the saved state with no extra request. GUI actions used only the private display; no real bookmark or owner desktop input was used.
 
 The picker, private profile voucher-list ownership and the remaining broader feature families are still open. This bookmark checkpoint does not establish those missing paths or provider/device/backend acceptance.
+
+## Picker checkpoint
+
+Picker exploration reproduced queued requests for pages 2 through 9, repeated Use/Remove decisions popping the underlying route, stale choices and replies after account changes, old-page callbacks selecting a newer page, and mutable nested checkout inputs changing later requests. A change between checkout route creation and the picker's first build also sent a request under a new session. The picker now inherits the opening checkout scope, retains its input snapshot, serializes reads and consumes each navigation decision once. Each displayed page has a child scope that expires before paging, immediately stopping cached bookmark actions as well.
+
+Page metadata is checked against the request and the backend's page limit. An unavailable final page gets one bounded correction read; temporary errors keep an explicit retry for the same page. Access denial clears choices and invalidates the supplied checkout scope, so closing the picker also removes obsolete checkout details. Closing a normal child view leaves its parent's scope intact. Three additional bookmark tests cover inherited-scope invalidation and disposal.
+
+Two further cases reproduced cached Review/Compare actions running behind an open picker. Checkout now holds those actions until the picker closes, prevents duplicate picker entries and passes a frozen selection into the route. The chooser checks revision, eligibility and voucher slot before returning a selection; quotes and final eligibility remain server-owned.
+
+All 23 picker cases, 42 bookmark cases and the existing normal picker case pass in the real Linux runner as one 66-case group. The focused voucher/checkout run passes 72 cases. All 788 isolated tests, full analysis, formatting of 82 changed/new Dart files and Android debug build pass. The Linux review build and a focused tool analysis also cover the final synthetic-fixture synchronization change.
+
+Private-window inspection showed one read per page, an acknowledged bookmark refreshing page two, one returned selection and account expiry hiding private rows and actions without another mutation. The review tool models saved IDs and exposes choice-read counts. No real voucher, order, account or owner-desktop input was used.
+
+Private profile voucher-list ownership and the remaining purchase/review, discovery/product/shop, messaging, recovery and notification/tracking exploration remain open. Existing passing account forms do not prove the profile root and its retained lists are scoped correctly. Continue that review before claiming the full buyer audit is complete.
+
+## Pre-publication review, November 1
+
+Finish the existing picker slice before publishing this branch. Acceptance: review the pending diff and unpublished history, pass the full isolated suite and native voucher group on a separate display, verify formatting/analysis and Android build, update the branch PR draft and save the slice as a local commit. A second documentation commit records final evidence if needed. Publication requires the owner's push instruction.
+
+This publication checkpoint covers the existing branch and pending picker slice. The broader feature audit remains open with the profile-list and other families listed above; this checkpoint does not claim full product acceptance.
+
+Fresh verification passed: 788 isolated tests, all 66 native Linux voucher cases on a newly created private display, full Flutter analysis, focused review-tool analysis, formatting of all 82 changed/new Dart files, diff whitespace checks and the Android debug APK build. The native integration run rebuilt the Linux application. The 23 previously unpublished commits were inspected for private-key/token and internal task-management markers with no findings. No new product fix was needed during this review. Existing October 30 private keyboard/feedback evidence remains recorded above; this rerun used native automated interactions.
+
+The local PR draft now includes voucher selection and retains the remaining broad-audit and physical-device/provider/iOS limitations. All pending picker source, regression cases and review-tool changes are saved together locally; no push or GitHub PR publication is part of this checkpoint.

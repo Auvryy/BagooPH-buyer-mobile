@@ -44,7 +44,17 @@ class _CheckoutPageState extends State<CheckoutPage>
   late final BuyerAccountScope _account;
   String _unavailable =
       'Your buyer account changed or access ended. Close checkout and reopen it from your Bag.';
-  bool _reviewOpen = false;
+  bool _reviewOpen = false, _pickingVoucher = false;
+  bool get _canPickVoucher =>
+      _current &&
+      _ready &&
+      !_quoting &&
+      !_choosingBest &&
+      !_locating &&
+      !_reviewOpen &&
+      !_pickingVoucher &&
+      !_frozen &&
+      !_submitting;
   StateSetter? _reviewUpdate;
   bool get _current =>
       _account.isCurrent &&
@@ -514,22 +524,32 @@ class _CheckoutPageState extends State<CheckoutPage>
   }
 
   Future<void> _pickVoucher({int? shopId, required String title}) async {
-    if (!_ensureAccount()) return;
+    if (!_ensureAccount() || !_canPickVoucher) {
+      return;
+    }
     final requested = jsonEncode(_quoteInput);
+    final values = jsonDecode(requested) as Map<String, dynamic>;
     final current = shopId == null
         ? _platformVoucher
         : _shopVouchers['$shopId'];
-    final selected = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => VoucherPickerPage(
-          repository: widget.repository,
-          values: _quoteInput,
-          title: title,
-          shopId: shopId,
-          selectedRevision: current,
+    setState(() => _pickingVoucher = true);
+    Map<String, dynamic>? selected;
+    try {
+      selected = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(
+          builder: (_) => VoucherPickerPage(
+            repository: widget.repository,
+            values: values,
+            title: title,
+            shopId: shopId,
+            selectedRevision: current,
+            account: _account,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _pickingVoucher = false);
+    }
     if (!mounted || !_ensureAccount() || selected == null) return;
     if (requested != jsonEncode(_quoteInput) || _frozen || _submitting) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -554,7 +574,14 @@ class _CheckoutPageState extends State<CheckoutPage>
 
   Future<void> _bestVouchers() async {
     if (!_ensureAccount()) return;
-    if (_choosingBest || !_ready || _frozen || _submitting) return;
+    if (_choosingBest ||
+        _pickingVoucher ||
+        _reviewOpen ||
+        !_ready ||
+        _frozen ||
+        _submitting) {
+      return;
+    }
     final requested = jsonEncode(_quoteInput);
     setState(() {
       _choosingBest = true;
@@ -637,6 +664,7 @@ class _CheckoutPageState extends State<CheckoutPage>
   Future<void> _review() async {
     if (!_ensureAccount() ||
         _reviewOpen ||
+        _pickingVoucher ||
         _submitting ||
         _locating ||
         _quoting ||
@@ -1134,7 +1162,7 @@ class _CheckoutPageState extends State<CheckoutPage>
             style: const TextStyle(fontSize: 12),
           ),
           trailing: const Icon(Icons.chevron_right),
-          enabled: _ready && !_choosingBest,
+          enabled: _canPickVoucher,
           onTap: () => _pickVoucher(title: 'Bagoo vouchers'),
         ),
         for (final shop in mapsOf(_quote['shops']))
@@ -1152,7 +1180,7 @@ class _CheckoutPageState extends State<CheckoutPage>
               style: const TextStyle(fontSize: 12),
             ),
             trailing: const Icon(Icons.chevron_right),
-            enabled: _ready && !_choosingBest,
+            enabled: _canPickVoucher,
             onTap: () => _pickVoucher(
               shopId: (shop['shop_id'] as num).toInt(),
               title: '${shop['shop_name']} vouchers',

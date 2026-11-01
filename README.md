@@ -137,7 +137,7 @@ flutter run -d linux -t tool/voucher_review.dart
 flutter test -d linux integration_test/voucher_misuse_test.dart
 ```
 
-The voucher review controls the next synthetic reply, save permission, displayed offer and session. It reports mutation attempts and confirmed refreshes. Reset starts a fresh fixture; outbound requests stay blocked. Bookmark changes do not reserve a discount, place an order or prove live backend acceptance.
+The voucher review controls the next synthetic reply, save permission, displayed offer and session. Open voucher picker exercises native paging, bookmark refresh and selection. The sidebar reports mutation attempts, confirmed bookmark refreshes and choice requests. Reset starts a fresh fixture; outbound requests stay blocked. Bookmark changes do not reserve a discount, place an order or prove live backend acceptance.
 
 Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
 

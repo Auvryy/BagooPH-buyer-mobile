@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/buyer_account_scope.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +40,7 @@ void main() {
     bool canSave = true,
     VoucherReviewSession? using,
     Future<void> Function()? onSaved,
+    BuyerAccountScope? account,
   }) => MaterialApp(
     theme: BagooTheme.light,
     home: Scaffold(
@@ -48,6 +50,7 @@ void main() {
           offer: offer ?? reviewOffer(),
           repository: voucherRepository(using ?? session),
           canSave: canSave,
+          account: account,
           onSaved:
               onSaved ??
               () async {
@@ -453,5 +456,49 @@ void main() {
     expect(session.writes, isEmpty);
     expect(find.text('Synthetic native sign-in'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  check('a parent checkout scope ends a cached bookmark action immediately', (
+    tester,
+  ) async {
+    final account = BuyerAccountScope(session);
+    await tester.pumpWidget(app(account: account));
+    await tester.pumpAndSettle();
+    final callback = saveAction(tester);
+    account.invalidate();
+    callback();
+    await tester.pumpAndSettle();
+    expect(session.writes, isEmpty);
+    expect(find.text('Remove voucher'), findsNothing);
+  });
+
+  check(
+    'a different parent scope cannot inherit the previous bookmark callback',
+    (tester) async {
+      final first = BuyerAccountScope(session),
+          second = BuyerAccountScope(session);
+      await tester.pumpWidget(app(account: first));
+      await tester.pumpAndSettle();
+      final callback = saveAction(tester);
+      await tester.pumpWidget(app(account: second));
+      await tester.pumpAndSettle();
+      callback();
+      await tester.pumpAndSettle();
+      expect(session.writes, isEmpty);
+      expect(first.isCurrent, isTrue);
+      expect(second.isCurrent, isTrue);
+    },
+  );
+
+  check('disposing a bookmark tile does not close its parent checkout scope', (
+    tester,
+  ) async {
+    final account = BuyerAccountScope(session);
+    await tester.pumpWidget(app(account: account));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(account.isCurrent, isTrue);
+    expect(session.writes, isEmpty);
   });
 }
