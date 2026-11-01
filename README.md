@@ -31,6 +31,28 @@ Shopping, support, and profile actions stay in Flutter with no browser or WebVie
 
 The card ribbon uses COD with the web ribbon styling. Delivery fees and shipping discounts come from the checkout quote; the app does not promise free delivery unconditionally.
 
+## Physical Android acceptance
+
+Use the normal configured app for owner interaction. The following synthetic
+suite runs native widgets on a connected Android phone with outbound requests
+blocked; provider and deployed-backend acceptance remain separate:
+
+```sh
+flutter test --no-pub --no-uninstall -d <DEVICE_ID> integration_test/buyer_android_misuse_test.dart
+```
+
+The optional `buyer_device_smoke_test.dart` requires explicit
+`BAGOO_DEVICE_LIVE_ACCEPTANCE=true` and approved test buyer values supplied
+through local build definitions. It exercises guest navigation and email login,
+without placing orders or changing account settings. Never commit those local
+values. Restore the normal configured entrypoint after device integration runs:
+
+```sh
+dart run tool/buyer.dart run --config config/buyer.local.json --platform android --device <DEVICE_ID>
+```
+
+Current evidence and gaps: [Android device review](docs/plans/buyer-android-device-acceptance.md).
+
 ## Requirements
 
 - Flutter stable with Dart SDK `^3.13.1`; installed dependencies are locked in `pubspec.lock`.

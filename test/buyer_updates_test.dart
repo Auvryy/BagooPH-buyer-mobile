@@ -52,6 +52,7 @@ WebPage orderPage({String status = 'Preparing', int owner = 7}) =>
 
 class OrderActionSession extends ControlledWebSession {
   int submissions = 0;
+  final submissionPaths = <String>[];
   @override
   Future<WebPage> submit(
     String path,
@@ -60,10 +61,62 @@ class OrderActionSession extends ControlledWebSession {
     String? referer,
     List<UploadPart>? files,
   }) async {
-    expect(path, '/buyer/orders/11/confirm');
+    submissionPaths.add(path);
     submissions++;
     return orderPage(status: 'Completed');
   }
+}
+
+class CancelOrderSession extends ControlledWebSession {
+  final submissionPaths = <String>[];
+  @override
+  Future<WebPage> submit(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+    List<UploadPart>? files,
+  }) async {
+    submissionPaths.add(path);
+    return orderPage(status: 'Cancelled');
+  }
+}
+
+class ReviewOrderSession extends ControlledWebSession {
+  final submissionPaths = <String>[];
+  @override
+  Future<WebPage> submit(
+    String path,
+    Map<String, dynamic> values, {
+    String method = 'POST',
+    String? referer,
+    List<UploadPart>? files,
+  }) async {
+    submissionPaths.add(path);
+    final page = completedOrderWithReviewableItem();
+    (page.props['order'] as Map)['items'][0]['review'] = {
+      'rating': 5,
+      'comment': 'Synthetic review',
+    };
+    page.props['flash'] = {'success': 'Review saved.'};
+    return page;
+  }
+}
+
+WebPage completedOrderWithReviewableItem() {
+  final page = orderPage(status: 'Completed');
+  page.props['canUsePortal'] = true;
+  (page.props['order'] as Map)['items'] = [
+    {
+      'id': 21,
+      'quantity': 1,
+      'unit_price': '120.00',
+      'subtotal': '120.00',
+      'sku_snapshot': 'Synthetic review item',
+      'product': {'name': 'Synthetic review item', 'slug': 'review-item'},
+    },
+  ];
+  return page;
 }
 
 void main() {
@@ -246,6 +299,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(session.submissions, 1);
+      expect(session.submissionPaths, ['/buyer/orders/11/confirm']);
       expect(find.text('Completed'), findsOneWidget);
       session.onPage = (_) async => orderPage(status: 'Completed');
       pending.complete(delivered);
@@ -257,4 +311,250 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('receipt confirmation opens one decision for rapid taps', (
+    tester,
+  ) async {
+    final session = OrderActionSession();
+    addTearDown(session.close);
+    final delivered = orderPage(status: 'Delivered');
+    delivered.props['canConfirmReceipt'] = true;
+    session.onPage = (_) async => delivered;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final onPressed = tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Confirm Received'),
+        )
+        .onPressed!;
+    onPressed();
+    onPressed();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(session.submissions, 0);
+    final dialogConfirm = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.widgetWithText(FilledButton, 'Confirm Received'),
+    );
+    expect(dialogConfirm, findsOneWidget);
+    tester.widget<FilledButton>(dialogConfirm).onPressed!();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(session.submissions, 1);
+    expect(session.submissionPaths, ['/buyer/orders/11/confirm']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('receipt confirmation stops after the buyer session changes', (
+    tester,
+  ) async {
+    final session = OrderActionSession();
+    addTearDown(session.close);
+    final delivered = orderPage(status: 'Delivered');
+    delivered.props['canConfirmReceipt'] = true;
+    session.onPage = (_) async => delivered;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm Received'));
+    await tester.pumpAndSettle();
+
+    session.clear();
+    final dialogConfirm = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.widgetWithText(FilledButton, 'Confirm Received'),
+    );
+    tester.widget<FilledButton>(dialogConfirm).onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(session.submissions, 0);
+    expect(find.text('Order #TEST-11'), findsNothing);
+    expect(
+      find.textContaining('Confirm that you received order #TEST-11'),
+      findsNothing,
+    );
+    expect(
+      find.text('Your account changed. Reopen this order after signing in.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('cancellation form does not submit after buyer session change', (
+    tester,
+  ) async {
+    final session = CancelOrderSession();
+    addTearDown(session.close);
+    final preparing = orderPage(status: 'Preparing');
+    preparing.props['cancelOrderUrl'] = '/buyer/orders/11/cancel';
+    preparing.props['cancellationReasons'] = ['Changed my mind'];
+    session.onPage = (_) async => preparing;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel order'));
+    await tester.pumpAndSettle();
+    tester
+        .widget<DropdownButtonFormField<String>>(
+          find.byType(DropdownButtonFormField<String>),
+        )
+        .onChanged!('Changed my mind');
+    await tester.pump();
+
+    session.clear();
+    await tester.tap(find.widgetWithText(FilledButton, 'Cancel order'));
+    await tester.pumpAndSettle();
+
+    expect(session.submissionPaths, isEmpty);
+    expect(find.byType(DropdownButtonFormField<String>), findsNothing);
+    expect(find.text('Details (optional)'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('confirmed cancellation returns to the updated order', (
+    tester,
+  ) async {
+    final session = CancelOrderSession();
+    addTearDown(session.close);
+    final preparing = orderPage(status: 'Preparing');
+    preparing.props['cancelOrderUrl'] = '/buyer/orders/11/cancel';
+    preparing.props['cancellationReasons'] = ['Changed my mind'];
+    session.onPage = (_) async => preparing;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel order'));
+    await tester.pumpAndSettle();
+    tester
+        .widget<DropdownButtonFormField<String>>(
+          find.byType(DropdownButtonFormField<String>),
+        )
+        .onChanged!('Changed my mind');
+    await tester.pump();
+    session.onPage = (_) async => orderPage(status: 'Cancelled');
+    await tester.tap(find.widgetWithText(FilledButton, 'Cancel order'));
+    await tester.pumpAndSettle();
+
+    expect(session.submissionPaths, ['/buyer/orders/11/cancel']);
+    expect(find.text('Cancelled'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('review form does not submit after buyer session change', (
+    tester,
+  ) async {
+    final session = ReviewOrderSession();
+    addTearDown(session.close);
+    final completed = completedOrderWithReviewableItem();
+    session.onPage = (_) async => completed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final reviewLink = find.text('Rate & review purchased item');
+    await tester.ensureVisible(reviewLink);
+    await tester.pumpAndSettle();
+    await tester.tap(reviewLink);
+    await tester.pumpAndSettle();
+    final fifthStar = find.byTooltip('Rate 5 out of 5');
+    await tester.ensureVisible(fifthStar);
+    await tester.pumpAndSettle();
+    await tester.tap(fifthStar);
+    await tester.pump();
+
+    session.clear();
+    final submitReview = find.widgetWithText(FilledButton, 'Submit review');
+    await tester.ensureVisible(submitReview);
+    await tester.pumpAndSettle();
+    await tester.tap(submitReview);
+    await tester.pumpAndSettle();
+
+    expect(session.submissionPaths, isEmpty);
+    expect(find.text('Synthetic review item'), findsNothing);
+    expect(
+      find.text(
+        'Your buyer account changed or access ended. Reopen this order from your purchases.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('saved review returns to the updated purchase', (tester) async {
+    final session = ReviewOrderSession();
+    addTearDown(session.close);
+    session.onPage = (_) async => completedOrderWithReviewableItem();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final reviewLink = find.text('Rate & review purchased item');
+    await tester.ensureVisible(reviewLink);
+    await tester.pumpAndSettle();
+    await tester.tap(reviewLink);
+    await tester.pumpAndSettle();
+    final fifthStar = find.byTooltip('Rate 5 out of 5');
+    await tester.ensureVisible(fifthStar);
+    await tester.pumpAndSettle();
+    await tester.tap(fifthStar);
+    await tester.pump();
+    final reviewed = completedOrderWithReviewableItem();
+    (reviewed.props['order'] as Map)['items'][0]['review'] = {
+      'rating': 5,
+      'comment': 'Synthetic review',
+    };
+    session.onPage = (_) async => reviewed;
+    final submitReview = find.widgetWithText(FilledButton, 'Submit review');
+    await tester.ensureVisible(submitReview);
+    await tester.pumpAndSettle();
+    await tester.tap(submitReview);
+    await tester.pumpAndSettle();
+
+    expect(session.submissionPaths, ['/buyer/reviews']);
+    expect(find.textContaining('Your rating: 5 / 5'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

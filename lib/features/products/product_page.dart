@@ -32,7 +32,8 @@ class ProductPage extends StatefulWidget {
 }
 
 class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
-  late final BuyerAccountScope _checkoutAccount;
+  late BuyerAccountScope _checkoutAccount;
+  late int _identityEpoch;
   ProductSelection? _selection;
   String? _error;
   String? _feedback;
@@ -53,6 +54,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   DateTime? _verifiedAt;
   ProductSelection get s => _selection!;
   BuyerRepository get repo => widget.repository;
+  bool get _sessionBindingCurrent =>
+      identical(_checkoutAccount.session, repo.session) &&
+      _identityEpoch == repo.session.identityEpoch;
+  bool get _accountCurrent =>
+      _sessionBindingCurrent && _checkoutAccount.isCurrent;
   bool get _hasSale {
     if (_selection == null) return false;
     final offer = mapOf(s.product['sale_offer']);
@@ -67,6 +73,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _checkoutAccount = BuyerAccountScope(repo.session);
+    _identityEpoch = repo.session.identityEpoch;
     WidgetsBinding.instance.addObserver(this);
     _updates = ForegroundRead(
       interval: const Duration(seconds: 30),
@@ -83,6 +90,31 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant ProductPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository == widget.repository &&
+        oldWidget.slug == widget.slug) {
+      return;
+    }
+    _generation++;
+    _checkoutAccount.invalidate();
+    _checkoutAccount = BuyerAccountScope(repo.session);
+    _identityEpoch = repo.session.identityEpoch;
+    _selection = null;
+    _error = null;
+    _feedback = null;
+    _feedbackError = false;
+    _loading = true;
+    _busy = false;
+    _saving = false;
+    _reminding = false;
+    _image = 0;
+    _verifiedAt = null;
+    _quantity.text = '1';
+    _load();
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
         !_hasSale &&
@@ -94,16 +126,31 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   Future<void> _load({bool quiet = false, ReadTicket? ticket}) async {
-    _reads++;
-    final generation = ++_generation;
-    final epoch = repo.session.identityEpoch;
-    final cacheGeneration = repo.catalogueCache.generation;
-    if (!quiet) {
+    final identityChanged = !_sessionBindingCurrent;
+    if (!quiet || identityChanged) {
       setState(() {
+        if (identityChanged) {
+          _checkoutAccount.invalidate();
+          _checkoutAccount = BuyerAccountScope(repo.session);
+          _identityEpoch = repo.session.identityEpoch;
+          _selection = null;
+          _feedback = null;
+          _feedbackError = false;
+          _busy = false;
+          _saving = false;
+          _reminding = false;
+          _image = 0;
+          _verifiedAt = null;
+          _quantity.text = '1';
+        }
         _loading = true;
         _error = null;
       });
     }
+    _reads++;
+    final generation = ++_generation;
+    final epoch = repo.session.identityEpoch;
+    final cacheGeneration = repo.catalogueCache.generation;
     try {
       final fresh = repo.product(widget.slug);
       if (_selection == null) {
@@ -131,6 +178,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           status: 401,
         );
       }
+      if (!page.isCached && page.user != null) {
+        _checkoutAccount.check(page: page);
+      }
       setState(() {
         if (!page.isCached) _verifiedAt = DateTime.now();
         if (_selection == null) {
@@ -153,6 +203,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           _error = e.message;
           if ([401, 403, 404, 410, 419].contains(e.status)) {
             _selection = null;
+            _busy = false;
+            _saving = false;
+            _reminding = false;
           } else if (_selection != null) {
             s.page = WebPage(
               s.page.component,
@@ -167,6 +220,25 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       if (mounted && generation == _generation) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  Future<bool> _ensureCurrentAccount() async {
+    if (_accountCurrent) return true;
+    await _load(quiet: true);
+    return false;
+  }
+
+  bool _mutationIsCurrent(ProductSelection selection, int epoch) =>
+      mounted &&
+      epoch == repo.session.identityEpoch &&
+      identical(_selection, selection) &&
+      _accountCurrent;
+
+  Future<void> _recoverAfterSessionChange(int epoch) async {
+    if (mounted &&
+        (epoch != repo.session.identityEpoch || !_checkoutAccount.isCurrent)) {
+      await _load(quiet: true);
     }
   }
 
@@ -186,10 +258,19 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   Future<void> _viewBag() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => BagPage(repository: repo)));
-    if (mounted) await _load(quiet: true);
+    if (_selection == null ||
+        !await _ensureCurrentAccount() ||
+        !mounted ||
+        _selection == null ||
+        !_accountCurrent) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BagPage(repository: repo, account: _checkoutAccount),
+      ),
+    );
+    if (mounted && _accountCurrent) await _load(quiet: true);
   }
 
   Future<void> _options() async {
@@ -208,6 +289,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   void _purchase(bool buyNow) {
+    if (!_accountCurrent) {
+      unawaited(_load(quiet: true));
+      return;
+    }
+    if (_selection == null) return;
     if (s.page.isCached) return;
     if (buyNow && s.page.user == null) {
       _login();
@@ -242,60 +328,81 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   void _login() => BuyerActions.login(context, productSlug: widget.slug);
   Future<void> _save([Map<String, dynamic>? item]) async {
-    if (s.page.isCached) return;
-    if (s.page.user == null) {
+    if (_selection == null ||
+        !await _ensureCurrentAccount() ||
+        !mounted ||
+        _selection == null ||
+        !_accountCurrent) {
+      return;
+    }
+    final selection = s;
+    if (selection.page.isCached) return;
+    if (selection.page.user == null) {
       BuyerActions.login(
         context,
-        productSlug: (item ?? s.product)['slug'].toString(),
+        productSlug: (item ?? selection.product)['slug'].toString(),
       );
       return;
     }
-    if (!s.approved || _saving) {
+    if (!selection.approved || _saving) {
       return;
     }
-    final id = ((item ?? s.product)['id'] as num).toInt();
-    final saved = (s.page.props['savedProductIds'] as List? ?? []).contains(id);
+    final id = ((item ?? selection.product)['id'] as num).toInt();
+    final saved = (selection.page.props['savedProductIds'] as List? ?? [])
+        .contains(id);
+    final epoch = repo.session.identityEpoch;
     setState(() => _saving = true);
     try {
       await repo.saveProduct(id, !saved);
-      if (!mounted) {
+      if (!_mutationIsCurrent(selection, epoch)) {
+        await _recoverAfterSessionChange(epoch);
         return;
       }
       final ids = Set<dynamic>.from(
-        s.page.props['savedProductIds'] as List? ?? [],
+        selection.page.props['savedProductIds'] as List? ?? [],
       );
       saved ? ids.remove(id) : ids.add(id);
-      setState(() => s.page.props['savedProductIds'] = ids.toList());
+      setState(() => selection.page.props['savedProductIds'] = ids.toList());
     } on BackendException catch (e) {
-      if (mounted) {
+      if (_mutationIsCurrent(selection, epoch)) {
         _message(e.message, error: true);
+      } else {
+        await _recoverAfterSessionChange(epoch);
       }
     } finally {
-      if (mounted) {
+      if (mounted && identical(_selection, selection)) {
         setState(() => _saving = false);
       }
     }
   }
 
   Future<void> _add(bool buyNow) async {
-    if (s.page.isCached) return;
+    if (_selection == null ||
+        !await _ensureCurrentAccount() ||
+        !mounted ||
+        _selection == null ||
+        !_accountCurrent) {
+      return;
+    }
+    final selection = s;
+    if (selection.page.isCached) return;
     if (_busy) {
       return;
     }
-    if (buyNow && s.page.user == null) {
+    if (buyNow && selection.page.user == null) {
       _login();
       return;
     }
-    if (buyNow && !s.approved) {
+    if (buyNow && !selection.approved) {
       _message(
         'An active approved buyer account is required for checkout. You may keep shopping and add items to your Bag.',
         error: true,
       );
       return;
     }
-    s.quantityText = _quantity.text;
-    if (s.quantityError != null) {
-      _message(s.quantityError!, error: true);
+    selection.quantityText = _quantity.text;
+    if (selection.quantityError != null) {
+      _message(selection.quantityError!, error: true);
       return;
     }
     setState(() {
@@ -303,28 +410,28 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       _feedback = null;
     });
     _generation++;
+    final epoch = repo.session.identityEpoch;
     try {
       if (buyNow) {
-        if (!identical(_checkoutAccount.session, repo.session)) {
-          _checkoutAccount.invalidate();
-        }
-        _checkoutAccount.check(page: s.page);
+        _checkoutAccount.check(page: selection.page);
       }
       final result = await repo.addToBag(
-        s.product,
-        s.quantity,
-        color: s.color,
-        size: s.size,
+        selection.product,
+        selection.quantity,
+        color: selection.color,
+        size: selection.size,
         buyNow: buyNow,
-        previousQuantity: s.lineInBag,
+        previousQuantity: selection.lineInBag,
       );
-      if (!mounted) {
+      if (!mounted) return;
+      if (!_mutationIsCurrent(selection, epoch)) {
+        await _recoverAfterSessionChange(epoch);
         return;
       }
+      if (selection.page.user != null || result.user != null) {
+        _checkoutAccount.check(page: result);
+      }
       if (buyNow) {
-        if (!identical(_checkoutAccount.session, repo.session)) {
-          _checkoutAccount.invalidate();
-        }
         _checkoutAccount.check(page: result);
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -336,41 +443,53 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           ),
         );
         if (mounted) {
+          setState(() => _busy = false);
           await _load(quiet: true);
         }
       } else {
-        setState(() => s.page = result);
-        _message('${s.quantity} added to your Shopping Bag.');
+        setState(() => selection.page = result);
+        _message('${selection.quantity} added to your Shopping Bag.');
       }
     } on BackendException catch (e) {
-      if (mounted) {
+      if (_mutationIsCurrent(selection, epoch)) {
         _message(
           e.fields.isEmpty ? e.message : e.fields.values.join('\n'),
           error: true,
         );
+      } else {
+        await _recoverAfterSessionChange(epoch);
       }
     } finally {
-      if (mounted) {
+      if (mounted && identical(_selection, selection)) {
         setState(() => _busy = false);
       }
     }
   }
 
   Future<void> _reminder() async {
-    if (s.page.isCached) return;
-    if (s.page.user == null) {
+    if (_selection == null ||
+        !await _ensureCurrentAccount() ||
+        !mounted ||
+        _selection == null ||
+        !_accountCurrent) {
+      return;
+    }
+    final selection = s;
+    if (selection.page.isCached) return;
+    if (selection.page.user == null) {
       _login();
       return;
     }
     if (_reminding) {
       return;
     }
-    final upcoming = mapOf(mapOf(s.product['sale_offer'])['upcoming']);
-    final state = mapOf(s.page.props['saleReminder']);
+    final upcoming = mapOf(mapOf(selection.product['sale_offer'])['upcoming']);
+    final state = mapOf(selection.page.props['saleReminder']);
     if (upcoming['id'] is! num ||
         state['delivered'] == true && state['subscribed'] != true) {
       return;
     }
+    final epoch = repo.session.identityEpoch;
     setState(() => _reminding = true);
     try {
       final data = await repo.reminder(
@@ -378,15 +497,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         (upcoming['id'] as num).toInt(),
         state['subscribed'] != true,
       );
-      if (mounted) {
-        setState(() => s.page = data);
+      if (!_mutationIsCurrent(selection, epoch)) {
+        await _recoverAfterSessionChange(epoch);
+        return;
       }
+      _checkoutAccount.check(page: data);
+      setState(() => selection.page = data);
     } on BackendException catch (e) {
-      if (mounted) {
+      if (_mutationIsCurrent(selection, epoch)) {
         _message(e.message, error: true);
+      } else {
+        await _recoverAfterSessionChange(epoch);
       }
     } finally {
-      if (mounted) {
+      if (mounted && identical(_selection, selection)) {
         setState(() => _reminding = false);
       }
     }
@@ -688,10 +812,15 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               child: ProductCard(
                 product: product,
                 session: repo.session,
-                saved: (s.page.props['savedProductIds'] as List? ?? [])
-                    .contains(product['id']),
+                saved:
+                    _accountCurrent &&
+                    (s.page.props['savedProductIds'] as List? ?? []).contains(
+                      product['id'],
+                    ),
                 saving: _saving,
-                saveLabel: s.page.isCached
+                saveLabel: !_accountCurrent
+                    ? 'Refresh to continue'
+                    : s.page.isCached
                     ? 'Connect to save'
                     : s.page.user == null
                     ? 'Sign in to save'
@@ -702,7 +831,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                       )
                     ? 'Remove from saved'
                     : 'Save product',
-                onSave: s.page.isCached || s.page.user != null && !s.approved
+                onSave:
+                    !_accountCurrent ||
+                        s.page.isCached ||
+                        s.page.user != null && !s.approved
                     ? null
                     : () => _save(product),
                 onTap: () => Navigator.of(context).push(
@@ -722,6 +854,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
 
   Widget _purchaseButtons() {
     final disabled =
+        !_accountCurrent ||
         s.page.isCached ||
         _busy ||
         s.vacation ||
@@ -732,7 +865,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       onPressed: disabled ? null : () => _purchase(false),
       icon: const Icon(Icons.shopping_bag_outlined, size: 18),
       label: Text(
-        s.page.isCached
+        !_accountCurrent
+            ? 'Refresh to continue'
+            : s.page.isCached
             ? 'Connect to shop'
             : _busy
             ? 'Adding…'
@@ -834,7 +969,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               child: IconButton.filledTonal(
                 tooltip: _saveLabel,
                 onPressed:
-                    s.page.isCached ||
+                    !_accountCurrent ||
+                        s.page.isCached ||
                         s.page.user != null && !s.approved ||
                         _saving
                     ? null
@@ -845,9 +981,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   foregroundColor: BagooTheme.strong,
                 ),
                 icon: Icon(
-                  (s.page.props['savedProductIds'] as List? ?? []).contains(
-                        s.product['id'],
-                      )
+                  _accountCurrent &&
+                          (s.page.props['savedProductIds'] as List? ?? [])
+                              .contains(s.product['id'])
                       ? Icons.favorite_rounded
                       : Icons.favorite_border_rounded,
                 ),
@@ -945,7 +1081,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     ],
   );
 
-  String get _saveLabel => s.page.isCached
+  String get _saveLabel => !_accountCurrent
+      ? 'Refresh to continue'
+      : s.page.isCached
       ? 'Connect to save'
       : _saving
       ? 'Saving product'
@@ -1286,6 +1424,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     final offer = mapOf(s.product['sale_offer']);
     final active = mapOf(offer['active']);
     final upcoming = mapOf(offer['upcoming']);
+    final reminder = _accountCurrent
+        ? mapOf(s.page.props['saleReminder'])
+        : <String, dynamic>{};
     if (active.isEmpty && upcoming.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1325,21 +1466,22 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             Text('Starts ${readableDateTime(upcoming['starts_at'])}'),
             TextButton.icon(
               onPressed:
-                  s.page.isCached ||
+                  !_accountCurrent ||
+                      s.page.isCached ||
                       _reminding ||
-                      mapOf(s.page.props['saleReminder'])['delivered'] ==
-                              true &&
-                          mapOf(s.page.props['saleReminder'])['subscribed'] !=
-                              true
+                      reminder['delivered'] == true &&
+                          reminder['subscribed'] != true
                   ? null
                   : _reminder,
               icon: const Icon(Icons.notifications_outlined),
               label: Text(
                 _reminding
                     ? 'Saving…'
-                    : mapOf(s.page.props['saleReminder'])['subscribed'] == true
+                    : !_accountCurrent
+                    ? 'Refresh to continue'
+                    : reminder['subscribed'] == true
                     ? 'Remove reminder'
-                    : mapOf(s.page.props['saleReminder'])['delivered'] == true
+                    : reminder['delivered'] == true
                     ? 'Reminder sent'
                     : 'Remind me',
               ),
@@ -1534,16 +1676,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               OfferTile(
                 offer: o,
                 repository: repo,
+                account: _checkoutAccount,
                 onSignIn: s.page.user == null ? _login : null,
                 canSave: s.page.user == null || s.approved,
-                onUse: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => BagPage(
-                      repository: repo,
-                      voucherCode: o['code']?.toString(),
-                    ),
-                  ),
-                ),
+                onUse: !_accountCurrent
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => BagPage(
+                            repository: repo,
+                            account: _checkoutAccount,
+                            voucherCode: o['code']?.toString(),
+                          ),
+                        ),
+                      ),
               ),
           ],
           const ProductHeading('Product Description'),

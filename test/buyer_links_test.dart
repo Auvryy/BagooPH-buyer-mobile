@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/auth/email_verification_link_page.dart';
+import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
 import 'package:bagoo_buyer_mobile/features/auth/password_link_page.dart';
 import 'package:bagoo_buyer_mobile/features/engagement/buyer_link.dart';
@@ -58,6 +59,46 @@ void main() {
       );
     });
   }
+  for (final entry in {
+    '/buyer/cart': ('/cart', false),
+    '/buyer/checkout': ('/checkout', true),
+    '/buyer/disputes': ('/buyer-returns', true),
+    '/buyer/catalog': ('/buyer/search', false),
+  }.entries) {
+    test(
+      'website alias ${entry.key} retains native destination and context',
+      () {
+        final link = BuyerLink.parse(
+          origin.resolve('${entry.key}?page=2&voucher=DEMO#details'),
+          origin,
+        );
+        expect(link.uri.path, entry.value.$1);
+        expect(link.requiresLogin, entry.value.$2);
+        expect(link.uri.queryParameters, {'page': '2', 'voucher': 'DEMO'});
+        expect(link.uri.fragment, 'details');
+      },
+    );
+  }
+
+  testWidgets('incoming website Bag alias opens the guest native Bag', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    final links = StreamController<Uri>();
+    addTearDown(links.close);
+    await tester.pumpWidget(
+      MainApp(repository: repo, incomingLinks: links.stream),
+    );
+    await tester.pumpAndSettle();
+    links.add(Uri.parse('http://backend.test/buyer/cart'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BagPage), findsOneWidget);
+    expect(repo.bagCalls, 1);
+    expect(repo.loginCalls, 0);
+    expect(repo.orderCalls, 0);
+  });
+
   test(
     'supports public shop categories and retains private account fragments',
     () {

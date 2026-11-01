@@ -21,6 +21,35 @@ class DelayedProductRepository extends FakeBuyerRepository {
   }
 }
 
+class DelayedAddRepository extends FakeBuyerRepository {
+  final pendingAdd = Completer<WebPage>();
+
+  @override
+  Future<WebPage> addToBag(
+    Map<String, dynamic> product,
+    int quantity, {
+    String? color,
+    String? size,
+    bool buyNow = false,
+    int previousQuantity = 0,
+  }) => pendingAdd.future;
+}
+
+class DelayedSaveRepository extends FakeBuyerRepository {
+  final pendingSave = Completer<bool>();
+
+  @override
+  Future<bool> saveProduct(int id, bool saved) => pendingSave.future;
+}
+
+class DelayedReminderRepository extends FakeBuyerRepository {
+  final pendingReminder = Completer<WebPage>();
+
+  @override
+  Future<WebPage> reminder(String slug, int id, bool subscribed) =>
+      pendingReminder.future;
+}
+
 WebPage salePage({String name = 'Sale product'}) => productPage(
   signedIn: true,
   override: {
@@ -31,6 +60,24 @@ WebPage salePage({String name = 'Sale product'}) => productPage(
     },
   },
 );
+
+WebPage reminderPage({required bool signedIn, bool subscribed = false}) {
+  final page = productPage(
+    signedIn: signedIn,
+    override: {
+      'sale_offer': {
+        'server_now': '2026-10-28T00:00:00Z',
+        'upcoming': {
+          'id': 12,
+          'name': 'Upcoming offer',
+          'starts_at': '2030-01-01T00:00:00Z',
+        },
+      },
+    },
+  );
+  page.props['saleReminder'] = {'subscribed': subscribed};
+  return page;
+}
 
 void main() {
   testWidgets('sale reads pause behind routes and while backgrounded', (
@@ -121,6 +168,102 @@ void main() {
     expect(repo.productCalls, 3);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets('a late add-to-Bag reply cannot restore the prior buyer state', (
+    tester,
+  ) async {
+    final repo = DelayedAddRepository()
+      ..signedIn = true
+      ..productResponse = productPage(signedIn: true);
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add to Bag'));
+    await tester.pump();
+
+    repo
+      ..signedIn = false
+      ..productResponse = productPage(signedIn: false);
+    repo.session.clear();
+    repo.pendingAdd.complete(productPage(signedIn: true));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 added to your Shopping Bag.'), findsNothing);
+    expect(repo.productCalls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a late save reply cannot restore prior buyer saved state', (
+    tester,
+  ) async {
+    final repo = DelayedSaveRepository()
+      ..signedIn = true
+      ..productResponse = productPage(signedIn: true);
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Save product'));
+    await tester.pump();
+
+    repo
+      ..signedIn = false
+      ..productResponse = productPage(signedIn: false);
+    repo.session.clear();
+    repo.pendingSave.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Remove from saved'), findsNothing);
+    expect(find.byTooltip('Sign in to save'), findsOneWidget);
+    expect(repo.productCalls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'a late reminder reply cannot restore prior buyer reminder state',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(800, 1000);
+      addTearDown(tester.view.reset);
+      final repo = DelayedReminderRepository()
+        ..signedIn = true
+        ..productResponse = reminderPage(signedIn: true);
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Remind me'));
+      await tester.tap(find.text('Remind me'));
+      await tester.pump();
+
+      repo
+        ..signedIn = false
+        ..productResponse = reminderPage(signedIn: false);
+      repo.session.clear();
+      repo.pendingReminder.complete(
+        reminderPage(signedIn: true, subscribed: true),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Remove reminder'), findsNothing);
+      expect(find.text('Remind me'), findsOneWidget);
+      expect(repo.productCalls, greaterThan(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('countdown boundaries wait for their visible route', (
     tester,

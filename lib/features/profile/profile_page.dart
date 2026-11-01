@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'profile_repository.dart';
@@ -70,9 +71,47 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
-  late final ProfileRepository _repository;
-  final _contentKey = GlobalKey();
+class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
+  late BuyerAccountScope _account;
+
+  bool _ensureAccount({bool rebuild = true}) {
+    if (!mounted) return false;
+    if (_account.isCurrent &&
+        identical(_account.session, widget.repository.session)) {
+      return true;
+    }
+    if (_page != null || _loading || _error == null) {
+      _expireAccount(rebuild: rebuild);
+    }
+    return false;
+  }
+
+  void _expireAccount({bool rebuild = true, String? message}) {
+    void clear() {
+      _account.invalidate();
+      _generation++;
+      _page = null;
+      _query.clear();
+      _loading = false;
+      _message = null;
+      _error = message ?? "Your buyer account changed or access ended. Sign in again to reopen your profile.";
+    }
+
+    if (rebuild) {
+      setState(clear);
+    } else {
+      clear();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.user != null) {
+      _ensureAccount();
+    }
+  }
+
+  late ProfileRepository _repository;
   final _visited = <String>{'overview'};
   final _query = <String, String>{};
   WebPage? _page;
@@ -82,8 +121,11 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _openingSupport = false;
   bool _openingTracking = false;
   int _generation = 0, _activityRefresh = 0;
-  Map<String, dynamic> get user =>
-      _page == null ? widget.user ?? {} : mapOf(_page!.props['user']);
+  Map<String, dynamic> get user => !_account.isCurrent
+      ? {}
+      : _page == null
+      ? widget.user ?? {}
+      : mapOf(_page!.props['user']);
   bool get _accountSection => [
     'personal',
     'emails',
@@ -98,6 +140,8 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _account = BuyerAccountScope(widget.repository.session);
     _repository = ProfileRepository(widget.repository);
     if (_sections.containsKey(widget.initialSection)) {
       _section = widget.initialSection;
@@ -115,6 +159,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _account.invalidate();
     _generation++;
     super.dispose();
   }
@@ -122,6 +168,21 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void didUpdateWidget(ProfilePage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.repository, widget.repository) ||
+        oldWidget.user?['id'] != widget.user?['id']) {
+      _account.invalidate();
+      _generation++;
+      _account = BuyerAccountScope(widget.repository.session);
+      _repository = ProfileRepository(widget.repository);
+      _page = null;
+      _query.clear();
+      _visited.clear();
+      _visited.add(_section);
+      _error = _message = null;
+      _loading = false;
+      if (widget.user != null) unawaited(_load());
+      return;
+    }
     final sectionChanged = widget.sectionRequest != oldWidget.sectionRequest;
     if (sectionChanged) {
       _select(
@@ -141,7 +202,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _load({bool refreshActivity = true}) async {
-    if (!mounted || widget.user == null) return;
+    if (!mounted || widget.user == null || !_ensureAccount()) return;
     final generation = ++_generation;
     final owner = widget.user!['id'];
     setState(() {
@@ -150,6 +211,7 @@ class _ProfilePageState extends State<ProfilePage> {
     });
     try {
       var page = await _repository.load(tab: _tab, query: Map.of(_query));
+      if (!mounted || generation != _generation || !_ensureAccount()) return;
       final corrected = <String, String>{};
       for (final entry in {
         'page': mapOf(page.props['orders']),
@@ -166,7 +228,8 @@ class _ProfilePageState extends State<ProfilePage> {
       }
       if (!mounted ||
           generation != _generation ||
-          owner != widget.user?['id']) {
+          owner != widget.user?['id'] ||
+          !_ensureAccount()) {
         return;
       }
       if (page.user?['id'] != owner) {
@@ -182,11 +245,12 @@ class _ProfilePageState extends State<ProfilePage> {
       });
       widget.onUserChanged(mapOf(page.props['user']));
     } on BackendException catch (e) {
-      if (mounted && generation == _generation) {
-        setState(() {
-          _error = e.message;
-          if (e.status == 401 || e.status == 419) _page = null;
-        });
+      if (mounted && generation == _generation && _ensureAccount()) {
+        if ([401, 403, 404, 419].contains(e.status)) {
+          _expireAccount(message: e.message);
+        } else {
+          setState(() => _error = e.message);
+        }
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -196,6 +260,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _accept(WebPage page) {
+    if (!_ensureAccount()) return;
     _repository.checked(page);
     if (!mounted || page.user?['id'] != widget.user?['id']) return;
     _generation++;
@@ -209,6 +274,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _select(String section) {
+    if (!_ensureAccount()) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _section = section;
@@ -841,6 +907,7 @@ class _ProfilePageState extends State<ProfilePage> {
         onOrder: _order,
       ),
       'vouchers' => VouchersSection(
+        account: _account,
         repository: _repository,
         page: page,
         onQuery: _vouchersQuery,
@@ -848,6 +915,7 @@ class _ProfilePageState extends State<ProfilePage> {
         loading: _loading,
       ),
       'orders' => PurchasesSection(
+        account: _account,
         repository: _repository,
         page: page,
         onQuery: _ordersQuery,
@@ -860,6 +928,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.user != null) _ensureAccount(rebuild: false);
     if (widget.user == null) {
       return ListView(
         padding: const EdgeInsets.all(24),
@@ -926,16 +995,18 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         } else {
           final keys = _sections.keys.toList();
-          content = IndexedStack(
-            key: _contentKey,
-            index: keys.indexOf(_section),
-            children: [
-              for (final key in keys)
-                if (_visited.contains(key))
-                  _workspace(key, wide)
-                else
-                  const SizedBox.shrink(),
-            ],
+          content = KeyedSubtree(
+            key: ObjectKey(_account),
+            child: IndexedStack(
+              index: keys.indexOf(_section),
+              children: [
+                for (final key in keys)
+                  if (_visited.contains(key))
+                    _workspace(key, wide)
+                  else
+                    const SizedBox.shrink(),
+              ],
+            ),
           );
         }
         final body = Column(

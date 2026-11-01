@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/foreground_refresh.dart';
 import '../../core/widgets.dart';
@@ -33,12 +34,31 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   WebPage? _page;
   String? _code;
   Timer? _claimTimer;
+  late BuyerAccountScope _account;
   late ForegroundRead _updates;
   late int _identityEpoch;
   String? _updateError;
   bool _refreshing = true, _accessLost = false, _manualRefresh = false;
+  bool _confirmingReceipt = false;
   Map<String, dynamic> get order => mapOf(_page?.props['order']);
   Map<String, dynamic> get claim => mapOf(_page?.props['pickupClaim']);
+  bool get hasCurrentAccount =>
+      !_accessLost &&
+      _account.isCurrent &&
+      identical(_account.session, widget.repository.session) &&
+      _identityEpoch == widget.repository.session.identityEpoch;
+
+  bool _ensureCurrentAccount() {
+    if (hasCurrentAccount) return true;
+    if (mounted && !_accessLost) {
+      setState(() {
+        _clearPrivate();
+        problem = 'Your account changed. Reopen this order after signing in.';
+      });
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +67,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
 
   void _configure() {
     _identityEpoch = widget.repository.session.identityEpoch;
+    _account = BuyerAccountScope(widget.repository.session);
     _updates = ForegroundRead(read: _read);
   }
 
@@ -56,6 +77,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     if (!identical(oldWidget.repository, widget.repository) ||
         oldWidget.orderId != widget.orderId) {
       _updates.dispose();
+      _account.invalidate();
       _claimTimer?.cancel();
       _page = null;
       _code = _updateError = problem = success = null;
@@ -69,6 +91,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   @override
   void dispose() {
     _updates.dispose();
+    _account.invalidate();
     _claimTimer?.cancel();
     _code = null;
     super.dispose();
@@ -86,8 +109,14 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
 
   void _accept(WebPage page) {
     widget.repository.buyer.requireNoErrors(page);
-    if (_identityEpoch != widget.repository.session.identityEpoch ||
-        page.component != 'Buyer/OrderDetail' ||
+    if (_identityEpoch != widget.repository.session.identityEpoch) {
+      throw const BackendException(
+        'This order could not be confirmed for your account.',
+        status: 401,
+      );
+    }
+    _account.check(page: page);
+    if (page.component != 'Buyer/OrderDetail' ||
         mapOf(page.props['order'])['id'] != widget.orderId ||
         page.user?['id'] is! num ||
         page.user?['role'] != 'buyer' ||
@@ -133,6 +162,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
 
   void _clearPrivate() {
     _accessLost = true;
+    _account.invalidate();
     _updates.setActive(false);
     _claimTimer?.cancel();
     _page = null;
@@ -155,16 +185,16 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     Future<String?> Function() action, {
     bool validate = true,
   }) {
-    if (_accessLost ||
-        _identityEpoch != widget.repository.session.identityEpoch) {
-      setState(() {
-        _clearPrivate();
-        problem = 'Your account changed. Reopen this order after signing in.';
-      });
+    if (!mounted) return Future.value(false);
+    if (!_ensureCurrentAccount()) {
       return Future.value(false);
     }
     _updates.setActive(false);
-    return super.perform(action, validate: validate);
+    return super.perform(() async {
+      final result = await action();
+      _account.check();
+      return result;
+    }, validate: validate);
   }
 
   Future<void> _load() async {
@@ -222,32 +252,71 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   }
 
   Future<void> _confirm() async {
-    if (!await confirmAction(
-      context,
-      'Confirm receipt?',
-      'Confirm that you received order #${order['order_number']} and checked its items. This records your receipt and completes the purchase.',
-      'Confirm Received',
-    )) {
+    if (!mounted || _confirmingReceipt || busy) return;
+    if (!_ensureCurrentAccount()) return;
+    final openingPage = _page;
+    if (openingPage == null ||
+        openingPage.props['canConfirmReceipt'] != true ||
+        mapOf(openingPage.props['order'])['id'] != widget.orderId) {
       return;
     }
-    await perform(() async {
-      final page = await widget.repository.session.submit(
-        '/buyer/orders/${widget.orderId}/confirm',
-        {},
-        referer: '/buyer/orders/${widget.orderId}',
-      );
-      _accept(page);
-      if (order['status'] != 'completed') {
-        throw const BackendException(
-          'Receipt confirmation was not confirmed. Refresh the order before trying again.',
-        );
+    final openingEpoch = _identityEpoch;
+    final orderNumber = mapOf(openingPage.props['order'])['order_number'];
+    _confirmingReceipt = true;
+    setState(() {});
+    try {
+      if (!await confirmAction(
+            context,
+            'Confirm receipt?',
+            'Confirm that you received order #$orderNumber and checked its items. This records your receipt and completes the purchase.',
+            'Confirm Received',
+          ) ||
+          !mounted) {
+        return;
       }
-      return mapOf(page.props['flash'])['success']?.toString() ??
-          'Receipt confirmed.';
-    }, validate: false);
+
+      if (!_ensureCurrentAccount()) return;
+      final currentPage = _page;
+      if (openingEpoch != widget.repository.session.identityEpoch ||
+          currentPage == null ||
+          currentPage.component != 'Buyer/OrderDetail' ||
+          currentPage.props['canConfirmReceipt'] != true ||
+          mapOf(currentPage.props['order'])['id'] != widget.orderId ||
+          currentPage.user?['role'] != 'buyer' ||
+          currentPage.user?['id'] is! num) {
+        if (mounted &&
+            openingEpoch != widget.repository.session.identityEpoch) {
+          setState(() {
+            _clearPrivate();
+            problem =
+                'Your account changed. Reopen this order after signing in.';
+          });
+        }
+        return;
+      }
+
+      await perform(() async {
+        final page = await widget.repository.session.submit(
+          '/buyer/orders/${widget.orderId}/confirm',
+          {},
+          referer: '/buyer/orders/${widget.orderId}',
+        );
+        _accept(page);
+        if (order['status'] != 'completed') {
+          throw const BackendException(
+            'Receipt confirmation was not confirmed. Refresh the order before trying again.',
+          );
+        }
+        return mapOf(page.props['flash'])['success']?.toString() ??
+            'Receipt confirmed.';
+      }, validate: false);
+    } finally {
+      if (mounted) setState(() => _confirmingReceipt = false);
+    }
   }
 
   Future<void> _pickup() async {
+    if (!mounted || !_ensureCurrentAccount()) return;
     if (!readyForPickup || claim['code_issued_at'] != null || _code != null) {
       return;
     }
@@ -283,7 +352,11 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     final tracking = mapOf(order['tracking']);
     final userCan = _page?.props['canUsePortal'] == true;
     final canAct =
-        !busy && !_accessLost && problem == null && _updateError == null;
+        !busy &&
+        !_confirmingReceipt &&
+        hasCurrentAccount &&
+        problem == null &&
+        _updateError == null;
     return ForegroundRefresh(
       controller: _updates,
       enabled: !busy && !_accessLost,
@@ -336,7 +409,12 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                         padding: const EdgeInsets.only(bottom: 16),
                         child: Notice(success!),
                       ),
-                    if (_page != null) ...[
+                    if (_page != null && !hasCurrentAccount)
+                      const Notice(
+                        'Your account changed. Reopen this order after signing in.',
+                        error: true,
+                      ),
+                    if (_page != null && hasCurrentAccount) ...[
                       ProfilePanel(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -401,6 +479,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                               widget.repository,
                                               widget.orderId,
                                               _page!.props['buyAgainToken'],
+                                              parentAccount: _account,
                                             );
                                             return null;
                                           }, validate: false)
@@ -415,6 +494,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                               builder: (_) => _CancelOrderPage(
                                                 repository: widget.repository,
                                                 page: _page!,
+                                                account: _account,
                                                 onSaved: _accept,
                                               ),
                                             ),
@@ -433,6 +513,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                               builder: (_) => ReturnsPage(
                                                 repository: widget.repository,
                                                 orderId: widget.orderId,
+                                                account: _account,
                                               ),
                                             ),
                                           )
@@ -451,6 +532,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                                       )['id']
                                                       as num)
                                                   .toInt(),
+                                              parentAccount: _account,
                                             );
                                             _accept(
                                               await widget.repository.order(
@@ -559,6 +641,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                               repository: widget.repository,
                                               item: item,
                                               orderId: widget.orderId,
+                                              account: _account,
                                               onSaved: _accept,
                                             ),
                                           ),
@@ -667,6 +750,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                       builder: (_) => ReturnsPage(
                                         repository: widget.repository,
                                         caseId: (item['id'] as num).toInt(),
+                                        account: _account,
                                       ),
                                     ),
                                   ),
@@ -702,22 +786,118 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   }
 }
 
+abstract class _OrderAccountFormState<T extends StatefulWidget>
+    extends ProfileFormState<T>
+    with WidgetsBindingObserver {
+  ProfileRepository get repository;
+  BuyerAccountScope get parentAccount;
+  void clearPrivateDraft();
+
+  late final BuyerAccountScope accountScope;
+  bool get hasOrderAccount =>
+      accountScope.isCurrent &&
+      identical(accountScope.session, repository.session);
+
+  @override
+  void initState() {
+    super.initState();
+    accountScope = parentAccount.fork();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _discardOrderAccount() {
+    accountScope.invalidate();
+    clearPrivateDraft();
+    errors = {};
+    success = null;
+    problem = 'Your buyer account changed or access ended. Reopen this order from your purchases.';
+  }
+
+  bool ensureOrderAccount() {
+    if (hasOrderAccount) return true;
+    if (mounted) setState(_discardOrderAccount);
+    return false;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) ensureOrderAccount();
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if (!hasOrderAccount || [401, 403, 404, 419].contains(error.status)) {
+      _discardOrderAccount();
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (!ensureOrderAccount()) return Future.value(false);
+    return super.perform(() async {
+      final result = await action();
+      if (mounted) accountScope.check();
+      return result;
+    }, validate: validate);
+  }
+
+  Widget orderContent(List<Widget> children) => content(
+    hasOrderAccount
+        ? children
+        : [
+            const ProfileHeading(
+              'Order action unavailable',
+              '',
+              Icons.lock_outline,
+            ),
+            if (problem == null)
+              const Notice(
+                'Your buyer account changed or access ended. Reopen this order from your purchases.',
+                error: true,
+              ),
+          ],
+  );
+
+  @override
+  void dispose() {
+    accountScope.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}
+
 class _CancelOrderPage extends StatefulWidget {
   const _CancelOrderPage({
     required this.repository,
     required this.page,
+    required this.account,
     required this.onSaved,
   });
   final ProfileRepository repository;
   final WebPage page;
+  final BuyerAccountScope account;
   final ValueChanged<WebPage> onSaved;
   @override
   State<_CancelOrderPage> createState() => _CancelOrderPageState();
 }
 
-class _CancelOrderPageState extends ProfileFormState<_CancelOrderPage> {
+class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
   String? _reason;
   final _notes = TextEditingController();
+
+  @override
+  ProfileRepository get repository => widget.repository;
+  @override
+  BuyerAccountScope get parentAccount => widget.account;
+  @override
+  void clearPrivateDraft() {
+    _reason = null;
+    _notes.clear();
+  }
+
   @override
   void dispose() {
     _notes.dispose();
@@ -733,7 +913,7 @@ class _CancelOrderPageState extends ProfileFormState<_CancelOrderPage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
-            child: content([
+            child: orderContent([
               const ProfileHeading(
                 'Cancel order',
                 'You can cancel before the seller marks it ready for pickup. Your other orders will continue.',
@@ -780,6 +960,7 @@ class _CancelOrderPageState extends ProfileFormState<_CancelOrderPage> {
                     referer: '/buyer/orders/$id',
                   );
                   widget.repository.buyer.requireNoErrors(page);
+                  accountScope.check(page: page);
                   if (mapOf(page.props['order'])['id'] != id ||
                       mapOf(page.props['order'])['status'] != 'cancelled') {
                     throw const BackendException(
@@ -806,21 +987,34 @@ class _ReviewPage extends StatefulWidget {
     required this.repository,
     required this.item,
     required this.orderId,
+    required this.account,
     required this.onSaved,
   });
   final ProfileRepository repository;
   final Map<String, dynamic> item;
   final int orderId;
+  final BuyerAccountScope account;
   final ValueChanged<WebPage> onSaved;
   @override
   State<_ReviewPage> createState() => _ReviewPageState();
 }
 
-class _ReviewPageState extends ProfileFormState<_ReviewPage> {
+class _ReviewPageState extends _OrderAccountFormState<_ReviewPage> {
   late final TextEditingController _comment;
   late int _rating;
   final _photos = <UploadPart>[];
   bool get editing => widget.item['review'] != null;
+  @override
+  ProfileRepository get repository => widget.repository;
+  @override
+  BuyerAccountScope get parentAccount => widget.account;
+  @override
+  void clearPrivateDraft() {
+    _comment.clear();
+    _rating = 0;
+    _photos.clear();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -828,6 +1022,7 @@ class _ReviewPageState extends ProfileFormState<_ReviewPage> {
       text: mapOf(widget.item['review'])['comment']?.toString() ?? '',
     );
     _rating = (mapOf(widget.item['review'])['rating'] as num?)?.toInt() ?? 0;
+    if (!hasOrderAccount) _discardOrderAccount();
   }
 
   @override
@@ -847,7 +1042,7 @@ class _ReviewPageState extends ProfileFormState<_ReviewPage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
-            child: content([
+            child: orderContent([
               ProfileHeading(
                 'Review purchased item',
                 editing
@@ -966,6 +1161,7 @@ class _ReviewPageState extends ProfileFormState<_ReviewPage> {
                     ],
                   );
                   widget.repository.buyer.requireNoErrors(page);
+                  accountScope.check(page: page);
                   if (mapOf(page.props['order'])['id'] != widget.orderId ||
                       mapOf(page.props['flash'])['success'] is! String) {
                     throw const BackendException(

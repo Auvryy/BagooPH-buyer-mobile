@@ -63,8 +63,11 @@ class BuyerDestinationRouter {
     if (href == null || href.trim().isEmpty) {
       throw const BackendException('This update has no available destination.');
     }
-    final target = repository.session.resolve(href);
-    final link = BuyerLink.parse(target, repository.session.origin);
+    final link = BuyerLink.parse(
+      repository.session.resolve(href),
+      repository.session.origin,
+    );
+    final target = link.uri;
     final segments = target.pathSegments;
     if (link.kind == BuyerLinkKind.passwordReset) {
       await Navigator.of(context).push(
