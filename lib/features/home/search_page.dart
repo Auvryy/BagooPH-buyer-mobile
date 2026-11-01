@@ -232,13 +232,12 @@ class _SearchPageState extends State<SearchPage> {
                       const Text(
                         'Find your next favorite',
                         style: TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
                           height: 1.3,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       BrowseSearchField(
                         controller: _text,
                         label: 'Search products',

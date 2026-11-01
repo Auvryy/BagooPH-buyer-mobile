@@ -12,6 +12,8 @@ import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/chat_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -50,6 +52,25 @@ class ReviewRepository extends FakeBuyerRepository {
         'feedProducts': {...mapOf(page.props['feedProducts']), 'total': 6},
       });
     };
+  }
+
+  @override
+  Future<WebPage> document(String path) async {
+    if (path == '/buyer/messages') {
+      return const WebPage('Buyer/Messages', {
+        'auth': {'user': buyer},
+        'conversations': [
+          {
+            'user': {'id': 3, 'name': 'Everyday Goods', 'role': 'seller'},
+            'last_message': 'Your order is being prepared. Thank you!',
+            'last_time': 'Today',
+            'unread_count': 2,
+            'messages': [],
+          },
+        ],
+      });
+    }
+    return super.document(path);
   }
 
   @override
@@ -134,6 +155,7 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
       onUserChanged: (_) {},
     ),
   ),
+  'inbox' => InboxPage(repository: ProfileRepository(repo)),
   'chat' => ChatPage(
     repository: repo,
     userId: 7,
@@ -172,6 +194,7 @@ void main() {
     'checkout',
     'profile',
     'chat',
+    'inbox',
     'login',
   ]) {
     for (final scene in [

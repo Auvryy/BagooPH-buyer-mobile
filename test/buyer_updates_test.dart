@@ -120,6 +120,51 @@ WebPage completedOrderWithReviewableItem() {
 }
 
 void main() {
+  testWidgets(
+    'inbox conversation remains usable on a narrow screen with enlarged text',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      final page = inbox(unread: 120);
+      final conversation =
+          (page.props['conversations'] as List).first as Map<String, dynamic>;
+      conversation['user'] = {
+        'id': 3,
+        'name': 'A very long store name for the buyer conversation',
+        'role': 'seller',
+      };
+      conversation['last_message'] = 'A long message preview that should remain readable within the available space.';
+      conversation['last_time'] = 'Yesterday afternoon';
+      session.onPage = (_) async => page;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: InboxPage(
+            repository: ProfileRepository(BuyerRepository(session)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('99+'), findsOneWidget);
+      expect(
+        find.text('A very long store name for the buyer conversation'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('inbox updates unread badges while preserving search', (
     tester,
   ) async {

@@ -29,3 +29,7 @@ Unapproved signed-in buyers can open a verification prompt from product purchase
 ## Product and Bag presentation checkpoint
 
 Product options and shared chips use compact Bagoo styling, the product title and price are smaller, and specifications align as label/value rows with a stacked layout at narrow widths or enlarged text. The description aligns with its heading. Bag filters have explicit selected states, item cards use borders and elevation, and product and Bag headers use the branded red. Synthetic 375-pixel product and Bag renders were inspected; the fixture has no product image. A 60-case product, Bag, and responsive selection passed with one worker, followed by the updated product design suite and two focused alignment checks. Focused analysis was clean. Live product imagery, messaging polish, remaining shared controls and physical-device review remain open.
+
+## Search and inbox presentation checkpoint
+
+Search uses a smaller heading and tighter spacing. The inbox now presents each conversation with a compact card, message preview, time and accessible unread count, while retaining the existing account-bound refresh behavior. The buyer updates and discovery selection passed 21 cases with one worker; three focused inbox cases and four responsive synthetic inbox layouts passed after adding long-text coverage. The 375-pixel and enlarged-text renders were inspected, and focused analysis was clean. Conversation detail polish, remaining default-looking controls, live imagery and physical-device review remain open.
