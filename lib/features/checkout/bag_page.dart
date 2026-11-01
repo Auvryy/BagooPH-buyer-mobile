@@ -205,12 +205,17 @@ class _BagContentsState extends State<_BagContents>
     if (!_ensureAccount() || _modalOpen) return;
     final slug = mapOf(item['product'])['slug'];
     if (slug == null || _bag.busy || _opening) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            ProductPage(repository: widget.repository, slug: slug.toString()),
-      ),
-    );
+    setState(() => _opening = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              ProductPage(repository: widget.repository, slug: slug.toString()),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
     if (mounted && _ensureAccount()) await _bag.load();
   }
 

@@ -47,3 +47,7 @@ The new aggregate Android runner and opted-in live smoke runner are prepared and
 The owner deferred further phone interaction and requested coding first. Leave the ADB server, connection and phone alone. The initial full run that began before the final identity-header change finished with 801 passing cases and that header case failing; do not report it as a passing suite. The final focused 119-case selection passed on the updated source.
 
 One additional case reproduced a Bag's first read starting through a different repository session from its supplied parent account. The initial read now requires both the inherited scope and matching session. All ten root cases pass and analysis is clean. A fresh full run on the final source is in progress in `.git/buyer-current-full.log`; verify its actual process/result before restarting.
+
+### Bag product navigation
+
+Two additional cases reproduced three product reads/routes from three retained taps and an unintended quantity change through a cached Bag control while its product route was open. Product navigation now sets the existing opening guard synchronously and releases it when the child closes; returning refreshes the same Bag once. All 43 navigation/dialog/profile checks pass on the final source and analysis is clean. The aggregate Android runner includes these cases for later device acceptance. The earlier full suite is still being collected and predates this navigation slice, so it is not full-suite evidence for the new source.

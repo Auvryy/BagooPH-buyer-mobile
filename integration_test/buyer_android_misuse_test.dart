@@ -13,6 +13,7 @@ import '../test/buyer_discovery_parity_test.dart' as discovery;
 import '../test/buyer_post_purchase_test.dart' as purchases;
 import '../test/buyer_links_test.dart' as links;
 import '../test/profile_root_misuse_test.dart' as profile_root;
+import '../test/bag_product_navigation_test.dart' as bag_navigation;
 import '../test/chat_updates_test.dart' as chat;
 import '../test/google_auth_widgets_test.dart' as google;
 import '../test/notifications_lifecycle_test.dart' as notices;
@@ -27,6 +28,7 @@ void main() {
   HttpOverrides.global = NoNetworkHttpOverrides();
   group('Android account and addresses', account.main);
   group('Android Bag', bag.main);
+  group('Android Bag product navigation', bag_navigation.main);
   group('Android checkout', checkout.main);
   group('Android returns', returns.main);
   group('Android private documents', documents.main);
