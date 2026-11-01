@@ -37,3 +37,7 @@ Search uses a smaller heading and tighter spacing. The inbox now presents each c
 ## Conversation presentation checkpoint
 
 Conversation detail uses the branded header, compact incoming and outgoing bubbles, and a separated composer. Product references use a custom compact row. Chat and product checks passed 18 cases with one worker, and four responsive synthetic conversation layouts passed; the phone and enlarged-text renders were inspected. Focused analysis was clean. Remaining shared controls, end-to-end verification and physical-device review remain open.
+
+## Search entry and navigation accessibility checkpoint
+
+The header search opens the retained search screen with its input focused and preserves an existing draft on return. A queued focus cannot activate the keyboard after switching to another tab. The duplicate Home search field was removed; Home filters still open search with the selected criteria. Bottom navigation grows for enlarged labels instead of overflowing. Discovery and app widget checks passed 22 cases with one worker; the focused filter and hidden-focus cases and five search cases passed. A synthetic 375-pixel Home render was inspected and focused analysis was clean. End-to-end and physical-device review remain open.

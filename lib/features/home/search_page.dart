@@ -18,9 +18,17 @@ import 'browse_controls.dart';
 import 'catalogue_loading.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.repository, this.request});
+  const SearchPage({
+    super.key,
+    required this.repository,
+    this.request,
+    this.focusRequest = 0,
+    this.active = true,
+  });
   final BuyerRepository repository;
   final SearchFilters? request;
+  final int focusRequest;
+  final bool active;
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
@@ -28,6 +36,7 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   late final CatalogueSearchController _catalogue;
   final _text = TextEditingController();
+  final _focus = FocusNode();
   final _scroll = ScrollController();
   Timer? _debounce;
   final _saving = <int>{};
@@ -42,11 +51,24 @@ class _SearchPageState extends State<SearchPage> {
     } else {
       _catalogue.load();
     }
+    if (widget.focusRequest > 0) _requestFocus(widget.focusRequest);
+  }
+
+  void _requestFocus(int request) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active && widget.focusRequest == request) {
+        _focus.requestFocus();
+      }
+    });
   }
 
   @override
   void didUpdateWidget(SearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.focusRequest != oldWidget.focusRequest &&
+        widget.focusRequest > 0) {
+      _requestFocus(widget.focusRequest);
+    }
     final request = widget.request;
     if (request != null && request != oldWidget.request) {
       _debounce?.cancel();
@@ -63,6 +85,7 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _debounce?.cancel();
     _text.dispose();
+    _focus.dispose();
     _scroll.dispose();
     _catalogue.dispose();
     super.dispose();
@@ -240,6 +263,7 @@ class _SearchPageState extends State<SearchPage> {
                       const SizedBox(height: 12),
                       BrowseSearchField(
                         controller: _text,
+                        focusNode: _focus,
                         label: 'Search products',
                         clearable: true,
                         showFilters: !wide,

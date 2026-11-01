@@ -62,10 +62,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
   late final ProfileRepository _inboxRepository;
   late final BuyerAdvertisementSession _advertisements;
-  final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
   SearchFilters? _searchRequest;
+  int _searchFocusRequest = 0;
   int? _notificationCount;
   Object? _notificationOwner;
   int _notificationGeneration = 0;
@@ -122,7 +122,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     widget.verificationRequests?.removeListener(_showVerification);
     _home.removeListener(_homeChanged);
     _home.dispose();
-    _search.dispose();
     super.dispose();
   }
 
@@ -161,7 +160,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final filters = await showBuyerSearchFilters(
         context,
         value: SearchFilters(
-          query: _search.text.trim(),
+          query: _home.search,
           category: _home.category,
           sort: _home.sort,
         ),
@@ -206,6 +205,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _searchRequest = SearchFilters(query: query.trim(), category: category);
       _tab = 2;
       _visited.add(2);
+    });
+  }
+
+  void _focusSearch() {
+    setState(() {
+      if (!_visited.contains(2)) _searchRequest = const SearchFilters();
+      _tab = 2;
+      _visited.add(2);
+      _searchFocusRequest++;
     });
   }
 
@@ -381,7 +389,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: InkWell(
                   key: const ValueKey('buyer-header-search'),
                   borderRadius: BorderRadius.circular(10),
-                  onTap: () => _openSearch(),
+                  onTap: _focusSearch,
                   child: const SizedBox(
                     height: 42,
                     child: Row(
@@ -461,6 +469,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           SearchPage(
                             repository: widget.repository,
                             request: _searchRequest,
+                            focusRequest: _searchFocusRequest,
+                            active: _tab == 2,
                           )
                         else
                           const SizedBox.shrink(),
@@ -554,28 +564,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
             ],
           ),
-          child: Row(
-            children: [
-              _bottomItem(0, Icons.home_outlined, Icons.home_rounded, 'Home'),
-              _bottomItem(
-                1,
-                Icons.shopping_bag_outlined,
-                Icons.shopping_bag_rounded,
-                'Bag',
-              ),
-              _bottomItem(
-                4,
-                Icons.forum_outlined,
-                Icons.forum_rounded,
-                'Messages',
-              ),
-              _bottomItem(
-                3,
-                Icons.person_outline_rounded,
-                Icons.person_rounded,
-                'Profile',
-              ),
-            ],
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _bottomItem(0, Icons.home_outlined, Icons.home_rounded, 'Home'),
+                _bottomItem(
+                  1,
+                  Icons.shopping_bag_outlined,
+                  Icons.shopping_bag_rounded,
+                  'Bag',
+                ),
+                _bottomItem(
+                  4,
+                  Icons.forum_outlined,
+                  Icons.forum_rounded,
+                  'Messages',
+                ),
+                _bottomItem(
+                  3,
+                  Icons.person_outline_rounded,
+                  Icons.person_rounded,
+                  'Profile',
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -596,22 +609,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         button: true,
         child: InkWell(
           onTap: () => _selectTab(tab),
-          child: SizedBox(
-            height: 62,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(selected ? selectedIcon : icon, color: color, size: 23),
-                const SizedBox(height: 3),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 62),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(selected ? selectedIcon : icon, color: color, size: 23),
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -619,36 +639,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _browseTools({required bool roomy}) {
-    final search = BrowseSearchField(
-      controller: _search,
-      label: 'Search products',
-      onSubmitted: (value) => _openSearch(query: value),
-      onFilters: _openingFilters ? null : _advancedFilters,
-    );
-    final utilities = _buyerUtilities();
-    return roomy
-        ? Row(
-            children: [
-              Expanded(child: search),
-              const SizedBox(width: 16),
-              utilities,
-            ],
-          )
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              search,
-              const SizedBox(height: 4),
-              Align(alignment: Alignment.centerLeft, child: utilities),
-            ],
-          );
-  }
-
   Widget _buyerUtilities() => Wrap(
     spacing: 8,
     runSpacing: 0,
     children: [
+      TextButton.icon(
+        onPressed: _openingFilters ? null : _advancedFilters,
+        icon: const Icon(Icons.tune_rounded, size: 18),
+        label: const Text('Filters'),
+      ),
       TextButton.icon(
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -755,7 +754,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _browseTools(roomy: roomy),
+                    _buyerUtilities(),
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 4,
@@ -938,7 +937,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           alignment: Alignment.centerLeft,
                           child: TextButton.icon(
                             onPressed: () {
-                              _search.clear();
                               _home.reset();
                             },
                             icon: const Icon(Icons.close, size: 18),
@@ -971,7 +969,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               ),
                               TextButton(
                                 onPressed: () {
-                                  _search.clear();
                                   _home.reset();
                                 },
                                 child: const Text('Reset filters'),

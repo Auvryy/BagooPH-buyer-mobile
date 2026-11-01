@@ -76,6 +76,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(MainApp(repository: repository));
       await press(tester, find.text('Browse the marketplace'));
+      await press(tester, find.byKey(const ValueKey('buyer-header-search')));
       await tester.enterText(find.byType(TextField).first, 'tea & coffee');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
