@@ -314,11 +314,15 @@ class _ChatPageState extends State<ChatPage> {
     enabled: !_sending && !_accessLost,
     child: Scaffold(
       appBar: AppBar(
+        backgroundColor: BagooTheme.strong,
+        foregroundColor: Colors.white,
         title: Text(
           widget.conversationTitle ??
               mapOf(widget.product['shop'])['name']?.toString() ??
               'Shop chat',
-          style: const TextStyle(fontSize: 16),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
@@ -394,13 +398,34 @@ class _ChatPageState extends State<ChatPage> {
                               ? Alignment.centerRight
                               : Alignment.centerLeft,
                           child: Container(
-                            constraints: const BoxConstraints(maxWidth: 440),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(14),
+                            constraints: BoxConstraints(
+                              maxWidth: min(440.0, max(0.0, box.maxWidth - 64)),
+                            ),
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               color: mine ? BagooTheme.rose : Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: BagooTheme.border),
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(16),
+                                topRight: const Radius.circular(16),
+                                bottomLeft: Radius.circular(mine ? 16 : 4),
+                                bottomRight: Radius.circular(mine ? 4 : 16),
+                              ),
+                              border: Border.all(
+                                color: mine
+                                    ? const Color(0xFFF4C8D2)
+                                    : BagooTheme.line,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x080F172A),
+                                  blurRadius: 6,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,7 +437,10 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                 Text(
                                   message['message']?.toString() ?? '',
-                                  style: const TextStyle(height: 1.6),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    height: 1.5,
+                                  ),
                                 ),
                                 Text(
                                   readableDateTime(message['created_at']),
@@ -460,7 +488,17 @@ class _ChatPageState extends State<ChatPage> {
                       },
                     ),
                   ),
-                  ConstrainedBox(
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x100F172A),
+                          blurRadius: 10,
+                          offset: Offset(0, -2),
+                        ),
+                      ],
+                    ),
                     constraints: BoxConstraints(maxHeight: box.maxHeight * .65),
                     child: SingleChildScrollView(
                       child: Column(
@@ -558,6 +596,7 @@ class _ChatPageState extends State<ChatPage> {
                                 Expanded(
                                   child: TextField(
                                     controller: _text,
+                                    style: const TextStyle(fontSize: 14),
                                     enabled: !_sending && !_accessLost,
                                     minLines: 1,
                                     maxLines: 4,
@@ -573,6 +612,10 @@ class _ChatPageState extends State<ChatPage> {
                                 const SizedBox(width: 8),
                                 IconButton.filled(
                                   tooltip: 'Send message',
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: BagooTheme.strong,
+                                    foregroundColor: Colors.white,
+                                  ),
                                   onPressed: _sending || _loading || _accessLost
                                       ? null
                                       : _send,
@@ -609,28 +652,10 @@ class ChatProductCard extends StatelessWidget {
   final Map<String, dynamic> product;
   @override
   Widget build(BuildContext context) => Material(
-    type: MaterialType.transparency,
-    child: ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      leading: SizedBox.square(
-        dimension: 48,
-        child: RemoteImage(
-          uri: imageUri(repository.session, product['featured_image']),
-          thumbnail: true,
-        ),
-      ),
-      title: Text(
-        product['name']?.toString() ?? 'Product',
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-      ),
-      subtitle: product['price'] == null
-          ? null
-          : Text(pesos(product['price']), style: const TextStyle(fontSize: 12)),
-      trailing: product['slug'] is String
-          ? const Icon(Icons.open_in_new, size: 18)
-          : null,
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(10),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(10),
       onTap: product['slug'] is String
           ? () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -639,6 +664,55 @@ class ChatProductCard extends StatelessWidget {
               ),
             )
           : null,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox.square(
+                dimension: 48,
+                child: RemoteImage(
+                  uri: imageUri(repository.session, product['featured_image']),
+                  thumbnail: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    product['name']?.toString() ?? 'Product',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (product['price'] != null)
+                    Text(
+                      pesos(product['price']),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: BagooTheme.strong,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (product['slug'] is String)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Icon(Icons.chevron_right, size: 20),
+              ),
+          ],
+        ),
+      ),
     ),
   );
 }

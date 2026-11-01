@@ -33,3 +33,7 @@ Product options and shared chips use compact Bagoo styling, the product title an
 ## Search and inbox presentation checkpoint
 
 Search uses a smaller heading and tighter spacing. The inbox now presents each conversation with a compact card, message preview, time and accessible unread count, while retaining the existing account-bound refresh behavior. The buyer updates and discovery selection passed 21 cases with one worker; three focused inbox cases and four responsive synthetic inbox layouts passed after adding long-text coverage. The 375-pixel and enlarged-text renders were inspected, and focused analysis was clean. Conversation detail polish, remaining default-looking controls, live imagery and physical-device review remain open.
+
+## Conversation presentation checkpoint
+
+Conversation detail uses the branded header, compact incoming and outgoing bubbles, and a separated composer. Product references use a custom compact row. Chat and product checks passed 18 cases with one worker, and four responsive synthetic conversation layouts passed; the phone and enlarged-text renders were inspected. Focused analysis was clean. Remaining shared controls, end-to-end verification and physical-device review remain open.
