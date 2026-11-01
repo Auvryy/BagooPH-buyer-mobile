@@ -17,3 +17,13 @@ Device detection succeeded. Owner public configuration passed the Android debug 
 ### Website link compatibility
 
 Five new regression cases initially failed: four explicit website aliases were rejected and an incoming guest Bag alias never opened its native screen. Normalize `/buyer/cart`, `/buyer/checkout`, `/buyer/disputes` and `/buyer/catalog` only after validating the original origin/path. The destination router now uses the parsed canonical URI, preserving query and fragment and existing login gates. All 22 link tests pass after the fix; full static analysis reports no issues. Foreign origins and action URLs remain rejected. Physical installed-link verification remains separate.
+
+### Launcher branding
+
+The installed baseline still used the Flutter launcher icon. Render the existing Bagoo favicon vector into the Android density icons and Apple icon catalog, and provide native adaptive foreground/background and Android 13 themed resources. Apple catalog images have their declared dimensions and opaque RGB channels. Android resource XML parses and the Android integration APK compiles with these resources. Installed launcher resource inspection is recorded with the phone run; iOS compilation is not established on Linux. No new branding was invented.
+
+### Phone control boundary
+
+The owner permits Bagoo-only phone interaction and approved seeded buyer sign-in. Never open other apps, browse personal files or manipulate system settings. Before external taps or captures, verify that Bagoo is the focused package. Android currently rejects shell input with INJECT_EVENTS even after reconnect; the owner is checking the separate OEM security setting. Continue using in-app integration actions, not an attempted privilege escalation. Google selection remains owner-controlled. The existing task timer belongs to a rider session and is left untouched; any buyer time entry must use a measured interval.
+
+The owner enabled the OEM debugging switches; after returning to Bagoo, a guarded shell tap succeeded. External control remains restricted to the Bagoo package. Do not send manual taps while native automated cases are running.
