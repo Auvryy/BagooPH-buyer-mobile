@@ -13,3 +13,7 @@ Start from merged main `565f69d` on `fix/buyer-android-device-acceptance`. The c
 ## Evidence
 
 Device detection succeeded. Owner public configuration passed the Android debug validation. No buyer package was installed at initial detection. Installation and device journeys are in progress.
+
+### Website link compatibility
+
+Five new regression cases initially failed: four explicit website aliases were rejected and an incoming guest Bag alias never opened its native screen. Normalize `/buyer/cart`, `/buyer/checkout`, `/buyer/disputes` and `/buyer/catalog` only after validating the original origin/path. The destination router now uses the parsed canonical URI, preserving query and fragment and existing login gates. All 22 link tests pass after the fix; full static analysis reports no issues. Foreign origins and action URLs remain rejected. Physical installed-link verification remains separate.

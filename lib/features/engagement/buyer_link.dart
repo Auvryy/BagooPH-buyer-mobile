@@ -25,6 +25,15 @@ class BuyerLink {
         )) {
       throw const BackendException('Use a buyer link for this Bagoo service.');
     }
+    // Normalize only the website's explicit read-only buyer aliases after
+    // validating the original origin and path. Keep action URLs unsupported.
+    final canonical = const {
+      '/buyer/cart': '/cart',
+      '/buyer/checkout': '/checkout',
+      '/buyer/disputes': '/buyer-returns',
+      '/buyer/catalog': '/buyer/search',
+    }[uri.path];
+    if (canonical != null) uri = uri.replace(path: canonical);
     final parts = uri.pathSegments;
     if (parts.length == 2 &&
         parts.first == 'reset-password' &&
