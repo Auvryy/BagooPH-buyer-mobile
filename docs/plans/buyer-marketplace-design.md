@@ -69,3 +69,7 @@ The configured debug APK was rebuilt after the compact verification-dialog fix w
 ## Navigation accessibility checkpoint
 
 At a 320-pixel width with enlarged text, synthetic checks confirmed at least 48 logical pixels for header actions, the search field and bottom tabs. A separate 360-pixel check confirmed the selected purchase status meets the same minimum. The selected Home, Messages and purchase status expose button and selected semantics. The two relevant suites passed 25 cases with one worker, and focused analysis was clean. Static color calculations gave 6.21:1 for the strong brand red on white, 4.88:1 for the primary red on white, and 7.58:1 for muted text on white. The app source and APK are unchanged from the verification-fix build; device acceptance remains open.
+
+## Narrow search editing checkpoint
+
+A signed-in 320-pixel preview showed that the three header actions left too little room to read a query while editing. During search editing the field now expands and shows a Done action; notification, Bag and profile controls return when focus leaves. The focus border is visible on the white field. The full sample query was visible in the updated synthetic phone preview, and 91 discovery, app, search and responsive layout cases passed with one worker. Focused analysis was clean. The previous APK predates this change; the updated build and physical review remain open.

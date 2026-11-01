@@ -94,6 +94,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       BuyerEngagementRepository(widget.repository).reportAdvertisement,
     );
     _home.addListener(_homeChanged);
+    _headerSearchFocus.addListener(_headerFocusChanged);
     widget.verificationRequests?.addListener(_showVerification);
     _homeChanged();
     _tab = widget.initialDestination;
@@ -126,11 +127,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _home.removeListener(_homeChanged);
     _home.dispose();
     _headerSearch.dispose();
+    _headerSearchFocus.removeListener(_headerFocusChanged);
     _headerSearchFocus.dispose();
     super.dispose();
   }
 
   void _showVerification() => _openProfileSection('identity');
+
+  void _headerFocusChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void didUpdateWidget(covariant HomePage oldWidget) {
@@ -458,44 +464,62 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(
-                        color: Colors.white,
-                        width: 2,
+                        color: BagooTheme.ink,
+                        width: 1.5,
                       ),
                     ),
                   ),
                 ),
               ),
               actions: [
-                if (_home.user != null)
-                  IconButton(
-                    tooltip:
-                        _notificationCount == null || _notificationCount == 0
-                        ? 'Notifications'
-                        : 'Notifications, $_notificationCount unread',
-                    onPressed: _openNotifications,
-                    icon: Badge(
-                      isLabelVisible:
-                          _notificationCount != null && _notificationCount! > 0,
-                      label: Text(
-                        _notificationCount != null && _notificationCount! > 99
-                            ? '99+'
-                            : '${_notificationCount ?? 0}',
+                if (_headerSearchFocus.hasFocus)
+                  TextButton(
+                    onPressed: _headerSearchFocus.unfocus,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 48),
+                      textStyle: const TextStyle(
+                        fontFamily: 'Plus Jakarta Sans',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
-                      child: const Icon(Icons.notifications_outlined),
                     ),
+                    child: const Text('Done'),
+                  )
+                else ...[
+                  if (_home.user != null)
+                    IconButton(
+                      tooltip:
+                          _notificationCount == null || _notificationCount == 0
+                          ? 'Notifications'
+                          : 'Notifications, $_notificationCount unread',
+                      onPressed: _openNotifications,
+                      icon: Badge(
+                        isLabelVisible:
+                            _notificationCount != null &&
+                            _notificationCount! > 0,
+                        label: Text(
+                          _notificationCount != null && _notificationCount! > 99
+                              ? '99+'
+                              : '${_notificationCount ?? 0}',
+                        ),
+                        child: const Icon(Icons.notifications_outlined),
+                      ),
+                    ),
+                  IconButton(
+                    tooltip: 'Shopping Bag',
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    onPressed: () => _selectTab(1),
                   ),
-                IconButton(
-                  tooltip: 'Shopping Bag',
-                  icon: const Icon(Icons.shopping_bag_outlined),
-                  onPressed: () => _selectTab(1),
-                ),
-                IconButton(
-                  tooltip: _home.user == null ? 'Log In' : 'Your profile',
-                  icon: const Icon(Icons.person_outline_rounded),
-                  onPressed: _home.user == null
-                      ? widget.onLogin
-                      : () => _selectTab(3),
-                ),
+                  IconButton(
+                    tooltip: _home.user == null ? 'Log In' : 'Your profile',
+                    icon: const Icon(Icons.person_outline_rounded),
+                    onPressed: _home.user == null
+                        ? widget.onLogin
+                        : () => _selectTab(3),
+                  ),
+                ],
                 const SizedBox(width: 4),
               ],
             ),

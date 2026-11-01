@@ -358,12 +358,23 @@ void main() {
       expect(find.byTooltip('Shopping Bag'), findsOneWidget);
       expect(find.byTooltip('Your profile'), findsOneWidget);
       final header = find.byKey(const ValueKey('buyer-header-search'));
+      final idleWidth = tester.getSize(header).width;
       await tester.tap(header);
       await tester.pumpAndSettle();
+      expect(tester.getSize(header).width, greaterThan(idleWidth + 20));
+      expect(find.text('Done'), findsOneWidget);
+      expect(find.byTooltip('Notifications'), findsNothing);
       await tester.enterText(header, 'canvas');
       await tester.pump(const Duration(milliseconds: 500));
       await tester.pumpAndSettle();
       expect(repo.searchRequests.last['search'], 'canvas');
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(header).focusNode!.hasFocus, isFalse);
+      expect(tester.widget<TextField>(header).controller!.text, 'canvas');
+      expect(find.byTooltip('Notifications'), findsOneWidget);
+      expect(find.byTooltip('Shopping Bag'), findsOneWidget);
+      expect(find.byTooltip('Your profile'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

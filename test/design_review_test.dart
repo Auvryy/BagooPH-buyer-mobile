@@ -159,6 +159,12 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
     onLogin: () {},
     onLogout: () async {},
   ),
+  'signed-search' => HomePage(
+    repository: repo,
+    initial: homePage(signedIn: true),
+    onLogin: () {},
+    onLogout: () async {},
+  ),
   'shell-search' => HomePage(
     repository: repo,
     onLogin: () {},
@@ -227,6 +233,7 @@ void main() {
   for (final name in [
     'home',
     'signed-home',
+    'signed-search',
     'shell-search',
     'search',
     'product',
@@ -274,9 +281,14 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          if (name == 'shell-search') {
-            await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+          if (name == 'shell-search' || name == 'signed-search') {
+            final search = find.byKey(const ValueKey('buyer-header-search'));
+            await tester.tap(search);
             await tester.pumpAndSettle();
+            if (name == 'signed-search') {
+              await tester.enterText(search, 'wireless headphones');
+              await tester.pumpAndSettle();
+            }
           }
           if (name == 'verification') {
             await tester.tap(
