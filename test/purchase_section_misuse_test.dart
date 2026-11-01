@@ -10,6 +10,51 @@ import 'support/fake_buyer_repository.dart' show buyer;
 import 'support/return_fixtures.dart';
 
 void main() {
+  testWidgets('purchase status tabs scroll and request the selected filter', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = AccountFixtureRepository();
+    addTearDown(repository.session.close);
+    String? requested;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'all',
+            }),
+            onQuery: (status, _) => requested = status,
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final selected = tester.widget<Text>(find.text('All (0)'));
+    expect(selected.style?.color, BagooTheme.strong);
+    final strip = find.byWidgetPredicate(
+      (widget) =>
+          widget is SingleChildScrollView &&
+          widget.scrollDirection == Axis.horizontal,
+    );
+    expect(strip, findsOneWidget);
+    await tester.drag(strip, const Offset(-1500, 0));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Return/Refund (0)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Return/Refund (0)'));
+    await tester.pump();
+    expect(requested, 'return_refund');
+    expect(tester.takeException(), isNull);
+  });
   for (final resume in [true, false]) {
     testWidgets(
       resume

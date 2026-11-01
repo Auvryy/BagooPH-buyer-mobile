@@ -189,23 +189,53 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
         'Review your purchases and follow the recorded parcel journey.',
         Icons.inventory_2_outlined,
       ),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final status in buyerOrderFilters.entries)
-            ChoiceChip(
-              label: Text('${status.value} (${counts[status.key] ?? 0})'),
-              selected: current == status.key,
-              onSelected: busy || widget.loading
-                  ? null
-                  : (_) {
-                      if (!_confirming && ensureBuyerAccess()) {
-                        widget.onQuery(status.key, 1);
-                      }
-                    },
-            ),
-        ],
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final status in buyerOrderFilters.entries)
+              Semantics(
+                button: true,
+                selected: current == status.key,
+                child: InkWell(
+                  onTap: busy || widget.loading
+                      ? null
+                      : () {
+                          if (!_confirming && ensureBuyerAccess()) {
+                            widget.onQuery(status.key, 1);
+                          }
+                        },
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: current == status.key
+                              ? BagooTheme.strong
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      '${status.value} (${counts[status.key] ?? 0})',
+                      style: TextStyle(
+                        color: current == status.key
+                            ? BagooTheme.strong
+                            : BagooTheme.muted,
+                        fontSize: 13,
+                        fontWeight: current == status.key
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
       const SizedBox(height: 24),
       if (widget.loading) const LinearProgressIndicator(),
