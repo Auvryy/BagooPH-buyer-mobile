@@ -37,6 +37,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   late int _identityEpoch;
   String? _updateError;
   bool _refreshing = true, _accessLost = false, _manualRefresh = false;
+  bool _confirmingReceipt = false;
   Map<String, dynamic> get order => mapOf(_page?.props['order']);
   Map<String, dynamic> get claim => mapOf(_page?.props['pickupClaim']);
   @override
@@ -155,6 +156,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     Future<String?> Function() action, {
     bool validate = true,
   }) {
+    if (!mounted) return Future.value(false);
     if (_accessLost ||
         _identityEpoch != widget.repository.session.identityEpoch) {
       setState(() {
@@ -222,29 +224,70 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   }
 
   Future<void> _confirm() async {
-    if (!await confirmAction(
-      context,
-      'Confirm receipt?',
-      'Confirm that you received order #${order['order_number']} and checked its items. This records your receipt and completes the purchase.',
-      'Confirm Received',
-    )) {
+    final openingPage = _page;
+    if (!mounted ||
+        _confirmingReceipt ||
+        busy ||
+        _accessLost ||
+        _identityEpoch != widget.repository.session.identityEpoch ||
+        openingPage == null ||
+        openingPage.props['canConfirmReceipt'] != true ||
+        mapOf(openingPage.props['order'])['id'] != widget.orderId) {
       return;
     }
-    await perform(() async {
-      final page = await widget.repository.session.submit(
-        '/buyer/orders/${widget.orderId}/confirm',
-        {},
-        referer: '/buyer/orders/${widget.orderId}',
-      );
-      _accept(page);
-      if (order['status'] != 'completed') {
-        throw const BackendException(
-          'Receipt confirmation was not confirmed. Refresh the order before trying again.',
-        );
+    final openingEpoch = _identityEpoch;
+    final orderNumber = mapOf(openingPage.props['order'])['order_number'];
+    _confirmingReceipt = true;
+    setState(() {});
+    try {
+      if (!await confirmAction(
+            context,
+            'Confirm receipt?',
+            'Confirm that you received order #$orderNumber and checked its items. This records your receipt and completes the purchase.',
+            'Confirm Received',
+          ) ||
+          !mounted) {
+        return;
       }
-      return mapOf(page.props['flash'])['success']?.toString() ??
-          'Receipt confirmed.';
-    }, validate: false);
+
+      final currentPage = _page;
+      if (_accessLost ||
+          openingEpoch != widget.repository.session.identityEpoch ||
+          currentPage == null ||
+          currentPage.component != 'Buyer/OrderDetail' ||
+          currentPage.props['canConfirmReceipt'] != true ||
+          mapOf(currentPage.props['order'])['id'] != widget.orderId ||
+          currentPage.user?['role'] != 'buyer' ||
+          currentPage.user?['id'] is! num) {
+        if (mounted &&
+            openingEpoch != widget.repository.session.identityEpoch) {
+          setState(() {
+            _clearPrivate();
+            problem =
+                'Your account changed. Reopen this order after signing in.';
+          });
+        }
+        return;
+      }
+
+      await perform(() async {
+        final page = await widget.repository.session.submit(
+          '/buyer/orders/${widget.orderId}/confirm',
+          {},
+          referer: '/buyer/orders/${widget.orderId}',
+        );
+        _accept(page);
+        if (order['status'] != 'completed') {
+          throw const BackendException(
+            'Receipt confirmation was not confirmed. Refresh the order before trying again.',
+          );
+        }
+        return mapOf(page.props['flash'])['success']?.toString() ??
+            'Receipt confirmed.';
+      }, validate: false);
+    } finally {
+      if (mounted) setState(() => _confirmingReceipt = false);
+    }
   }
 
   Future<void> _pickup() async {
@@ -283,7 +326,11 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     final tracking = mapOf(order['tracking']);
     final userCan = _page?.props['canUsePortal'] == true;
     final canAct =
-        !busy && !_accessLost && problem == null && _updateError == null;
+        !busy &&
+        !_confirmingReceipt &&
+        !_accessLost &&
+        problem == null &&
+        _updateError == null;
     return ForegroundRefresh(
       controller: _updates,
       enabled: !busy && !_accessLost,

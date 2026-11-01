@@ -69,3 +69,7 @@ The first 25 focused purchase/profile/helper cases pass. Added normal and expire
 The owner requested lower RAM use. Run one heavy verification job at a time; use a single Flutter test worker and perform analysis/builds sequentially. The overlapping 815-case full-suite run was deliberately interrupted to release memory and is cancelled, not passing, regardless of the CLI exit code. Do not stop another session's rider checks or shared services. Final full-suite/build evidence must be gathered within this limit.
 
 Final purchase-action selection: all 27 purchase/profile/helper cases pass with one test worker, including both valid and expired receipt decisions. Analysis is clean after the test run. The resource-limited full suite and current-source Android build are still outstanding; the earlier 815-case full run was cancelled. Keep the broader audit and physical acceptance open.
+
+### Order receipt dialog re-entry
+
+A direct rapid callback reproduction opened two receipt dialogs for one order. The order detail now latches the decision before showing its dialog, rechecks session and receipt eligibility after confirmation, clears private order content if the session changed, and ignores delayed actions after disposal. The focused order-update suite passes all eight cases, including one-dialog/one-submit and session-change/no-submit coverage. Static analysis is clean. Full-suite, current Android build and physical acceptance remain outstanding.

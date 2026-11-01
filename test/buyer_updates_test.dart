@@ -52,6 +52,7 @@ WebPage orderPage({String status = 'Preparing', int owner = 7}) =>
 
 class OrderActionSession extends ControlledWebSession {
   int submissions = 0;
+  final submissionPaths = <String>[];
   @override
   Future<WebPage> submit(
     String path,
@@ -60,7 +61,7 @@ class OrderActionSession extends ControlledWebSession {
     String? referer,
     List<UploadPart>? files,
   }) async {
-    expect(path, '/buyer/orders/11/confirm');
+    submissionPaths.add(path);
     submissions++;
     return orderPage(status: 'Completed');
   }
@@ -246,6 +247,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(session.submissions, 1);
+      expect(session.submissionPaths, ['/buyer/orders/11/confirm']);
       expect(find.text('Completed'), findsOneWidget);
       session.onPage = (_) async => orderPage(status: 'Completed');
       pending.complete(delivered);
@@ -257,4 +259,89 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('receipt confirmation opens one decision for rapid taps', (
+    tester,
+  ) async {
+    final session = OrderActionSession();
+    addTearDown(session.close);
+    final delivered = orderPage(status: 'Delivered');
+    delivered.props['canConfirmReceipt'] = true;
+    session.onPage = (_) async => delivered;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final onPressed = tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Confirm Received'),
+        )
+        .onPressed!;
+    onPressed();
+    onPressed();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(session.submissions, 0);
+    final dialogConfirm = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.widgetWithText(FilledButton, 'Confirm Received'),
+    );
+    expect(dialogConfirm, findsOneWidget);
+    tester.widget<FilledButton>(dialogConfirm).onPressed!();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(session.submissions, 1);
+    expect(session.submissionPaths, ['/buyer/orders/11/confirm']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('receipt confirmation stops after the buyer session changes', (
+    tester,
+  ) async {
+    final session = OrderActionSession();
+    addTearDown(session.close);
+    final delivered = orderPage(status: 'Delivered');
+    delivered.props['canConfirmReceipt'] = true;
+    session.onPage = (_) async => delivered;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderDetailPage(
+          repository: ProfileRepository(BuyerRepository(session)),
+          orderId: 11,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm Received'));
+    await tester.pumpAndSettle();
+
+    session.clear();
+    final dialogConfirm = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.widgetWithText(FilledButton, 'Confirm Received'),
+    );
+    tester.widget<FilledButton>(dialogConfirm).onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(session.submissions, 0);
+    expect(find.text('Order #TEST-11'), findsNothing);
+    expect(
+      find.textContaining('Confirm that you received order #TEST-11'),
+      findsNothing,
+    );
+    expect(
+      find.text('Your account changed. Reopen this order after signing in.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
