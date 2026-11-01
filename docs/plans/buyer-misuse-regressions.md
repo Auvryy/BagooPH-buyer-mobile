@@ -49,7 +49,7 @@ Collections: reproduced six baseline failures across Saved Products and Followed
 
 A further two reproduced failures covered removal requests that fail after the session changes. These now clear the previous private rows as well, and obsolete controls cannot submit after access loss. All twelve collection cases pass in the real Linux runner, as part of a passing 25-case native form/lifecycle/checkout run.
 
-Product detail: reproduced an Add to Bag response restoring the previous buyer's page and success message after the session changed. Product actions now stay tied to the session that loaded the page; late Add to Bag, Save and sale-reminder replies are discarded and the current product is reloaded. Six focused product foreground cases pass, along with product widgets (14), product/checkout layout (8), cached catalogue (4) and Bag (7). The current full isolated suite passes 831 cases with one worker, and static analysis is clean. Android build and physical-device/provider acceptance remain open.
+Product detail: reproduced an Add to Bag response restoring the previous buyer's page and success message after the session changed. Product actions now stay tied to the session that loaded the page; late Add to Bag, Save and sale-reminder replies are discarded and the current product is reloaded. Six focused product foreground cases pass, along with product widgets (14), product/checkout layout (8), cached catalogue (4) and Bag (7). The current full isolated suite passes 831 cases with one worker, and static analysis is clean. The configured Android debug APK built; installation, physical-device journeys and provider acceptance remain open after ADB shell and install timeouts.
 
 
 ## Native verification and next review

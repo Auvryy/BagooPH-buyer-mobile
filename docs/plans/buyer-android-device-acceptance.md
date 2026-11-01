@@ -85,3 +85,7 @@ After the receipt-dialog and order-scope changes, `flutter test --no-pub --concu
 ### Product detail session-bound actions
 
 A delayed Add to Bag response reproduced the previous buyer's product state and success message reappearing after session expiry. Product detail now binds mutations and Bag destinations to the page's opening account, rejects late Add to Bag, Save and sale-reminder replies, and reloads the current session's product data. Regression coverage verifies all three delayed replies. The final one-worker full run passes 831 isolated tests; static analysis reports no issues. No phone, screen-control, Android build or provider checks were performed in this slice. Device and provider acceptance remain open.
+
+### Configured Android installation attempt
+
+The owner requested installation and physical testing. The public Android debug configuration validates, and a current-source debug APK built successfully at `build/app/outputs/flutter-apk/app-debug.apk` with Gradle limited to one worker. The build emitted an SDK XML version warning but completed. ADB continues to list the Xiaomi, while bounded `getprop` and package-path shell reads time out. One `adb install -r` attempt ended with timeout code 124 without a success/error response, so the install state is unknown and no launch or device test is claimed. No ADB server reset, screen capture, manual input or other-app interaction was performed. Resolve the stalled device shell before retrying install or native tests.
