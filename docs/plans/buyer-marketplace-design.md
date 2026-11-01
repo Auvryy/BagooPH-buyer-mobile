@@ -49,3 +49,7 @@ The horizontal status strip reveals the selected status when the section opens o
 ## Editable search header checkpoint
 
 The red header is now the actual editable search field; the embedded results page no longer duplicates it. Search preserves the draft and filter context, ignores cursor-only changes, and applies a filter request received while hidden when the page reopens. Single-page catalogues no longer show disabled pagination controls. Thirty-eight focused discovery, authentication, search and catalogue cases passed with one worker, followed by four responsive embedded-search layouts and a narrow enlarged-text check; synthetic phone and landscape renders were inspected. Whole-project analysis was clean. Before this final search change, the full isolated suite passed 853 cases and a constrained Android debug build succeeded; both need refreshing for the current source. Physical-device review remains open.
+
+## Regression and signed-in header checkpoint
+
+The full isolated suite passed 861 cases with one worker at the editable-header checkpoint, and a configured Android debug APK built with a 1.5 GB Gradle heap and one worker. Whole-project analysis was clean. A signed-in 320-pixel preview then revealed a truncated search prompt; the prompt was shortened, 28 focused discovery and app cases passed, and the updated signed-in preview was inspected. The current source still needs a refreshed APK and physical-device review.

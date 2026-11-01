@@ -138,6 +138,12 @@ class ReviewRepository extends FakeBuyerRepository {
 
 Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
   'home' => HomePage(repository: repo, onLogin: () {}, onLogout: () async {}),
+  'signed-home' => HomePage(
+    repository: repo,
+    initial: homePage(signedIn: true),
+    onLogin: () {},
+    onLogout: () async {},
+  ),
   'shell-search' => HomePage(
     repository: repo,
     onLogin: () {},
@@ -204,6 +210,7 @@ void main() {
   );
   for (final name in [
     'home',
+    'signed-home',
     'shell-search',
     'search',
     'product',

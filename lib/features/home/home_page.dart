@@ -418,8 +418,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     color: BagooTheme.ink,
                   ),
                   decoration: InputDecoration(
-                    labelText: 'Search products',
-                    hintText: 'Search products',
+                    labelText: 'Search',
+                    hintText: 'Search',
                     labelStyle: const TextStyle(
                       fontFamily: 'Plus Jakarta Sans',
                       fontSize: 13,

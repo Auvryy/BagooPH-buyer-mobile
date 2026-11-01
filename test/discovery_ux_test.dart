@@ -247,6 +247,48 @@ void main() {
     },
   );
 
+  testWidgets(
+    'signed-in header keeps search and actions usable on a narrow screen',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final repo = FakeBuyerRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: HomePage(
+            repository: repo,
+            initial: homePage(signedIn: true),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Notifications'), findsOneWidget);
+      expect(find.byTooltip('Shopping Bag'), findsOneWidget);
+      expect(find.byTooltip('Your profile'), findsOneWidget);
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      await tester.tap(header);
+      await tester.pumpAndSettle();
+      await tester.enterText(header, 'canvas');
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last['search'], 'canvas');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('search focus does not open the keyboard after switching tabs', (
     tester,
   ) async {
@@ -371,9 +413,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
     await tester.pumpAndSettle();
-    final search = find.byWidgetPredicate(
-      (w) => w is TextField && w.decoration?.labelText == 'Search products',
-    );
+    final search = find.byKey(const ValueKey('buyer-header-search'));
     await tester.enterText(search, 'canvas tote');
     for (final scene in [
       (const Size(900, 768), 1.4),
