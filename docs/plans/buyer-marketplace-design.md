@@ -73,3 +73,7 @@ At a 320-pixel width with enlarged text, synthetic checks confirmed at least 48 
 ## Narrow search editing checkpoint
 
 A signed-in 320-pixel preview showed that the three header actions left too little room to read a query while editing. During search editing the field now expands and shows a Done action; notification, Bag and profile controls return when focus leaves. The focus border is visible on the white field. The full sample query was visible in the updated synthetic phone preview, and 91 discovery, app, search and responsive layout cases passed with one worker. Focused analysis was clean. The previous APK predates this change; the updated build and physical review remain open.
+
+## Current narrow-search Android build
+
+After the narrow search editing change, 91 discovery, app, search and responsive layout cases passed with one worker, the signed-in 320-pixel preview was inspected, and whole-project analysis was clean. The configured debug APK was rebuilt with a 1.5 GB Gradle heap cap and one worker; package inspection confirmed the buyer label and adaptive launcher icon resource. The build succeeded with the existing SDK XML version warning. The earlier full isolated run passed 861 cases before this change. Bagoo was not confirmed in the phone foreground, so this APK has not been installed for the device review.
