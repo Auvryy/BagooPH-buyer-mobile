@@ -19,12 +19,14 @@ class BagPage extends StatefulWidget {
     super.key,
     required this.repository,
     this.voucherCode,
+    this.account,
     this.initialSelection = const [],
     this.active = true,
     this.onBrowse,
   });
   final BuyerRepository repository;
   final String? voucherCode;
+  final BuyerAccountScope? account;
   final List<int> initialSelection;
   final bool active;
   final VoidCallback? onBrowse;
@@ -75,13 +77,20 @@ class _BagContentsState extends State<_BagContents>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _checkoutAccount = BuyerAccountScope(widget.repository.session);
+    _checkoutAccount =
+        (widget.settings.account ??
+                BuyerAccountScope(widget.repository.session))
+            .fork();
     _bag = BagController(
       widget.repository,
       initialSelection: widget.initialSelection,
     );
     _bag.addListener(_onIdle);
-    _bag.load();
+    if (_checkoutAccount.isCurrent) {
+      _bag.load();
+    } else {
+      _bag.invalidate(notify: false);
+    }
   }
 
   void _onIdle() {
@@ -117,7 +126,9 @@ class _BagContentsState extends State<_BagContents>
 
   bool _ensureAccount({bool notify = true}) {
     if (!mounted) return false;
-    if (!identical(_bag.repository, widget.repository)) {
+    if (!identical(_bag.repository, widget.repository) ||
+        !_checkoutAccount.isCurrent ||
+        !identical(_checkoutAccount.session, widget.repository.session)) {
       _bag.invalidate(notify: notify);
     }
     final current = _bag.ensureCurrent(notify: notify);

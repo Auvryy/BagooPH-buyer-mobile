@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/web_session.dart';
+import '../../core/buyer_account_scope.dart';
 import '../checkout/bag_page.dart';
 import '../products/product_widgets.dart';
 import '../home/product_card.dart';
@@ -11,18 +12,21 @@ class VouchersSection extends StatelessWidget {
   const VouchersSection({
     super.key,
     required this.repository,
+    required this.account,
     required this.page,
     required this.onQuery,
     required this.reload,
     this.loading = false,
   });
   final ProfileRepository repository;
+  final BuyerAccountScope account;
   final WebPage page;
   final void Function(String tab, int page) onQuery;
   final Future<void> Function() reload;
   final bool loading;
   @override
   Widget build(BuildContext context) {
+    var opening = false;
     final collection = mapOf(page.props['voucherCollection']);
     final current = collection['tab']?.toString() ?? 'available';
     final counts = mapOf(collection['counts']);
@@ -94,6 +98,7 @@ class VouchersSection extends StatelessWidget {
                       ),
                       offer: offer,
                       repository: repository.buyer,
+                      account: account,
                       canSave:
                           page.props['canUsePortal'] == true &&
                           (!loading) &&
@@ -102,14 +107,29 @@ class VouchersSection extends StatelessWidget {
                       onSaved: reload,
                       onUse: offer['eligible'] == false || loading
                           ? null
-                          : () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => BagPage(
-                                  repository: repository.buyer,
-                                  voucherCode: offer['code']?.toString(),
-                                ),
-                              ),
-                            ),
+                          : () async {
+                              if (!context.mounted ||
+                                  !account.isCurrent ||
+                                  loading ||
+                                  opening ||
+                                  ModalRoute.of(context)?.isCurrent != true) {
+                                return;
+                              }
+                              opening = true;
+                              try {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => BagPage(
+                                      repository: repository.buyer,
+                                      account: account,
+                                      voucherCode: offer['code']?.toString(),
+                                    ),
+                                  ),
+                                );
+                              } finally {
+                                opening = false;
+                              }
+                            },
                     ),
                     if (offer['unavailable_reason'] != null)
                       Text(
