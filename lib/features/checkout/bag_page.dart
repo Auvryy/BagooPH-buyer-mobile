@@ -86,7 +86,8 @@ class _BagContentsState extends State<_BagContents>
       initialSelection: widget.initialSelection,
     );
     _bag.addListener(_onIdle);
-    if (_checkoutAccount.isCurrent) {
+    if (_checkoutAccount.isCurrent &&
+        identical(_checkoutAccount.session, widget.repository.session)) {
       _bag.load();
     } else {
       _bag.invalidate(notify: false);

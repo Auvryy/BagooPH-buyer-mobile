@@ -186,4 +186,23 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+  testWidgets(
+    'a Bag cannot read through a different repository session than its parent',
+    (tester) async {
+      final other = ControlledWebSession();
+      addTearDown(other.close);
+      final account = BuyerAccountScope(other);
+      session.onPage = (_) async => const WebPage('Cart/Index', {
+        'auth': {'user': buyer},
+        'items': [],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BagPage(repository: repository, account: account),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(session.pageRequests, isEmpty);
+    },
+  );
 }

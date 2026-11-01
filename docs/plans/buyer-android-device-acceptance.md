@@ -41,3 +41,9 @@ Four initial valid regression cases reproduced retained private voucher rows on 
 The normal configured app with Bagoo icons and link fixes was reinstalled successfully after the interrupted live run. It does not yet contain the profile follow-up. The device remained physically connected according to the owner. Earlier ADB reconnect commands were initiated by this agent and interrupted the driver; do not attribute those interruptions to the owner's cable. Stop connection resets and framebuffer captures. ADB still lists the device but a bounded Bagoo-process query timed out. No other phone app or personal file is in scope.
 
 The new aggregate Android runner and opted-in live smoke runner are prepared and statically checked. The aggregate has not yet run on the phone; the live smoke driver did not complete. A later UI-tree read showed the seeded buyer profile, which is an observation rather than a completed test pass. Google, actual permissions and the remaining physical journeys still require evidence.
+
+### Coding continuation
+
+The owner deferred further phone interaction and requested coding first. Leave the ADB server, connection and phone alone. The initial full run that began before the final identity-header change finished with 801 passing cases and that header case failing; do not report it as a passing suite. The final focused 119-case selection passed on the updated source.
+
+One additional case reproduced a Bag's first read starting through a different repository session from its supplied parent account. The initial read now requires both the inherited scope and matching session. All ten root cases pass and analysis is clean. A fresh full run on the final source is in progress in `.git/buyer-current-full.log`; verify its actual process/result before restarting.
