@@ -80,4 +80,8 @@ A synthetic cancellation form still sent `/buyer/orders/11/cancel` after its buy
 
 ### November 1 full regression checkpoint
 
-After the receipt-dialog and order-scope changes, `flutter test --no-pub --concurrency=1` passed all 828 isolated tests. `flutter analyze --no-pub` reports no issues. The current-source configured Android build and installed-app/device acceptance remain outstanding; physical phone work is deferred at the owner's request. No website or live shopping data was changed.
+After the receipt-dialog and order-scope changes, `flutter test --no-pub --concurrency=1` passed 828 isolated tests. `flutter analyze --no-pub` reported no issues. The current-source configured Android build and installed-app/device acceptance remained outstanding; physical phone work was deferred at the owner's request. No website or live shopping data was changed.
+
+### Product detail session-bound actions
+
+A delayed Add to Bag response reproduced the previous buyer's product state and success message reappearing after session expiry. Product detail now binds mutations and Bag destinations to the page's opening account, rejects late Add to Bag, Save and sale-reminder replies, and reloads the current session's product data. Regression coverage verifies all three delayed replies. The final one-worker full run passes 831 isolated tests; static analysis reports no issues. No phone, screen-control, Android build or provider checks were performed in this slice. Device and provider acceptance remain open.
