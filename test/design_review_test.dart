@@ -220,7 +220,13 @@ void main() {
                 .first;
             expect(
               tester.getRect(price).bottom,
-              lessThan(tester.getRect(find.byType(NavigationBar)).top),
+              lessThan(
+                tester
+                    .getRect(
+                      find.byKey(const ValueKey('buyer-bottom-navigation')),
+                    )
+                    .top,
+              ),
             );
           }
           if (name == 'home' && scene.$1.width == 1024 && scene.$2 == 1) {

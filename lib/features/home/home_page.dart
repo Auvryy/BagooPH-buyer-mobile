@@ -28,6 +28,8 @@ import '../tracking/parcel_tracking_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
+import '../profile/profile_repository.dart';
+import '../profile/inbox_page.dart';
 import '../../core/buyer_actions.dart';
 
 class HomePage extends StatefulWidget {
@@ -56,6 +58,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
+  late final ProfileRepository _inboxRepository;
   late final BuyerAdvertisementSession _advertisements;
   final _search = TextEditingController();
   int _tab = 0;
@@ -81,6 +84,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
+    _inboxRepository = ProfileRepository(widget.repository);
     _advertisements = BuyerAdvertisementSession(
       BuyerEngagementRepository(widget.repository).reportAdvertisement,
     );
@@ -349,21 +353,48 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _home,
     builder: (context, _) => Scaffold(
-      appBar: _tab == 1
+      appBar: _tab == 1 || (_tab == 4 && _home.user != null)
           ? null
           : AppBar(
-              toolbarHeight: 64,
-              title: const FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Brand(size: 32),
+              backgroundColor: BagooTheme.strong,
+              foregroundColor: Colors.white,
+              toolbarHeight: 60,
+              titleSpacing: 12,
+              title: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  key: const ValueKey('buyer-header-search'),
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _openSearch(),
+                  child: const SizedBox(
+                    height: 42,
+                    child: Row(
+                      children: [
+                        SizedBox(width: 12),
+                        Icon(Icons.search, color: BagooTheme.muted, size: 21),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Search products',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: BagooTheme.muted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
               actions: [
                 if (_home.user != null)
                   IconButton(
-                    tooltip: _notificationCount == null
-                        ? 'Notifications'
-                        : _notificationCount == 0
+                    tooltip:
+                        _notificationCount == null || _notificationCount == 0
                         ? 'Notifications'
                         : 'Notifications, $_notificationCount unread',
                     onPressed: _openNotifications,
@@ -383,28 +414,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   icon: const Icon(Icons.shopping_bag_outlined),
                   onPressed: () => _selectTab(1),
                 ),
-                if (_home.user == null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: TextButton(
-                      onPressed: widget.onLogin,
-                      child: const Text('Log In'),
-                    ),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: IconButton(
-                      tooltip: 'Your profile',
-                      onPressed: () => _selectTab(3),
-                      icon: const Icon(Icons.person_outline_rounded),
-                    ),
-                  ),
+                IconButton(
+                  tooltip: _home.user == null ? 'Log In' : 'Your profile',
+                  icon: const Icon(Icons.person_outline_rounded),
+                  onPressed: _home.user == null
+                      ? widget.onLogin
+                      : () => _selectTab(3),
+                ),
+                const SizedBox(width: 4),
               ],
-              bottom: const PreferredSize(
-                preferredSize: Size.fromHeight(1),
-                child: Divider(height: 1),
-              ),
             ),
       body: SafeArea(
         top: false,
@@ -462,6 +480,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           )
                         else
                           const SizedBox.shrink(),
+                        if (_visited.contains(4))
+                          _home.user == null
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.forum_outlined,
+                                          size: 44,
+                                          color: BagooTheme.strong,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        const Text(
+                                          'Sign in to see your messages',
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        FilledButton(
+                                          onPressed: widget.onLogin,
+                                          child: const Text('Log In'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : InboxPage(
+                                  key: ValueKey(
+                                    'buyer-inbox-${_home.user?['id']}-${widget.repository.session.identityEpoch}',
+                                  ),
+                                  repository: _inboxRepository,
+                                )
+                        else
+                          const SizedBox.shrink(),
                       ].indexed
                       .map(
                         (tab) =>
@@ -472,37 +525,84 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _selectTab,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded, color: BagooTheme.strong),
-            label: 'Home',
+      bottomNavigationBar: SafeArea(
+        key: const ValueKey('buyer-bottom-navigation'),
+        top: false,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .08),
+                blurRadius: 12,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.shopping_bag_outlined),
-            selectedIcon: Icon(
-              Icons.shopping_bag_rounded,
-              color: BagooTheme.strong,
-            ),
-            label: 'Bag',
+          child: Row(
+            children: [
+              _bottomItem(0, Icons.home_outlined, Icons.home_rounded, 'Home'),
+              _bottomItem(
+                1,
+                Icons.shopping_bag_outlined,
+                Icons.shopping_bag_rounded,
+                'Bag',
+              ),
+              _bottomItem(
+                4,
+                Icons.forum_outlined,
+                Icons.forum_rounded,
+                'Messages',
+              ),
+              _bottomItem(
+                3,
+                Icons.person_outline_rounded,
+                Icons.person_rounded,
+                'Profile',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search, color: BagooTheme.strong),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded, color: BagooTheme.strong),
-            label: 'Profile',
-          ),
-        ],
+        ),
       ),
     ),
   );
+
+  Widget _bottomItem(
+    int tab,
+    IconData icon,
+    IconData selectedIcon,
+    String label,
+  ) {
+    final selected = _tab == tab;
+    final color = selected ? BagooTheme.strong : BagooTheme.muted;
+    return Expanded(
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: InkWell(
+          onTap: () => _selectTab(tab),
+          child: SizedBox(
+            height: 62,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(selected ? selectedIcon : icon, color: color, size: 23),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _browseTools({required bool roomy}) {
     final search = BrowseSearchField(

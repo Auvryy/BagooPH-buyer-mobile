@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme.dart';
 import '../../core/web_session.dart';
 import '../../core/foreground_refresh.dart';
 import '../../core/widgets.dart';
@@ -153,6 +154,8 @@ class _InboxPageState extends State<InboxPage> {
       enabled: !_accessLost,
       child: Scaffold(
         appBar: AppBar(
+          backgroundColor: BagooTheme.strong,
+          foregroundColor: Colors.white,
           title: const Text('Store & Courier Messages'),
           actions: [
             IconButton(

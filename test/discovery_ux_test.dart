@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
+import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/catalogue_loading.dart';
 import 'package:bagoo_buyer_mobile/features/home/browse_controls.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
@@ -39,12 +41,89 @@ Future<void> showFirstProduct(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+class NavigationSession extends FakeSession {
+  int inboxReads = 0;
+
+  @override
+  Future<WebPage> page(String path, {bool bootstrap = false}) async {
+    if (path == '/buyer/messages') {
+      inboxReads++;
+      return const WebPage('Buyer/Messages', {
+        'auth': {'user': buyer},
+        'conversations': [],
+      });
+    }
+    return super.page(path, bootstrap: bootstrap);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     await (FontLoader(
       'Plus Jakarta Sans',
     )..addFont(rootBundle.load('assets/fonts/PlusJakartaSans.ttf'))).load();
+  });
+
+  testWidgets('header search and guest messages remain reachable', (
+    tester,
+  ) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    var loginCalls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(),
+          onLogin: () => loginCalls++,
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Messages'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in to see your messages'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Log In'));
+    expect(loginCalls, 1);
+    await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('messages tab loads the buyer inbox only while active', (
+    tester,
+  ) async {
+    final session = NavigationSession();
+    final repo = BuyerRepository(session);
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(signedIn: true),
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(session.inboxReads, 0);
+    await tester.tap(find.text('Messages'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InboxPage), findsOneWidget);
+    expect(session.inboxReads, 1);
+    await tester.tap(find.text('Home').last);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 20));
+    expect(session.inboxReads, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(

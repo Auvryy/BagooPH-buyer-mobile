@@ -17,3 +17,7 @@
 3. Messaging presentation, shared component polish, responsive and accessibility verification.
 
 Use focused widget tests and static analysis, then inspect representative phone layouts. Keep physical and provider limitations explicit.
+
+## Navigation checkpoint
+
+The home shell now uses a red search header and a compact custom bottom bar with Messages. Guest messages lead to sign-in; signed-in messages use the existing account-bound inbox, which pauses foreground reads when hidden. Search remains a retained destination for existing links and filters. Discovery and design-review widget suites passed 41 cases with one worker, including guest access, inbox visibility, narrow layouts, landscape, enlarged text, and tablet layouts; focused analysis was clean. Product, Bag, verification guidance, messaging polish, and physical-device review remain open.
