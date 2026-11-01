@@ -134,6 +134,8 @@ class FakeBuyerRepository extends BuyerRepository {
     submittedOrder = values;
     if (orderHandler != null) return orderHandler!(values);
     return const WebPage('Buyer/Profile', {
+      'auth': {'user': buyer},
+      'user': buyer,
       'flash': {'success': 'Order #TEST-1 successfully placed.'},
       'orders': {'data': []},
     });
@@ -276,11 +278,14 @@ WebPage productPage({bool signedIn = false, Map<String, dynamic>? override}) =>
       'relatedProducts': [],
       'shopOffers': [],
     });
-WebPage checkoutPage() => const WebPage('Checkout/Index', {
+String checkoutFixtureToken([int version = 2]) =>
+    'v$version.${'a' * 64}.${'b' * 64}';
+
+WebPage checkoutPage() => WebPage('Checkout/Index', {
   'logisticsCompanies': [
     {'id': 41, 'name': 'Test delivery company'},
   ],
-  'checkoutToken': 'test-checkout-token',
+  'checkoutToken': checkoutFixtureToken(),
   'auth': {'user': buyer},
   'user': buyer,
   'items': [

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/web_session.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
 import '../../core/widgets.dart';
 import '../products/product_widgets.dart';
@@ -23,11 +24,23 @@ class IdentitySection extends StatefulWidget {
   State<IdentitySection> createState() => _IdentitySectionState();
 }
 
-class _IdentitySectionState extends ProfileFormState<IdentitySection> {
+class _IdentitySectionState extends BuyerProfileFormState<IdentitySection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
   final _value = TextEditingController(), _reason = TextEditingController();
   final _files = <String, UploadPart>{};
   String _field = 'birthday';
   bool _conflict = false;
+  @override
+  void clearBuyerDraft() {
+    _files.clear();
+    _value.clear();
+    _reason.clear();
+    _conflict = false;
+  }
+
   Map<String, dynamic> get user => mapOf(widget.page.props['user']);
   Map<String, dynamic> get subject =>
       mapOf(mapOf(widget.page.props['identityCorrection'])['subject']);
@@ -42,20 +55,27 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
   }
 
   void _resetValue() {
+    if (!choices.any((choice) => choice['key'] == _field)) {
+      _field = choices.firstOrNull?['key']?.toString() ?? '';
+    }
     _value.text = mapOf(subject['values'])[_field]?.toString() ?? '';
   }
 
   @override
   void didUpdateWidget(IdentitySection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!hasBuyerAccess) return;
     final previous = mapOf(
       mapOf(oldWidget.page.props['identityCorrection'])['subject'],
     )['source_token'];
-    if (previous != subject['source_token']) {
+    final tokenChanged = previous != subject['source_token'];
+    if (tokenChanged || !choices.any((choice) => choice['key'] == _field)) {
       _resetValue();
-      _files.clear();
-      _conflict = false;
-      success = 'Recorded identity details changed. Review the current values before requesting a correction.';
+      if (tokenChanged) {
+        _files.clear();
+        _conflict = false;
+        success = 'Recorded identity details changed. Review the current values before requesting a correction.';
+      }
     }
   }
 
@@ -68,19 +88,40 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
 
   Future<void> _pick(String key) async => perform(() async {
     final file = await pickUpload(key);
+    checkBuyerAccount();
     if (file != null && mounted) setState(() => _files[key] = file);
     return null;
   }, validate: false);
-  void _view(String url, String title) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => PrivateDocumentPage(
-        repository: widget.repository,
-        path: url,
-        title: title,
+  void _view(String url, String title) {
+    if (!ensureBuyerAccess()) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PrivateDocumentPage(
+          repository: widget.repository,
+          path: url,
+          title: title,
+          account: accountScope,
+        ),
       ),
-    ),
-  );
+    );
+  }
+
+  void _application() {
+    if (!ensureBuyerAccess()) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _ApplicationEditor(
+          repository: widget.repository,
+          page: widget.page,
+          onSaved: widget.onChanged,
+          account: accountScope,
+        ),
+      ),
+    );
+  }
+
   Future<void> _date() async {
+    if (!ensureBuyerAccess()) return;
     final now = DateTime.now();
     final initial =
         DateTime.tryParse(_value.text) ??
@@ -93,25 +134,59 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
       firstDate: DateTime(1900),
       lastDate: now,
     );
+    if (!ensureBuyerAccess()) return;
     if (result != null && mounted) {
       setState(() => _value.text = result.toIso8601String().split('T').first);
     }
   }
 
   Future<void> _submit() async {
+    if (_conflict) return;
     await perform(() async {
+      final token = subject['source_token'];
+      final value = _value.text.trim();
+      if (token is! String ||
+          RegExp(r'^[a-f0-9]{64}$').stringMatch(token) != token ||
+          !choices.any((choice) => choice['key'] == _field)) {
+        throw const BackendException(
+          'The identity form could not be confirmed. Reload your current profile before requesting a correction.',
+        );
+      }
+      if (value ==
+          (mapOf(subject['values'])[_field]?.toString().trim() ?? '')) {
+        throw const BackendException(
+          'Change the reviewed detail before requesting a correction.',
+        );
+      }
+      if (selected['type'] == 'date') {
+        final date = DateTime.tryParse(value);
+        final today = DateTime.now().toUtc().add(const Duration(hours: 8));
+        final day = DateTime(today.year, today.month, today.day);
+        if (date == null ||
+            date.toIso8601String().split('T').first != value ||
+            !date.isBefore(day)) {
+          throw const BackendException(
+            'Choose a real birth date before today.',
+          );
+        }
+      }
+      final options = selected['options'];
+      if (options is List && options.isNotEmpty && !options.contains(value)) {
+        throw const BackendException('Choose an available corrected value.');
+      }
       try {
         final result = await widget.repository.json(
           '/account/identity-corrections',
           {
-            'source_token': subject['source_token'],
+            'source_token': token,
             'shop_id': subject['shop_id'],
-            'changes': {_field: _value.text.trim()},
+            'changes': {_field: value},
             'reason': _reason.text.trim(),
           },
           files: _files.values.toList(),
         );
-        if (result['id'] is! num) {
+        checkBuyerAccount();
+        if (result['id'] is! int || (result['id'] as int) < 1) {
           throw const BackendException(
             'The correction request was not confirmed.',
           );
@@ -165,17 +240,7 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
         )['can_correct'] ==
         true)
       OutlinedButton.icon(
-        onPressed: busy
-            ? null
-            : () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => _ApplicationEditor(
-                    repository: widget.repository,
-                    page: widget.page,
-                    onSaved: widget.onChanged,
-                  ),
-                ),
-              ),
+        onPressed: busy ? null : _application,
         icon: const Icon(Icons.edit_note),
         label: const Text('Update application details'),
       ),
@@ -196,6 +261,7 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
               {},
               files: [_files['id_document']!],
             );
+            checkBuyerAccount(result: result);
             if (mounted) {
               _files.clear();
               widget.onChanged(result);
@@ -220,6 +286,7 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
         Icons.edit_note,
       ),
       DropdownButtonFormField<String>(
+        key: ValueKey(Object.hashAll(choices.map((choice) => choice['key']))),
         initialValue: _field,
         isExpanded: true,
         decoration: const InputDecoration(labelText: 'Detail to correct'),
@@ -231,11 +298,6 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
                 choice['label'].toString(),
                 overflow: TextOverflow.ellipsis,
               ),
-            ),
-          if (!choices.any((f) => f['key'] == 'birthday'))
-            const DropdownMenuItem(
-              value: 'birthday',
-              child: Text('Birth date'),
             ),
         ],
         onChanged: busy || _conflict
@@ -282,6 +344,7 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
           'changes.$_field',
           'Corrected ${selected['label']}',
           _value,
+          required: selected['required'] == true,
           enabled: !_conflict,
           max: 100,
         ),
@@ -342,15 +405,11 @@ class _IdentitySectionState extends ProfileFormState<IdentitySection> {
         TextButton(
           onPressed: busy
               ? null
-              : () async {
+              : () => perform(() async {
                   await widget.reload();
-                  if (mounted) {
-                    setState(() {
-                      _conflict = false;
-                      _resetValue();
-                    });
-                  }
-                },
+                  checkBuyerAccount();
+                  return null;
+                }, validate: false),
           child: const Text('Reload current identity details'),
         ),
       SubmitButton(
@@ -414,17 +473,34 @@ class _ApplicationEditor extends StatefulWidget {
     required this.repository,
     required this.page,
     required this.onSaved,
+    required this.account,
   });
   final ProfileRepository repository;
   final WebPage page;
   final ValueChanged<WebPage> onSaved;
+  final BuyerAccountScope account;
   @override
   State<_ApplicationEditor> createState() => _ApplicationEditorState();
 }
 
-class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
+class _ApplicationEditorState
+    extends BuyerProfileFormState<_ApplicationEditor> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
+  @override
+  BuyerAccountScope get parentAccountScope => widget.account;
   late final Map<String, TextEditingController> _values;
   UploadPart? _document;
+  @override
+  void clearBuyerDraft() {
+    _document = null;
+    for (final controller in _values.values) {
+      controller.clear();
+    }
+  }
+
   Map<String, dynamic> get data => mapOf(widget.page.props['buyerApplication']);
   Map<String, dynamic> get application => mapOf(data['application']);
   List<Map<String, dynamic>> get inputs => mapsOf(application['fields'])
@@ -472,6 +548,7 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
   }
 
   Future<void> _date() async {
+    if (!ensureBuyerAccess()) return;
     final last = DateTime.tryParse(
       mapOf(data['birth_date_limits'])['adult_maximum']?.toString() ?? '',
     );
@@ -494,6 +571,7 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
       firstDate: DateTime(1900),
       lastDate: last,
     );
+    if (!ensureBuyerAccess()) return;
     if (picked != null && mounted) {
       setState(
         () => _values['birthday']!.text = picked
@@ -502,6 +580,20 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
             .first,
       );
     }
+  }
+
+  void _viewDocument(String path) {
+    if (!ensureBuyerAccess()) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PrivateDocumentPage(
+          repository: widget.repository,
+          path: path,
+          title: 'Identity document on file',
+          account: accountScope,
+        ),
+      ),
+    );
   }
 
   @override
@@ -578,15 +670,7 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
                 TextButton(
                   onPressed: busy
                       ? null
-                      : () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => PrivateDocumentPage(
-                              repository: widget.repository,
-                              path: data['identity_document_url'],
-                              title: 'Identity document on file',
-                            ),
-                          ),
-                        ),
+                      : () => _viewDocument(data['identity_document_url']),
                   child: const Text('View identity document on file'),
                 ),
               OutlinedButton.icon(
@@ -594,6 +678,7 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
                     ? null
                     : () => perform(() async {
                         final document = await pickUpload('id_document');
+                        checkBuyerAccount();
                         if (document != null && mounted) {
                           setState(() => _document = document);
                         }
@@ -641,6 +726,7 @@ class _ApplicationEditorState extends ProfileFormState<_ApplicationEditor> {
                     changes,
                     files: _document == null ? null : [_document!],
                   );
+                  checkBuyerAccount(result: page);
                   if (context.mounted) {
                     widget.onSaved(page);
                     Navigator.pop(context);

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_model.dart';
@@ -16,10 +17,12 @@ class OrderResultPage extends StatefulWidget {
     required this.repository,
     required this.initial,
     this.now = DateTime.now,
+    this.account,
   });
   final BuyerRepository repository;
   final WebPage initial;
   final DateTime Function() now;
+  final BuyerAccountScope? account;
   @override
   State<OrderResultPage> createState() => _OrderResultPageState();
 }
@@ -27,6 +30,39 @@ class OrderResultPage extends StatefulWidget {
 class _OrderResultPageState extends State<OrderResultPage>
     with WidgetsBindingObserver {
   late WebPage _page;
+  late final BuyerAccountScope _account;
+  bool get _current =>
+      _account.isCurrent &&
+      identical(_account.session, widget.repository.session);
+  void _discardPrivate() {
+    _account.invalidate();
+    _page = const WebPage('Auth/Login', {});
+    _deadline?.cancel();
+    _checkedDeadlines.clear();
+    _confirmed = false;
+    _busy = false;
+    _error = 'Your buyer account changed or access ended. Reopen your recorded orders from your account.';
+  }
+
+  bool _ensureAccount() {
+    if (!mounted) return false;
+    try {
+      _checkOwner(_page);
+      return true;
+    } on BackendException {
+      setState(_discardPrivate);
+      return false;
+    }
+  }
+
+  bool _lostAccess(BackendException error) {
+    if (!_current || [401, 403, 404, 419].contains(error.status)) {
+      if (mounted) setState(_discardPrivate);
+      return true;
+    }
+    return false;
+  }
+
   bool _busy = false;
   bool _confirmed = false;
   String? _error;
@@ -35,7 +71,8 @@ class _OrderResultPageState extends State<OrderResultPage>
   bool get _canPay {
     final payment = mapOf(_page.props['payment']);
     final expiry = DateTime.tryParse(payment['expires_at']?.toString() ?? '');
-    return payment['can_pay'] == true &&
+    return _current &&
+        payment['can_pay'] == true &&
         payment['status'] == 'pending' &&
         expiry != null &&
         expiry.isAfter(widget.now());
@@ -45,7 +82,15 @@ class _OrderResultPageState extends State<OrderResultPage>
   void initState() {
     super.initState();
     _page = widget.initial;
+    _account =
+        widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
     WidgetsBinding.instance.addObserver(this);
+    try {
+      _checkOwner(_page);
+    } on BackendException {
+      _discardPrivate();
+      return;
+    }
     _scheduleDeadline();
   }
 
@@ -73,6 +118,7 @@ class _OrderResultPageState extends State<OrderResultPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
+        _ensureAccount() &&
         !_busy &&
         mapOf(_page.props['payment']).isNotEmpty) {
       _refresh();
@@ -81,23 +127,31 @@ class _OrderResultPageState extends State<OrderResultPage>
 
   @override
   void dispose() {
+    _account.invalidate();
     _deadline?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   void _checkOwner(WebPage page) {
-    if (page.user?['role'] != 'buyer' ||
-        _page.user?['id'] != null && _page.user?['id'] != page.user?['id']) {
-      throw const BackendException(
-        'These details are unavailable for the current buyer session.',
-        status: 401,
-      );
+    if (!identical(_account.session, widget.repository.session)) {
+      _account.invalidate();
+    }
+    _account.check(page: page);
+  }
+
+  @override
+  void didUpdateWidget(OrderResultPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_current ||
+        !identical(oldWidget.initial, widget.initial) ||
+        !identical(oldWidget.account, widget.account)) {
+      _discardPrivate();
     }
   }
 
   Future<void> _openOrder(dynamic value) async {
-    if (_busy || value is! num || value <= 0) return;
+    if (!_ensureAccount() || _busy || value is! num || value <= 0) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => OrderDetailPage(
@@ -109,7 +163,7 @@ class _OrderResultPageState extends State<OrderResultPage>
   }
 
   Future<void> _refresh({int? number}) async {
-    if (_busy) return;
+    if (!_ensureAccount() || _busy) return;
     final payment = mapOf(_page.props['payment']);
     setState(() {
       _busy = true;
@@ -121,8 +175,8 @@ class _OrderResultPageState extends State<OrderResultPage>
             ? '/buyer/orders?page=${number ?? 1}'
             : '/wallet/payments/${payment['id']}',
       );
-      widget.repository.requireNoErrors(page);
       _checkOwner(page);
+      widget.repository.requireNoErrors(page);
       if (payment.isEmpty
           ? page.props['orders'] is! Map
           : page.props['payment'] is! Map) {
@@ -138,6 +192,7 @@ class _OrderResultPageState extends State<OrderResultPage>
         _scheduleDeadline();
       }
     } on BackendException catch (e) {
+      if (_lostAccess(e)) return;
       if (mounted) {
         setState(() {
           _error = e.message;
@@ -152,7 +207,7 @@ class _OrderResultPageState extends State<OrderResultPage>
   }
 
   Future<void> _payment(String action) async {
-    if (_busy) {
+    if (!_ensureAccount() || _busy) {
       return;
     }
     final payment = mapOf(_page.props['payment']);
@@ -168,6 +223,17 @@ class _OrderResultPageState extends State<OrderResultPage>
       return;
     }
     if (action == 'cancel') {
+      bool decided = false;
+      void finishConfirmation(BuildContext dialogContext, bool value) {
+        if (decided ||
+            !dialogContext.mounted ||
+            ModalRoute.of(dialogContext)?.isCurrent != true) {
+          return;
+        }
+        decided = true;
+        Navigator.pop(dialogContext, value);
+      }
+
       final consent = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -177,17 +243,17 @@ class _OrderResultPageState extends State<OrderResultPage>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => finishConfirmation(context, false),
               child: const Text('Keep payment'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => finishConfirmation(context, true),
               child: const Text('Cancel payment'),
             ),
           ],
         ),
       );
-      if (consent != true || !mounted) {
+      if (!mounted || !_ensureAccount() || consent != true) {
         return;
       }
     }
@@ -203,11 +269,12 @@ class _OrderResultPageState extends State<OrderResultPage>
           'payment_confirmed': _confirmed,
         },
       );
+      if (!mounted || !_ensureAccount()) return;
       final updated = await widget.repository.document(
         '/wallet/payments/${payment['id']}',
       );
-      widget.repository.requireNoErrors(updated);
       _checkOwner(updated);
+      widget.repository.requireNoErrors(updated);
       if (updated.props['payment'] is! Map) {
         throw const BackendException(
           'Refresh this payment to check its recorded status.',
@@ -221,6 +288,7 @@ class _OrderResultPageState extends State<OrderResultPage>
         _scheduleDeadline();
       }
     } on BackendException catch (e) {
+      if (_lostAccess(e)) return;
       if (mounted) {
         setState(
           () => _error = e.fields.isEmpty
@@ -236,26 +304,31 @@ class _OrderResultPageState extends State<OrderResultPage>
   }
 
   Future<void> _openPayment(int id) async {
+    if (!_ensureAccount() || _busy) return;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       final page = await widget.repository.document('/wallet/payments/$id');
-      widget.repository.requireNoErrors(page);
       _checkOwner(page);
+      widget.repository.requireNoErrors(page);
       if (page.props['payment'] is! Map) {
         throw const BackendException('This wallet payment is unavailable.');
       }
       if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                OrderResultPage(repository: widget.repository, initial: page),
+            builder: (_) => OrderResultPage(
+              repository: widget.repository,
+              initial: page,
+              account: _account,
+            ),
           ),
         );
       }
     } on BackendException catch (e) {
+      if (_lostAccess(e)) return;
       if (mounted) {
         setState(() => _error = e.message);
       }
@@ -268,6 +341,22 @@ class _OrderResultPageState extends State<OrderResultPage>
 
   @override
   Widget build(BuildContext context) {
+    if (!_current) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Recorded orders unavailable')),
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Notice(
+                'Your buyer account changed or access ended. Reopen your recorded orders from your account.',
+                error: true,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     final payment = mapOf(_page.props['payment']);
     final orders = mapsOf(mapOf(_page.props['orders'])['data']);
     final message = mapOf(_page.props['flash'])['success'];

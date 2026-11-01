@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'numeric_input.dart';
+
 class CataloguePages extends StatelessWidget {
   const CataloguePages({
     super.key,
@@ -40,6 +42,7 @@ class CataloguePages extends StatelessWidget {
           initialValue: '$current',
           enabled: !busy && last > 1,
           keyboardType: TextInputType.number,
+          inputFormatters: [unsignedIntegerFormatter],
           textInputAction: TextInputAction.go,
           decoration: const InputDecoration(labelText: 'Go to page'),
           autovalidateMode: AutovalidateMode.onUserInteraction,

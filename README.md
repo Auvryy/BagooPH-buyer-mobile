@@ -80,6 +80,73 @@ Use the left sidebar to choose a device, rotate it, adjust text size or hide the
 
 This debug-only layout tool uses `device_frame` presets and is not an Android/iOS emulator. Google sign-in, native device permissions and real provider acceptance use the actual phone. Normal `flutter run -d linux` and the regular mobile entrypoint keep their existing UI. Details: [device preview plan](docs/plans/buyer-device-preview.md).
 
+For input and navigation checks with synthetic buyer data and all network requests blocked:
+
+```sh
+flutter run -d linux -t tool/qa_preview.dart
+```
+
+This separate debug entrypoint displays an **ISOLATED QA** banner. It uses the real buyer widgets with test fixtures; unimplemented fixture actions fail locally. It cannot create a real account, send email or place a real order. Use the normal preview command above for your configured backend.
+
+For isolated return forms, decision pages and private-evidence failure checks:
+
+```sh
+flutter run -d linux -t tool/return_review.dart
+```
+
+The sidebar selects the screen and its next synthetic response, including connection loss, access denial, changed form choices, a local PDF and a corrupt PDF. Reset starts a fresh fixture; Change test account expires the open screen's session. This entrypoint blocks outbound requests and uses the real Linux file picker, so select a disposable test file when checking uploads. It does not test production authorization or payment/provider acceptance.
+
+Run the corresponding native regression cases with:
+
+```sh
+flutter test -d linux integration_test/return_misuse_test.dart
+flutter test -d linux integration_test/private_pdf_misuse_test.dart
+```
+
+To review contact emails, reviewed identity, rejected applications, login sessions, delivery addresses, personal details, password changes and demo credits with synthetic replies:
+
+```sh
+flutter run -d linux -t tool/account_review.dart
+flutter test -d linux integration_test/account_misuse_test.dart
+```
+
+The account review sidebar selects successful, failed, denied, conflicting or throttled responses and shows the synthetic write count. Account changes expire open forms and confirmations. No real emails, passwords, sessions or credits are changed. Automated native checks can use a separate virtual display while the desktop is in use; ordinary Linux run/test commands open a window on their configured display.
+
+For isolated checkout input, confirmation, uncertain replies and account changes:
+
+```sh
+flutter run -d linux -t tool/checkout_review.dart
+flutter test -d linux integration_test/checkout_misuse_test.dart
+```
+
+The checkout review shows quote attempts and synthetic order writes. Its sidebar selects successful, failed, denied or wrong-buyer replies and an invalid GPS reading. GPS uses a synthetic position; outbound requests are blocked. Native device permissions, real backend authorization and actual order/payment acceptance remain separate checks.
+
+For isolated Shopping Bag quantity/removal dialogs, stock limits and account changes:
+
+```sh
+flutter run -d linux -t tool/bag_review.dart
+flutter test -d linux integration_test/bag_misuse_test.dart
+```
+
+The Bag review uses synthetic rows and reports read, quote and mutation attempts. Its sidebar selects successful, failed, denied or wrong-buyer replies. Change test account expires the open Bag; close any masked dialog, then use Reopen Bag for a fresh session. Reset starts a new fixture. All outbound requests are blocked, so these checks do not change a real Bag or establish backend authorization.
+
+For isolated voucher bookmarks, changed offers and late or malformed acknowledgements:
+
+```sh
+flutter run -d linux -t tool/voucher_review.dart
+flutter test -d linux integration_test/voucher_misuse_test.dart
+```
+
+The voucher review controls the next synthetic reply, save permission, displayed offer and session. Open voucher picker exercises native paging, bookmark refresh and selection. The sidebar reports mutation attempts, confirmed bookmark refreshes and choice requests. Reset starts a fresh fixture; outbound requests stay blocked. Bookmark changes do not reserve a discount, place an order or prove live backend acceptance.
+
+Repeat the native Linux misuse regressions, including a synthetic login-to-checkout journey, with:
+
+```sh
+flutter test integration_test/buyer_misuse_test.dart -d linux
+```
+
+These SDK integration checks open a native window. They supplement the isolated `flutter test` suite and desktop keyboard/clipboard checks; real Google, permission dialogs, backend authorization and physical-device acceptance remain separate. See the [misuse review and coverage record](docs/plans/buyer-misuse-regressions.md).
+
 Linux builds require Clang, CMake, Ninja, pkg-config, GTK 3, libsecret and jsoncpp development libraries. Persistent sessions also need a working desktop Secret Service; ordinary login remains usable if secure storage is unavailable. Build without opening a window with `flutter build linux --debug`.
 
 ## Native link setup

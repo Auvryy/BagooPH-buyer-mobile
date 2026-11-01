@@ -28,10 +28,21 @@ class WalletSection extends StatefulWidget {
   State<WalletSection> createState() => _WalletSectionState();
 }
 
-class _WalletSectionState extends ProfileFormState<WalletSection> {
+class _WalletSectionState extends BuyerProfileFormState<WalletSection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
   final _amount = TextEditingController(), _reason = TextEditingController();
   late String _token;
   Map<String, dynamic>? _submitted;
+  @override
+  void clearBuyerDraft() {
+    _submitted = null;
+    _amount.clear();
+    _reason.clear();
+  }
+
   Map<String, dynamic> get wallet => mapOf(widget.page.props['wallet']);
   bool get pending =>
       mapsOf(wallet['credit_requests'])
@@ -64,6 +75,7 @@ class _WalletSectionState extends ProfileFormState<WalletSection> {
         '/wallet/credits',
         _submitted!,
       );
+      checkBuyerAccount();
       if (result['reference'] is! String ||
           !['pending', 'approved', 'rejected'].contains(result['status'])) {
         throw const BackendException(

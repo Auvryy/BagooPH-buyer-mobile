@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../app/theme.dart';
+import '../../core/buyer_account_scope.dart';
+import '../../core/contact_input.dart';
+import '../../core/numeric_input.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -166,8 +169,18 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
     Future<String?> Function() action, {
     bool validate = true,
   }) async {
-    if (busy || (validate && formKey.currentState?.validate() == false)) {
-      return false;
+    if (busy) return false;
+    if (validate) {
+      final invalid = formKey.currentState?.validateGranularly();
+      if (invalid != null && invalid.isNotEmpty) {
+        final first = invalid.first;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && first.mounted) {
+            Scrollable.ensureVisible(first.context, alignment: .1);
+          }
+        });
+        return false;
+      }
     }
     setState(() {
       busy = true;
@@ -224,6 +237,11 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       minLines: lines,
       maxLines: secret ? 1 : lines,
       keyboardType: keyboard,
+      inputFormatters: keyboard == TextInputType.phone
+          ? [mobileNumberFormatter]
+          : keyboard == TextInputType.number
+          ? [unsignedIntegerFormatter]
+          : null,
       autofillHints: autofill,
       maxLength: max,
       onChanged: onChanged,
@@ -237,14 +255,16 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       ),
       validator: (v) {
         final value = secret ? v ?? '' : v?.trim() ?? '';
+        final length = value.runes.length;
         if (required && value.isEmpty) return 'Enter ${label.toLowerCase()}.';
-        if (value.isNotEmpty && value.length < min) {
+        if (value.isNotEmpty && length < min) {
           return 'Use at least $min characters.';
         }
-        if (max != null && value.length > max) {
+        if (max != null && length > max) {
           return 'Use at most $max characters.';
         }
-        return check?.call(value);
+        return check?.call(value) ??
+            (keyboard == TextInputType.phone ? mobileNumberValidator(v) : null);
       },
     ),
   );
@@ -288,6 +308,124 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
       ],
     ),
   );
+}
+
+abstract class BuyerProfileFormState<T extends StatefulWidget>
+    extends ProfileFormState<T>
+    with WidgetsBindingObserver {
+  ProfileRepository get accountRepository;
+  WebPage get accountPage;
+  BuyerAccountScope? get parentAccountScope => null;
+  late final BuyerAccountScope accountScope;
+
+  bool get hasBuyerAccess =>
+      accountScope.isCurrent &&
+      identical(accountScope.session, accountRepository.session);
+
+  void clearBuyerDraft();
+
+  @override
+  void initState() {
+    super.initState();
+    accountScope =
+        parentAccountScope?.fork() ??
+        BuyerAccountScope(accountRepository.session);
+    WidgetsBinding.instance.addObserver(this);
+    try {
+      checkBuyerAccount();
+    } on BackendException {
+      accountScope.invalidate();
+    }
+  }
+
+  void checkBuyerAccount({WebPage? result}) {
+    if (!identical(accountScope.session, accountRepository.session)) {
+      accountScope.invalidate();
+    }
+    accountScope.check(page: accountPage);
+    accountRepository.checked(accountPage);
+    if (result != null) {
+      accountScope.check(page: result);
+      accountRepository.checked(result);
+    }
+  }
+
+  void _discardBuyer() {
+    accountScope.invalidate();
+    clearBuyerDraft();
+    errors = {};
+    success = null;
+    problem = null;
+  }
+
+  bool ensureBuyerAccess() {
+    try {
+      checkBuyerAccount();
+      return true;
+    } on BackendException {
+      if (mounted) setState(_discardBuyer);
+      return false;
+    }
+  }
+
+  @override
+  void didUpdateWidget(T oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    try {
+      checkBuyerAccount();
+    } on BackendException {
+      _discardBuyer();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) ensureBuyerAccess();
+  }
+
+  @override
+  void onFailure(BackendException error) {
+    if (!hasBuyerAccess || [401, 403, 404, 419].contains(error.status)) {
+      _discardBuyer();
+    }
+  }
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (!ensureBuyerAccess()) return Future.value(false);
+    return super.perform(() async {
+      final result = await action();
+      checkBuyerAccount();
+      return result;
+    }, validate: validate);
+  }
+
+  @override
+  Widget content(List<Widget> children) => super.content(
+    hasBuyerAccess
+        ? children
+        : [
+            const ProfileHeading(
+              'Account settings unavailable',
+              '',
+              Icons.lock_outline,
+            ),
+            const Notice(
+              'Your buyer account changed or access ended. Reopen these settings from your profile.',
+              error: true,
+            ),
+          ],
+  );
+
+  @override
+  void dispose() {
+    accountScope.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 }
 
 class ProfilePagination extends StatelessWidget {
@@ -338,81 +476,166 @@ class PrivateDocumentPage extends StatefulWidget {
     required this.repository,
     required this.path,
     required this.title,
+    this.account,
   });
   final ProfileRepository repository;
   final String path, title;
+  final BuyerAccountScope? account;
   @override
   State<PrivateDocumentPage> createState() => _PrivateDocumentPageState();
 }
 
-class _PrivateDocumentPageState extends State<PrivateDocumentPage> {
-  late Future<RemoteDocument> _document;
+class _PrivateDocumentPageState extends State<PrivateDocumentPage>
+    with WidgetsBindingObserver {
+  late BuyerAccountScope _account;
+  Future<RemoteDocument>? _document;
   @override
   void initState() {
     super.initState();
+    _account =
+        widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
-  void _load() {
-    _document = widget.repository.session.documentBytes(widget.path);
+  @override
+  void didUpdateWidget(PrivateDocumentPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.repository.session, widget.repository.session) ||
+        !identical(oldWidget.account, widget.account)) {
+      _account.invalidate();
+      _account =
+          widget.account?.fork() ??
+          BuyerAccountScope(widget.repository.session);
+      _load();
+    } else if (oldWidget.path != widget.path) {
+      _load();
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.title)),
-    body: SafeArea(
-      child: FutureBuilder(
-        future: _document,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Notice(
-                      snapshot.error is BackendException
-                          ? (snapshot.error as BackendException).message
-                          : 'The document could not load.',
-                      error: true,
-                    ),
-                    TextButton(
-                      onPressed: () => setState(_load),
-                      child: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          final document = snapshot.data;
-          if (document == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return document.mime == 'application/pdf'
-              ? PdfViewer.data(
-                  document.bytes,
-                  sourceName: widget.title,
-                  params: PdfViewerParams(
-                    linkHandlerParams: PdfLinkHandlerParams(onLinkTap: (_) {}),
-                  ),
-                )
-              : Center(
-                  child: InteractiveViewer(
-                    maxScale: 5,
-                    child: Image.memory(
-                      document.bytes,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Notice(
-                        'This image cannot be displayed.',
-                        error: true,
-                      ),
-                    ),
-                  ),
-                );
-        },
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_account.isCurrent && mounted) {
+      setState(() => _document = null);
+    }
+  }
+
+  @override
+  void dispose() {
+    _account.invalidate();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _load() {
+    final account = _account;
+    final session = widget.repository.session;
+    final path = widget.path;
+    if (!account.isCurrent || !identical(account.session, session)) {
+      account.invalidate();
+      _document = null;
+      return;
+    }
+    _document = () async {
+      account.check();
+      try {
+        final document = await session.documentBytes(path);
+        account.check();
+        return document;
+      } on BackendException catch (e) {
+        if ([401, 403, 404, 419].contains(e.status)) account.invalidate();
+        rethrow;
+      }
+    }();
+  }
+
+  Widget _failure(String message, {bool retry = true}) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Notice(message, error: true),
+          TextButton(
+            onPressed: retry
+                ? () => setState(_load)
+                : () => Navigator.of(context).maybePop(),
+            child: Text(retry ? 'Try again' : 'Close document'),
+          ),
+        ],
       ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(
+        _account.isCurrent ? widget.title : 'Private document unavailable',
+      ),
+    ),
+    body: SafeArea(
+      child: !_account.isCurrent
+          ? _failure(
+              'Your buyer account changed or access ended. Close this document and reopen it from your account.',
+              retry: false,
+            )
+          : FutureBuilder(
+              key: ObjectKey(_document),
+              future: _document,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  if (!_account.isCurrent) {
+                    return _failure(
+                      'Your buyer account changed or access ended. Close this document and reopen it from your account.',
+                      retry: false,
+                    );
+                  }
+                  return _failure(
+                    snapshot.error is BackendException
+                        ? (snapshot.error as BackendException).message
+                        : 'The document could not load.',
+                  );
+                }
+                final document = snapshot.data;
+                if (document == null) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return document.mime == 'application/pdf'
+                    ? PdfViewer(
+                        PdfDocumentRefData(
+                          document.bytes,
+                          sourceName: 'buyer-private-evidence',
+                          // Each authenticated read owns its viewer cache,
+                          // including simultaneous routes with the same title.
+                          key: PdfDocumentRefKey('buyer-private-evidence', [
+                            _document,
+                          ]),
+                        ),
+                        params: PdfViewerParams(
+                          errorBannerBuilder: (_, _, _, _) => _failure(
+                            'This PDF cannot be displayed. Try again or reopen it from your account.',
+                          ),
+                          linkHandlerParams: PdfLinkHandlerParams(
+                            onLinkTap: (_) {},
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: InteractiveViewer(
+                          maxScale: 5,
+                          child: Image.memory(
+                            document.bytes,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Notice(
+                              'This image cannot be displayed.',
+                              error: true,
+                            ),
+                          ),
+                        ),
+                      );
+              },
+            ),
     ),
   );
 }

@@ -133,7 +133,7 @@ void main() {
       await press(tester, find.byType(CheckboxListTile).last);
       await press(tester, find.widgetWithText(FilledButton, 'Place order'));
       expect(repo.orderCalls, 1);
-      expect(repo.submittedOrder?['checkout_token'], 'test-checkout-token');
+      expect(repo.submittedOrder?['checkout_token'], checkoutFixtureToken());
       expect(find.text('Order #TEST-1 successfully placed.'), findsOneWidget);
     },
   );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/auth_validation.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -22,10 +23,22 @@ class PersonalSection extends StatefulWidget {
   State<PersonalSection> createState() => _PersonalSectionState();
 }
 
-class _PersonalSectionState extends ProfileFormState<PersonalSection> {
+class _PersonalSectionState extends BuyerProfileFormState<PersonalSection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
   late final TextEditingController _phone;
   UploadPart? _avatar;
   bool _remove = false, _dirty = false;
+  @override
+  void clearBuyerDraft() {
+    _phone.clear();
+    _avatar = null;
+    _remove = false;
+    _dirty = false;
+  }
+
   Map<String, dynamic> get user => mapOf(widget.page.props['user']);
   @override
   void initState() {
@@ -36,6 +49,7 @@ class _PersonalSectionState extends ProfileFormState<PersonalSection> {
   @override
   void didUpdateWidget(PersonalSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!hasBuyerAccess) return;
     if (!_dirty) _phone.text = user['phone']?.toString() ?? '';
   }
 
@@ -47,6 +61,7 @@ class _PersonalSectionState extends ProfileFormState<PersonalSection> {
 
   Future<void> _pick() => perform(() async {
     final photo = await pickUpload('avatar', avatar: true);
+    checkBuyerAccount();
     if (photo != null && mounted) {
       setState(() {
         _avatar = photo;
@@ -63,6 +78,7 @@ class _PersonalSectionState extends ProfileFormState<PersonalSection> {
       'phone': _phone.text.trim(),
       'remove_avatar': _remove,
     }, files: _avatar == null ? null : [_avatar!]);
+    checkBuyerAccount(result: page);
     if (mounted) {
       _dirty = false;
       _avatar = null;
@@ -167,11 +183,12 @@ class _PersonalSectionState extends ProfileFormState<PersonalSection> {
         onPressed: busy
             ? null
             : () => perform(() async {
-                await widget.repository.mutate(
+                final result = await widget.repository.mutate(
                   '/email/verification-notification',
                   {},
                   requireMessage: false,
                 );
+                checkBuyerAccount(result: result);
                 return 'Verification link requested. Check your sign-in email.';
               }, validate: false),
         child: const Text('Resend verification email'),
@@ -222,10 +239,21 @@ class PasswordSection extends StatefulWidget {
   State<PasswordSection> createState() => _PasswordSectionState();
 }
 
-class _PasswordSectionState extends ProfileFormState<PasswordSection> {
+class _PasswordSectionState extends BuyerProfileFormState<PasswordSection> {
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
   final _current = TextEditingController(),
       _password = TextEditingController(),
       _confirmation = TextEditingController();
+  @override
+  void clearBuyerDraft() {
+    _current.clear();
+    _password.clear();
+    _confirmation.clear();
+  }
+
   @override
   void dispose() {
     for (final controller in [_current, _password, _confirmation]) {
@@ -263,6 +291,7 @@ class _PasswordSectionState extends ProfileFormState<PasswordSection> {
       secret: true,
       min: 8,
       max: 128,
+      check: passwordValidator,
       autofill: const [AutofillHints.newPassword],
     ),
     field(
@@ -289,6 +318,7 @@ class _PasswordSectionState extends ProfileFormState<PasswordSection> {
           method: 'PUT',
           requireMessage: false,
         );
+        checkBuyerAccount(result: page);
         if (mounted) {
           _current.clear();
           _password.clear();
