@@ -45,3 +45,7 @@ The header search opens the retained search screen with its input focused and pr
 ## Purchase status visibility checkpoint
 
 The horizontal status strip reveals the selected status when the section opens or its filter changes, including statuses initially outside the viewport. Nine purchase-section tests passed with one worker, four responsive synthetic purchase layouts passed, and the 375-pixel preview was inspected. Focused analysis was clean. Broader regression and physical-device review remain open.
+
+## Editable search header checkpoint
+
+The red header is now the actual editable search field; the embedded results page no longer duplicates it. Search preserves the draft and filter context, ignores cursor-only changes, and applies a filter request received while hidden when the page reopens. Single-page catalogues no longer show disabled pagination controls. Thirty-eight focused discovery, authentication, search and catalogue cases passed with one worker, followed by four responsive embedded-search layouts and a narrow enlarged-text check; synthetic phone and landscape renders were inspected. Whole-project analysis was clean. Before this final search change, the full isolated suite passed 853 cases and a constrained Android debug build succeeded; both need refreshing for the current source. Physical-device review remains open.

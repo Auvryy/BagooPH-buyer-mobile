@@ -24,18 +24,28 @@ class SearchPage extends StatefulWidget {
     this.request,
     this.focusRequest = 0,
     this.active = true,
+    this.controller,
+    this.embedded = false,
+    this.submitRequest = 0,
   });
   final BuyerRepository repository;
   final SearchFilters? request;
   final int focusRequest;
   final bool active;
+  final TextEditingController? controller;
+  final bool embedded;
+  final int submitRequest;
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
   late final CatalogueSearchController _catalogue;
-  final _text = TextEditingController();
+  late TextEditingController _text;
+  late bool _ownsText;
+  bool _settingText = false;
+  String _lastSharedText = '';
+  SearchFilters? _pendingRequest;
   final _focus = FocusNode();
   final _scroll = ScrollController();
   Timer? _debounce;
@@ -44,39 +54,109 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    _bindText();
     _catalogue = CatalogueSearchController(widget.repository);
-    if (widget.request != null) {
-      _text.text = widget.request!.query;
-      _catalogue.apply(widget.request!);
+    final request = widget.request;
+    if (request != null) {
+      if (_ownsText) _text.text = request.query;
+      _catalogue.apply(
+        _ownsText ? request : request.copyWith(query: _text.text),
+      );
+    } else if (!_ownsText && _text.text.isNotEmpty) {
+      _catalogue.apply(SearchFilters(query: _text.text));
     } else {
       _catalogue.load();
     }
     if (widget.focusRequest > 0) _requestFocus(widget.focusRequest);
   }
 
+  void _bindText() {
+    _ownsText = widget.controller == null;
+    _text = widget.controller ?? TextEditingController();
+    _lastSharedText = _text.text;
+    if (!_ownsText) _text.addListener(_sharedTextChanged);
+  }
+
+  void _sharedTextChanged() {
+    final value = _text.text;
+    if (value == _lastSharedText) return;
+    _lastSharedText = value;
+    if (_settingText || !mounted || !widget.active) return;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 450), () {
+      if (mounted && widget.active) _search();
+    });
+  }
+
+  void _setText(String value) {
+    if (_text.text == value) return;
+    _settingText = true;
+    try {
+      _text.text = value;
+    } finally {
+      _settingText = false;
+    }
+  }
+
   void _requestFocus(int request) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.active && widget.focusRequest == request) {
+      if (mounted &&
+          widget.active &&
+          !widget.embedded &&
+          widget.focusRequest == request) {
         _focus.requestFocus();
       }
+    });
+  }
+
+  void _queueRequest(SearchFilters request) {
+    _pendingRequest = request;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !widget.active ||
+          widget.request != request ||
+          _pendingRequest != request) {
+        return;
+      }
+      _pendingRequest = null;
+      if (_ownsText) _setText(request.query);
+      _apply(_ownsText ? request : request.copyWith(query: _text.text));
     });
   }
 
   @override
   void didUpdateWidget(SearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      if (_ownsText) {
+        _text.dispose();
+      } else {
+        _text.removeListener(_sharedTextChanged);
+      }
+      _bindText();
+    }
+    if (!widget.active) _debounce?.cancel();
     if (widget.focusRequest != oldWidget.focusRequest &&
         widget.focusRequest > 0) {
       _requestFocus(widget.focusRequest);
     }
     final request = widget.request;
-    if (request != null && request != oldWidget.request) {
+    if (request != oldWidget.request) {
+      _debounce?.cancel();
+      if (request == null) {
+        _pendingRequest = null;
+      } else {
+        _queueRequest(request);
+      }
+    } else if (widget.active && request != null && _pendingRequest == request) {
+      _queueRequest(request);
+    } else if (widget.active &&
+        ((oldWidget.controller != widget.controller) ||
+            (!oldWidget.active && filters.query != _text.text.trim()) ||
+            widget.submitRequest != oldWidget.submitRequest)) {
       _debounce?.cancel();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.request == request) {
-          _text.text = request.query;
-          _apply(request);
-        }
+        if (mounted && widget.active) _search();
       });
     }
   }
@@ -84,7 +164,11 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void dispose() {
     _debounce?.cancel();
-    _text.dispose();
+    if (_ownsText) {
+      _text.dispose();
+    } else {
+      _text.removeListener(_sharedTextChanged);
+    }
     _focus.dispose();
     _scroll.dispose();
     _catalogue.dispose();
@@ -252,37 +336,71 @@ class _SearchPageState extends State<SearchPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Find your next favorite',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          height: 1.3,
+                      if (widget.embedded)
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Find your next favorite',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                            if (!wide)
+                              Tooltip(
+                                message:
+                                    'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
+                                child: OutlinedButton.icon(
+                                  onPressed: _catalogue.data == null
+                                      ? null
+                                      : _filters,
+                                  icon: const Icon(
+                                    Icons.tune_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
+                                  ),
+                                ),
+                              ),
+                          ],
+                        )
+                      else ...[
+                        const Text(
+                          'Find your next favorite',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      BrowseSearchField(
-                        controller: _text,
-                        focusNode: _focus,
-                        label: 'Search products',
-                        clearable: true,
-                        showFilters: !wide,
-                        filterLabel:
-                            'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
-                        onFilters: _catalogue.data == null ? null : _filters,
-                        onSubmitted: (_) {
-                          FocusScope.of(context).unfocus();
-                          _search();
-                        },
-                        onChanged: (_) {
-                          setState(() {});
-                          _debounce?.cancel();
-                          _debounce = Timer(
-                            const Duration(milliseconds: 450),
-                            _search,
-                          );
-                        },
-                      ),
+                        const SizedBox(height: 12),
+                        BrowseSearchField(
+                          controller: _text,
+                          focusNode: _focus,
+                          label: 'Search products',
+                          clearable: true,
+                          showFilters: !wide,
+                          filterLabel:
+                              'Filters${filters.count == 0 ? '' : ' (${filters.count})'}',
+                          onFilters: _catalogue.data == null ? null : _filters,
+                          onSubmitted: (_) {
+                            FocusScope.of(context).unfocus();
+                            _search();
+                          },
+                          onChanged: (_) {
+                            setState(() {});
+                            _debounce?.cancel();
+                            _debounce = Timer(
+                              const Duration(milliseconds: 450),
+                              _search,
+                            );
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       _chips(),
                     ],

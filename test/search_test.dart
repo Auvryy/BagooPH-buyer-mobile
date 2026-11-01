@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/catalogue_pages.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:flutter/material.dart';
@@ -39,6 +40,30 @@ class SearchRepository extends FakeBuyerRepository {
 }
 
 void main() {
+  testWidgets(
+    'pagination hides inactive controls for one page and accepts a valid page on longer lists',
+    (tester) async {
+      int? selected;
+      Widget screen(int last) => MaterialApp(
+        home: Scaffold(
+          body: CataloguePages(
+            current: 1,
+            last: last,
+            total: 4,
+            onPage: (page) => selected = page,
+          ),
+        ),
+      );
+      await tester.pumpWidget(screen(1));
+      expect(find.byTooltip('Next page'), findsNothing);
+      expect(find.byType(TextFormField), findsNothing);
+      await tester.pumpWidget(screen(3));
+      expect(find.byTooltip('Next page'), findsOneWidget);
+      await tester.enterText(find.byType(TextFormField), '3');
+      await tester.testTextInput.receiveAction(TextInputAction.go);
+      expect(selected, 3);
+    },
+  );
   test(
     'search keeps all server filters across pages and ignores stale responses',
     () async {

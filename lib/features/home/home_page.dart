@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -65,7 +66,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _tab = 0;
   final _visited = <int>{0};
   SearchFilters? _searchRequest;
-  int _searchFocusRequest = 0;
+  final _headerSearch = TextEditingController();
+  final _headerSearchFocus = FocusNode();
+  int _searchSubmitRequest = 0;
   int? _notificationCount;
   Object? _notificationOwner;
   int _notificationGeneration = 0;
@@ -122,6 +125,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     widget.verificationRequests?.removeListener(_showVerification);
     _home.removeListener(_homeChanged);
     _home.dispose();
+    _headerSearch.dispose();
+    _headerSearchFocus.dispose();
     super.dispose();
   }
 
@@ -201,6 +206,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _openSearch({String query = '', String category = ''}) {
     FocusManager.instance.primaryFocus?.unfocus();
+    _headerSearch.text = query.trim();
     setState(() {
       _searchRequest = SearchFilters(query: query.trim(), category: category);
       _tab = 2;
@@ -209,16 +215,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _focusSearch() {
+    if (_tab == 2) return;
     setState(() {
-      if (!_visited.contains(2)) _searchRequest = const SearchFilters();
+      if (!_visited.contains(2)) {
+        _searchRequest = SearchFilters(query: _headerSearch.text.trim());
+      }
       _tab = 2;
       _visited.add(2);
-      _searchFocusRequest++;
     });
   }
 
   void _openSearchFilters(SearchFilters filters) {
     FocusManager.instance.primaryFocus?.unfocus();
+    _headerSearch.text = filters.query;
     setState(() {
       _searchRequest = filters;
       _tab = 2;
@@ -381,34 +390,77 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           : AppBar(
               backgroundColor: BagooTheme.strong,
               foregroundColor: Colors.white,
-              toolbarHeight: 60,
+              toolbarHeight: math.max(
+                60,
+                MediaQuery.textScalerOf(context).scale(13) + 34,
+              ),
               titleSpacing: 12,
-              title: Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                child: InkWell(
+              title: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _headerSearch,
+                builder: (context, value, _) => TextField(
                   key: const ValueKey('buyer-header-search'),
-                  borderRadius: BorderRadius.circular(10),
+                  controller: _headerSearch,
+                  focusNode: _headerSearchFocus,
                   onTap: _focusSearch,
-                  child: const SizedBox(
-                    height: 42,
-                    child: Row(
-                      children: [
-                        SizedBox(width: 12),
-                        Icon(Icons.search, color: BagooTheme.muted, size: 21),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Search products',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
+                  onChanged: (_) {
+                    if (_tab != 2) _focusSearch();
+                  },
+                  onSubmitted: (_) {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    setState(() => _searchSubmitRequest++);
+                  },
+                  textInputAction: TextInputAction.search,
+                  maxLength: 100,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    fontSize: 13,
+                    color: BagooTheme.ink,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'Search products',
+                    hintText: 'Search products',
+                    labelStyle: const TextStyle(
+                      fontFamily: 'Plus Jakarta Sans',
+                      fontSize: 13,
+                      color: BagooTheme.muted,
+                    ),
+                    floatingLabelBehavior: FloatingLabelBehavior.never,
+                    counterText: '',
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: BagooTheme.muted,
+                      size: 20,
+                    ),
+                    suffixIcon: value.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            onPressed: _headerSearch.clear,
+                            icon: const Icon(
+                              Icons.close,
                               color: BagooTheme.muted,
-                              fontSize: 13,
+                              size: 19,
                             ),
                           ),
-                        ),
-                      ],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(
+                        color: Colors.white,
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
@@ -469,7 +521,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           SearchPage(
                             repository: widget.repository,
                             request: _searchRequest,
-                            focusRequest: _searchFocusRequest,
+                            controller: _headerSearch,
+                            embedded: true,
+                            submitRequest: _searchSubmitRequest,
                             active: _tab == 2,
                           )
                         else

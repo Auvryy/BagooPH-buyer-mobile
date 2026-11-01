@@ -138,6 +138,11 @@ class ReviewRepository extends FakeBuyerRepository {
 
 Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
   'home' => HomePage(repository: repo, onLogin: () {}, onLogout: () async {}),
+  'shell-search' => HomePage(
+    repository: repo,
+    onLogin: () {},
+    onLogout: () async {},
+  ),
   'search' => Scaffold(
     appBar: AppBar(title: const Text('Search Bagoo')),
     body: SearchPage(repository: repo),
@@ -199,6 +204,7 @@ void main() {
   );
   for (final name in [
     'home',
+    'shell-search',
     'search',
     'product',
     'bag',
@@ -243,6 +249,10 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
+          if (name == 'shell-search') {
+            await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+            await tester.pumpAndSettle();
+          }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
           if (name == 'home' &&
