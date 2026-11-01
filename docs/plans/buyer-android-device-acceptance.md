@@ -57,3 +57,15 @@ Two additional cases reproduced three product reads/routes from three retained t
 Two new cases reproduced a delayed wallet-payment read and Buy Again acknowledgement navigating after the opening session ended. Capture a scope before each request, check it after the reply and pass it into the payment/Bag destination. Wallet navigation validates the existing backend `Buyer/WalletPayment` component and requested payment ID. Buy Again requires positive integer Bag item IDs before building the selected-item route.
 
 All ten final purchase-navigation cases pass, including both current-session destinations and six malformed-ID responses. The related checkout/post-purchase selection passes 29 cases and full analysis is clean. The preceding configured Android build passed before this slice; current-source build/device acceptance are still required. The preceding full-suite run is still being collected and is not evidence for these new cases. Phone interaction remains deferred at the owner's request.
+
+### Retained purchase actions and confirmations
+
+Four initial cases reproduced an expired purchase list remaining visible, a cached Buy Again callback starting a mutation after expiry, and queued accept/cancel decisions popping beyond their confirmation dialog. A fifth case reproduced multiple receipt dialogs from queued parent callbacks. Purchases now use the existing buyer-bound form state and inherit the root account. Reads/actions/navigation check that scope, while receipt confirmation rechecks current eligibility before sending. A confirmation dialog consumes one decision and marks external closure before old callbacks can act.
+
+The first 25 focused purchase/profile/helper cases pass. Added normal and expired receipt-decision paths are being verified with the final combined selection; the new tests scroll to their controls before tapping. The earlier 50-case account/helper selection passed before receipt-dialog coalescing. Final analysis and the latest combined result remain to be collected.
+
+### Verification resource limit
+
+The owner requested lower RAM use. Run one heavy verification job at a time; use a single Flutter test worker and perform analysis/builds sequentially. The overlapping 815-case full-suite run was deliberately interrupted to release memory and is cancelled, not passing, regardless of the CLI exit code. Do not stop another session's rider checks or shared services. Final full-suite/build evidence must be gathered within this limit.
+
+Final purchase-action selection: all 27 purchase/profile/helper cases pass with one test worker, including both valid and expired receipt decisions. Analysis is clean after the test run. The resource-limited full suite and current-source Android build are still outstanding; the earlier 815-case full run was cancelled. Keep the broader audit and physical acceptance open.

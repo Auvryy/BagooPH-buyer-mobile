@@ -136,27 +136,47 @@ Future<bool> confirmAction(
   String title,
   String description,
   String button,
-) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: Text(description, style: const TextStyle(height: 1.6)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Go back'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(button),
-          ),
-        ],
-      ),
-    ) ??
-    false;
+) async {
+  if (!context.mounted) return false;
+  var decided = false;
+  return await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          void finish(bool result) {
+            if (decided ||
+                !dialogContext.mounted ||
+                ModalRoute.of(dialogContext)?.isCurrent != true) {
+              return;
+            }
+            decided = true;
+            Navigator.pop(dialogContext, result);
+          }
+
+          return PopScope(
+            onPopInvokedWithResult: (didPop, _) {
+              if (didPop) decided = true;
+            },
+            child: AlertDialog(
+              title: Text(title),
+              content: SingleChildScrollView(
+                child: Text(description, style: const TextStyle(height: 1.6)),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => finish(false),
+                  child: const Text('Go back'),
+                ),
+                FilledButton(
+                  onPressed: () => finish(true),
+                  child: Text(button),
+                ),
+              ],
+            ),
+          );
+        },
+      ) ??
+      false;
+}
 
 abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
   final formKey = GlobalKey<FormState>();

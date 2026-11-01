@@ -915,6 +915,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
         loading: _loading,
       ),
       'orders' => PurchasesSection(
+        account: _account,
         repository: _repository,
         page: page,
         onQuery: _ordersQuery,

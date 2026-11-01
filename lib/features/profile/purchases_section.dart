@@ -29,9 +29,12 @@ const buyerOrderFilters = {
 Future<void> openWalletPayment(
   BuildContext context,
   ProfileRepository repository,
-  int id,
-) async {
-  final account = BuyerAccountScope(repository.session);
+  int id, {
+  BuyerAccountScope? parentAccount,
+}) async {
+  final account =
+      parentAccount?.fork() ?? BuyerAccountScope(repository.session);
+  account.check();
   final page = await repository.buyer.document('/wallet/payments/$id');
   account.check(page: page);
   repository.buyer.requireNoErrors(page);
@@ -57,9 +60,12 @@ Future<void> buyAgain(
   BuildContext context,
   ProfileRepository repository,
   int orderId,
-  String token,
-) async {
-  final account = BuyerAccountScope(repository.session);
+  String token, {
+  BuyerAccountScope? parentAccount,
+}) async {
+  final account =
+      parentAccount?.fork() ?? BuyerAccountScope(repository.session);
+  account.check();
   final response = await repository.json('/buyer/orders/$orderId/buy-again', {
     'mode': 'purchase',
     'request_token': token,
@@ -99,17 +105,78 @@ class PurchasesSection extends StatefulWidget {
     required this.onQuery,
     required this.reload,
     this.loading = false,
+    this.account,
   });
   final ProfileRepository repository;
   final WebPage page;
   final void Function(String status, int number) onQuery;
   final Future<void> Function() reload;
   final bool loading;
+  final BuyerAccountScope? account;
   @override
   State<PurchasesSection> createState() => _PurchasesSectionState();
 }
 
-class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
+class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
+  bool _confirming = false;
+
+  Future<void> _confirmReceipt(Map<String, dynamic> order) async {
+    final id = order['id'];
+    if (busy ||
+        widget.loading ||
+        _confirming ||
+        id is! int ||
+        id < 1 ||
+        !ensureBuyerAccess()) {
+      return;
+    }
+    setState(() => _confirming = true);
+    var confirmed = false;
+    try {
+      confirmed = await confirmAction(
+        context,
+        'Confirm receipt?',
+        'Confirm that you received this order and checked its items. This records your receipt and completes the purchase.',
+        'Confirm Received',
+      );
+    } finally {
+      if (mounted) setState(() => _confirming = false);
+    }
+    if (!confirmed || !mounted || !ensureBuyerAccess()) return;
+    final current = mapsOf(mapOf(widget.page.props['orders'])['data'])
+        .where((row) => row['id'] == id)
+        .firstOrNull;
+    if (current?['can_confirm_receipt'] != true) return;
+    await perform(() async {
+      final result = await widget.repository.mutate(
+        '/buyer/orders/$id/confirm',
+        {},
+        tab: 'orders',
+      );
+      checkBuyerAccount(result: result);
+      await widget.reload();
+      return 'Receipt confirmed.';
+    }, validate: false);
+  }
+
+  @override
+  ProfileRepository get accountRepository => widget.repository;
+  @override
+  WebPage get accountPage => widget.page;
+  @override
+  BuyerAccountScope? get parentAccountScope => widget.account;
+  @override
+  void clearBuyerDraft() {}
+
+  @override
+  Future<bool> perform(
+    Future<String?> Function() action, {
+    bool validate = true,
+  }) {
+    if (widget.loading || _confirming) return Future.value(false);
+    return super.perform(action, validate: validate);
+  }
+
   @override
   Widget build(BuildContext context) {
     final paginator = mapOf(widget.page.props['orders']);
@@ -132,7 +199,11 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
               selected: current == status.key,
               onSelected: busy || widget.loading
                   ? null
-                  : (_) => widget.onQuery(status.key, 1),
+                  : (_) {
+                      if (!_confirming && ensureBuyerAccess()) {
+                        widget.onQuery(status.key, 1);
+                      }
+                    },
             ),
         ],
       ),
@@ -257,6 +328,7 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
                                 widget.repository,
                                 (mapOf(order['wallet_payment'])['id'] as num)
                                     .toInt(),
+                                parentAccount: accountScope,
                               );
                               await widget.reload();
                               return null;
@@ -269,27 +341,9 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
                     ),
                   if (order['can_confirm_receipt'] == true)
                     FilledButton(
-                      onPressed: busy || widget.loading
+                      onPressed: busy || widget.loading || _confirming
                           ? null
-                          : () async {
-                              if (!await confirmAction(
-                                context,
-                                'Confirm receipt?',
-                                'Confirm that you received this order and checked its items. This records your receipt and completes the purchase.',
-                                'Confirm Received',
-                              )) {
-                                return;
-                              }
-                              await perform(() async {
-                                await widget.repository.mutate(
-                                  '/buyer/orders/${order['id']}/confirm',
-                                  {},
-                                  tab: 'orders',
-                                );
-                                await widget.reload();
-                                return 'Receipt confirmed.';
-                              }, validate: false);
-                            },
+                          : () => _confirmReceipt(order),
                       child: const Text('Confirm Received'),
                     ),
                   if (order['can_buy_again'] == true &&
@@ -303,6 +357,7 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
                                 widget.repository,
                                 (order['id'] as num).toInt(),
                                 order['buy_again_token'],
+                                parentAccount: accountScope,
                               );
                               return null;
                             }, validate: false),
@@ -314,11 +369,11 @@ class _PurchasesSectionState extends ProfileFormState<PurchasesSection> {
             ],
           ),
         ),
-      ProfilePagination(
-        paginator,
-        (number) => widget.onQuery(current, number),
-        disabled: busy || widget.loading,
-      ),
+      ProfilePagination(paginator, (number) {
+        if (!_confirming && ensureBuyerAccess()) {
+          widget.onQuery(current, number);
+        }
+      }, disabled: busy || widget.loading),
     ]);
   }
 }
