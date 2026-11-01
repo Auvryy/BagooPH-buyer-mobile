@@ -53,3 +53,7 @@ The red header is now the actual editable search field; the embedded results pag
 ## Regression and signed-in header checkpoint
 
 The full isolated suite passed 861 cases with one worker at the editable-header checkpoint, and a configured Android debug APK built with a 1.5 GB Gradle heap and one worker. Whole-project analysis was clean. A signed-in 320-pixel preview then revealed a truncated search prompt; the prompt was shortened, 28 focused discovery and app cases passed, and the updated signed-in preview was inspected. The current source still needs a refreshed APK and physical-device review.
+
+## Current Android build checkpoint
+
+The current source at the signed-in header checkpoint passed whole-project analysis and 28 focused discovery and app cases after the prompt wording adjustment. The preceding full isolated suite passed 861 cases with one worker. A configured debug APK was rebuilt from the current source with one Gradle worker and a 1.5 GB heap cap. Android SDK tooling emitted an XML version warning but the build succeeded; package inspection reported the Bagoo buyer package, app label and adaptive launcher icon resource. The connected phone was not confirmed to have Bagoo in the foreground, so this APK has not been installed for this review. Live product imagery and physical-device acceptance remain open.
