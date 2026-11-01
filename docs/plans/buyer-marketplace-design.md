@@ -57,3 +57,7 @@ The full isolated suite passed 861 cases with one worker at the editable-header 
 ## Current Android build checkpoint
 
 The current source at the signed-in header checkpoint passed whole-project analysis and 28 focused discovery and app cases after the prompt wording adjustment. The preceding full isolated suite passed 861 cases with one worker. A configured debug APK was rebuilt from the current source with one Gradle worker and a 1.5 GB heap cap. Android SDK tooling emitted an XML version warning but the build succeeded; package inspection reported the Bagoo buyer package, app label and adaptive launcher icon resource. The connected phone was not confirmed to have Bagoo in the foreground, so this APK has not been installed for this review. Live product imagery and physical-device acceptance remain open.
+
+## Verification dialog accessibility checkpoint
+
+Synthetic review revealed that the verification explanation could be squeezed out in landscape with enlarged text and a keyboard inset. The dialog now dismisses keyboard focus, uses a compact scrollable layout, and provides shorter status-specific guidance. Six verification cases passed, including scrolling and selecting the account action on a constrained screen; 52 synthetic responsive layouts passed with the media settings applied to dialog overlays. Phone and landscape dialog renders were inspected and focused analysis was clean. The previous APK predates this dialog fix and must be rebuilt; physical-device review remains open.

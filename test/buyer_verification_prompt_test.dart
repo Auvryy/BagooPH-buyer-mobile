@@ -1,5 +1,6 @@
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/buyer_actions.dart';
+import 'package:bagoo_buyer_mobile/core/verification_prompt.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
@@ -38,6 +39,55 @@ class SignedInVerificationRepository extends UnverifiedProductRepository {
 }
 
 void main() {
+  testWidgets(
+    'verification guidance scrolls while the account action stays reachable',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 450);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      bool? decision;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 450),
+              textScaler: TextScaler.linear(2),
+              viewInsets: EdgeInsets.only(bottom: 120),
+            ),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async => decision =
+                    await showBuyerVerificationPrompt(context, unverifiedBuyer),
+                child: const Text('Open verification'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open verification'));
+      await tester.pumpAndSettle();
+      final scrollable = find
+          .descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final position = tester.state<ScrollableState>(scrollable).position;
+      expect(position.maxScrollExtent, greaterThan(0));
+      await tester.drag(scrollable, const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+      await tester.tap(find.text('Review account'));
+      await tester.pumpAndSettle();
+      expect(decision, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final expire in [false, true]) {
     testWidgets(
       'unverified product prompts once and checks account before navigation (expired: $expire)',

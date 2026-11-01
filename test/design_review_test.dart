@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/verification_prompt.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
@@ -136,6 +137,20 @@ class ReviewRepository extends FakeBuyerRepository {
   ];
 }
 
+Widget verificationReview() => Scaffold(
+  body: Center(
+    child: Builder(
+      builder: (context) => FilledButton(
+        onPressed: () => showBuyerVerificationPrompt(context, {
+          ...buyer,
+          'kyc_status': 'unverified',
+        }),
+        child: const Text('Show verification'),
+      ),
+    ),
+  ),
+);
+
 Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
   'home' => HomePage(repository: repo, onLogin: () {}, onLogout: () async {}),
   'signed-home' => HomePage(
@@ -154,6 +169,7 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
     body: SearchPage(repository: repo),
   ),
   'product' => ProductPage(repository: repo, slug: 'everyday-bag-1'),
+  'verification' => verificationReview(),
   'bag' => BagPage(repository: repo),
   'checkout' => CheckoutPage(repository: repo, initial: checkoutPage()),
   'profile' => Scaffold(
@@ -214,6 +230,7 @@ void main() {
     'shell-search',
     'search',
     'product',
+    'verification',
     'bag',
     'checkout',
     'profile',
@@ -243,15 +260,16 @@ void main() {
               child: MaterialApp(
                 theme: BagooTheme.light,
                 debugShowCheckedModeBanner: false,
-                home: MediaQuery(
+                builder: (_, child) => MediaQuery(
                   data: MediaQueryData(
                     size: scene.$1,
                     textScaler: TextScaler.linear(scene.$2),
                     viewInsets: EdgeInsets.only(bottom: scene.$3),
                     disableAnimations: true,
                   ),
-                  child: reviewScreen(name, repo),
+                  child: child!,
                 ),
+                home: reviewScreen(name, repo),
               ),
             ),
           );
@@ -259,6 +277,13 @@ void main() {
           if (name == 'shell-search') {
             await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
             await tester.pumpAndSettle();
+          }
+          if (name == 'verification') {
+            await tester.tap(
+              find.widgetWithText(FilledButton, 'Show verification'),
+            );
+            await tester.pumpAndSettle();
+            expect(find.text('Verification needed'), findsOneWidget);
           }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
