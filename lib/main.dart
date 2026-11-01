@@ -50,6 +50,7 @@ class MainApp extends StatefulWidget {
 
 class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   final _navigator = GlobalKey<NavigatorState>();
+  final _verificationRequests = ValueNotifier<int>(0);
   String? _pendingProduct;
   int _pendingDestination = 0;
   BuyerRepository? _repository;
@@ -329,6 +330,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     _linkGeneration++;
     unawaited(_links?.cancel());
     _pendingLink = null;
+    _verificationRequests.dispose();
     if (widget.repository == null) {
       _repository?.session.close();
     }
@@ -342,6 +344,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     navigatorObservers: [_routes],
     builder: (context, child) => BuyerActions(
       sessionEnded: _sessionEnded,
+      openVerification: () {
+        _navigator.currentState?.popUntil((route) => route.isFirst);
+        _verificationRequests.value++;
+      },
       signIn: (slug) {
         _pendingProduct = slug;
         _pendingDestination = 0;
@@ -445,6 +451,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
               ),
               _Screen.home => HomePage(
                 repository: _repository!,
+                verificationRequests: _verificationRequests,
                 initial: _initial,
                 initialProductSlug: _pendingProduct,
                 initialDestination: _pendingDestination,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
@@ -42,6 +43,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   bool _busy = false;
   bool _saving = false;
   bool _reminding = false;
+  bool _approvalPromptOpen = false;
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
   final _scroll = ScrollController();
@@ -289,6 +291,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   void _purchase(bool buyNow) {
+    if (_approvalPromptOpen) return;
     if (!_accountCurrent) {
       unawaited(_load(quiet: true));
       return;
@@ -297,6 +300,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     if (s.page.isCached) return;
     if (buyNow && s.page.user == null) {
       _login();
+      return;
+    }
+    if (buyNow && !s.approved) {
+      unawaited(_add(true));
       return;
     }
     if (!s.complete) {
@@ -394,10 +401,26 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       return;
     }
     if (buyNow && !selection.approved) {
-      _message(
-        'An active approved buyer account is required for checkout. You may keep shopping and add items to your Bag.',
-        error: true,
-      );
+      if (_approvalPromptOpen) return;
+      _approvalPromptOpen = true;
+      final epoch = repo.session.identityEpoch;
+      try {
+        final review = await showBuyerVerificationPrompt(
+          context,
+          selection.page.user!,
+        );
+        if (review &&
+            mounted &&
+            _accountCurrent &&
+            identical(_selection, selection)) {
+          _checkoutAccount.check(page: selection.page);
+          if (mounted) BuyerActions.reviewVerification(context);
+        }
+      } on BackendException {
+        await _recoverAfterSessionChange(epoch);
+      } finally {
+        _approvalPromptOpen = false;
+      }
       return;
     }
     selection.quantityText = _quantity.text;

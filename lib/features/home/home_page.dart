@@ -39,6 +39,7 @@ class HomePage extends StatefulWidget {
     required this.onLogin,
     required this.onLogout,
     this.initial,
+    this.verificationRequests,
     this.initialProductSlug,
     this.onProductRestored,
     this.initialDestination = 0,
@@ -48,6 +49,7 @@ class HomePage extends StatefulWidget {
   final VoidCallback onLogin;
   final Future<void> Function() onLogout;
   final WebPage? initial;
+  final Listenable? verificationRequests;
   final String? initialProductSlug;
   final VoidCallback? onProductRestored;
   final int initialDestination;
@@ -89,6 +91,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       BuyerEngagementRepository(widget.repository).reportAdvertisement,
     );
     _home.addListener(_homeChanged);
+    widget.verificationRequests?.addListener(_showVerification);
     _homeChanged();
     _tab = widget.initialDestination;
     _visited.add(_tab);
@@ -116,10 +119,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.verificationRequests?.removeListener(_showVerification);
     _home.removeListener(_homeChanged);
     _home.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  void _showVerification() => _openProfileSection('identity');
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.verificationRequests != widget.verificationRequests) {
+      oldWidget.verificationRequests?.removeListener(_showVerification);
+      widget.verificationRequests?.addListener(_showVerification);
+    }
   }
 
   @override

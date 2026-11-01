@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
@@ -349,7 +350,28 @@ class _BagContentsState extends State<_BagContents>
       BuyerActions.login(context, destination: 'cart');
       return;
     }
-    if (!_bag.approved || !_bag.ready || _opening) return;
+    if (!_bag.approved) {
+      setState(() => _modalOpen = true);
+      try {
+        final review = await showBuyerVerificationPrompt(
+          context,
+          _bag.data!.user!,
+        );
+        if (review && mounted && _ensureAccount()) {
+          _checkoutAccount.check(page: _bag.data!);
+          if (mounted) BuyerActions.reviewVerification(context);
+        }
+      } on BackendException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      } finally {
+        if (mounted) setState(() => _modalOpen = false);
+      }
+      return;
+    }
+    if (!_bag.ready || _opening) return;
     setState(() => _opening = true);
     try {
       if (!identical(_checkoutAccount.session, widget.repository.session)) {
@@ -425,10 +447,11 @@ class _BagContentsState extends State<_BagContents>
       : pesos(_bag.quote![key]);
   Widget _button() => FilledButton.icon(
     onPressed:
-        !_bag.ready ||
-            _opening ||
+        _opening ||
             _modalOpen ||
-            (_bag.data?.user != null && !_bag.approved)
+            !_bag.isCurrent ||
+            _bag.busy ||
+            (_bag.data?.user == null || _bag.approved) && !_bag.ready
         ? null
         : _checkout,
     icon: const Icon(Icons.arrow_forward),
