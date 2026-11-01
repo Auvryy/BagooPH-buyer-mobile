@@ -553,8 +553,25 @@ class _BagContentsState extends State<_BagContents>
     final priced = mapsOf(_bag.quote?['items'])
         .where((row) => row['id'] == id)
         .firstOrNull;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _bag.selected.contains(id) ? BagooTheme.rose : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _bag.selected.contains(id)
+              ? const Color(0xFFF4C8D2)
+              : BagooTheme.line,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D0F172A),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -782,6 +799,20 @@ class _BagContentsState extends State<_BagContents>
                     ChoiceChip(
                       label: Text(filter.value),
                       selected: _filter == filter.key,
+                      showCheckmark: false,
+                      side: BorderSide(
+                        color: _filter == filter.key
+                            ? BagooTheme.strong
+                            : BagooTheme.line,
+                      ),
+                      labelStyle: TextStyle(
+                        fontFamily: 'Plus Jakarta Sans',
+                        color: _filter == filter.key
+                            ? BagooTheme.strong
+                            : BagooTheme.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                       onSelected: (_) =>
                           _editFilters(() => _filter = filter.key),
                     ),
@@ -906,7 +937,12 @@ class _BagContentsState extends State<_BagContents>
       final current = _ensureAccount(notify: false);
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Shopping Bag'),
+          backgroundColor: BagooTheme.strong,
+          foregroundColor: Colors.white,
+          title: const Text(
+            'Shopping Bag',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
           actions: [
             IconButton(
               tooltip: 'Refresh Bag',

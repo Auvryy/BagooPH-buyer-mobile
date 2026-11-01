@@ -91,6 +91,21 @@ abstract final class BagooTheme {
           ),
         ),
       ),
+      chipTheme: ChipThemeData(
+        backgroundColor: Colors.white,
+        selectedColor: rose,
+        disabledColor: canvas,
+        showCheckmark: false,
+        side: const BorderSide(color: line),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        labelStyle: const TextStyle(
+          fontFamily: 'Plus Jakarta Sans',
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: ink,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      ),
       dividerTheme: const DividerThemeData(color: border, thickness: 1),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white,

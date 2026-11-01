@@ -44,9 +44,9 @@ class ProductHeading extends StatelessWidget {
       child: Text(
         text,
         style: const TextStyle(
-          fontSize: 18,
+          fontSize: 16,
           height: 1.4,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w700,
         ),
       ),
     ),

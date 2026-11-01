@@ -556,9 +556,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     enabled: _hasSale && !_busy && !_saving && !_reminding,
     child: Scaffold(
       appBar: AppBar(
+        backgroundColor: BagooTheme.strong,
+        foregroundColor: Colors.white,
         title: const Text(
           'Product',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
@@ -1148,10 +1150,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     child: Text(
       s.product['name'].toString(),
       style: const TextStyle(
-        fontSize: 24,
+        fontSize: 21,
         height: 1.3,
         fontWeight: FontWeight.w800,
-        letterSpacing: -.4,
+        letterSpacing: -.3,
       ),
     ),
   );
@@ -1240,8 +1242,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             Text(
               s.priceLabel,
               style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
                 color: BagooTheme.crimson,
               ),
             ),
@@ -1293,6 +1295,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               .map(
                 (o) => ChoiceChip(
                   selected: s.color == o['name'],
+                  showCheckmark: false,
+                  side: BorderSide(
+                    color: s.color == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.line,
+                  ),
+                  labelStyle: TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: s.color == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                   avatar: _optionAvatar(o),
                   label: Text(o['name'].toString()),
                   selectedColor: BagooTheme.rose,
@@ -1328,6 +1344,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               .map(
                 (o) => ChoiceChip(
                   selected: s.size == o['name'],
+                  showCheckmark: false,
+                  side: BorderSide(
+                    color: s.size == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.line,
+                  ),
+                  labelStyle: TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: s.size == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                   label: Text(o['name'].toString()),
                   selectedColor: BagooTheme.rose,
                   onSelected: _busy || !s.sizeAvailable(o['name'].toString())
@@ -1660,28 +1690,42 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           const ProductHeading('Product specifications'),
           for (final row in rows.entries)
             Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final label = Text(
                     row.key,
                     style: const TextStyle(
                       fontSize: 12,
+                      height: 1.5,
                       color: BagooTheme.muted,
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
+                  );
+                  final value = Text(
                     row.value.toString().isEmpty
                         ? 'Not listed'
                         : row.value.toString(),
                     style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
+                      height: 1.5,
                       fontWeight: FontWeight.w600,
                     ),
-                  ),
-                ],
+                  );
+                  if (box.maxWidth < 280 ||
+                      MediaQuery.textScalerOf(context).scale(12) >= 20) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [label, const SizedBox(height: 3), value],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: box.maxWidth * .38, child: label),
+                      Expanded(child: value),
+                    ],
+                  );
+                },
               ),
             ),
           const Text(
@@ -1716,9 +1760,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               ),
           ],
           const ProductHeading('Product Description'),
-          Text(
-            p['description']?.toString() ?? 'No description provided.',
-            style: const TextStyle(fontSize: 14, height: 1.7),
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              p['description']?.toString() ?? 'No description provided.',
+              textAlign: TextAlign.start,
+              style: const TextStyle(fontSize: 13, height: 1.65),
+            ),
           ),
         ],
       ),
