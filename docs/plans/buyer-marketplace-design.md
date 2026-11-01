@@ -61,3 +61,7 @@ The current source at the signed-in header checkpoint passed whole-project analy
 ## Verification dialog accessibility checkpoint
 
 Synthetic review revealed that the verification explanation could be squeezed out in landscape with enlarged text and a keyboard inset. The dialog now dismisses keyboard focus, uses a compact scrollable layout, and provides shorter status-specific guidance. Six verification cases passed, including scrolling and selecting the account action on a constrained screen; 52 synthetic responsive layouts passed with the media settings applied to dialog overlays. Phone and landscape dialog renders were inspected and focused analysis was clean. The previous APK predates this dialog fix and must be rebuilt; physical-device review remains open.
+
+## Current verification-fix Android build
+
+The configured debug APK was rebuilt after the compact verification-dialog fix with one Gradle worker and a 1.5 GB heap cap. The build succeeded with the existing Android SDK XML version warning. Package inspection confirmed the Bagoo buyer package, label and adaptive launcher resource. Whole-project analysis is clean; the earlier full run passed 861 cases, followed by 28 focused search/app cases, six verification cases and 52 responsive synthetic layout cases for the later changes. Bagoo was not confirmed in the foreground on the connected phone, so this APK has not been installed for device review. Physical acceptance and live imagery remain open.
