@@ -6,4 +6,6 @@ Profile data and voucher actions now retain the opening buyer scope. Expired or 
 
 Repeated Bag product taps now open one product route, and retained quantity actions wait until it closes.
 
+Wallet and Buy Again navigation retain their opening session across replies and destination creation; malformed payment context and selected item IDs are rejected.
+
 Verification is recorded in buyer-android-device-acceptance.md. The initial physical Android batch passed 26 synthetic cases. A later live driver run was interrupted by debugging transport failures and is not claimed as passing. The aggregate Android runner is prepared, not yet verified on-device. Normal-app reinstall, final profile-fix phone acceptance, Google/provider and remaining feature journeys are still open. No website edits or publication are included. This PR description remains a local draft.

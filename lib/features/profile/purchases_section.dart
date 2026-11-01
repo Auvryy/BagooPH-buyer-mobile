@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/buyer_account_scope.dart';
 import '../products/product_page.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
@@ -30,16 +31,23 @@ Future<void> openWalletPayment(
   ProfileRepository repository,
   int id,
 ) async {
+  final account = BuyerAccountScope(repository.session);
   final page = await repository.buyer.document('/wallet/payments/$id');
+  account.check(page: page);
   repository.buyer.requireNoErrors(page);
-  if (page.props['payment'] is! Map) {
+  if (page.component != 'Buyer/WalletPayment' ||
+      page.props['payment'] is! Map ||
+      mapOf(page.props['payment'])['id'] != id) {
     throw const BackendException('This wallet payment is unavailable.');
   }
   if (context.mounted) {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            OrderResultPage(repository: repository.buyer, initial: page),
+        builder: (_) => OrderResultPage(
+          repository: repository.buyer,
+          initial: page,
+          account: account,
+        ),
       ),
     );
   }
@@ -51,14 +59,19 @@ Future<void> buyAgain(
   int orderId,
   String token,
 ) async {
+  final account = BuyerAccountScope(repository.session);
   final response = await repository.json('/buyer/orders/$orderId/buy-again', {
     'mode': 'purchase',
     'request_token': token,
   });
+  account.check();
   final rows = mapsOf(mapOf(response['result'])['items']);
   if (mapOf(response['result'])['order_id'] != orderId ||
       rows.isEmpty ||
-      rows.any((row) => row['cart_item_id'] is! num)) {
+      rows.any(
+        (row) =>
+            row['cart_item_id'] is! int || (row['cart_item_id'] as int) <= 0,
+      )) {
     throw const BackendException(
       'The Buy again selection was not confirmed. Check your Bag before retrying.',
     );
@@ -68,6 +81,7 @@ Future<void> buyAgain(
       MaterialPageRoute<void>(
         builder: (_) => BagPage(
           repository: repository.buyer,
+          account: account,
           initialSelection: rows
               .map((row) => (row['cart_item_id'] as num).toInt())
               .toList(),

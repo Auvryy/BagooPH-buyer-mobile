@@ -11,6 +11,7 @@ import 'private_pdf_misuse_test.dart' as documents;
 import 'voucher_misuse_test.dart' as vouchers;
 import '../test/buyer_discovery_parity_test.dart' as discovery;
 import '../test/buyer_post_purchase_test.dart' as purchases;
+import '../test/purchase_navigation_misuse_test.dart' as purchase_navigation;
 import '../test/buyer_links_test.dart' as links;
 import '../test/profile_root_misuse_test.dart' as profile_root;
 import '../test/bag_product_navigation_test.dart' as bag_navigation;
@@ -35,6 +36,7 @@ void main() {
   group('Android vouchers', vouchers.main);
   group('Android discovery', discovery.main);
   group('Android purchases', purchases.main);
+  group('Android purchase navigation', purchase_navigation.main);
   group('Android incoming links', links.main);
   group('Android profile ownership', profile_root.main);
   group('Android conversation updates', chat.main);

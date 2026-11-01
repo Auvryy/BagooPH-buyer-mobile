@@ -51,3 +51,9 @@ One additional case reproduced a Bag's first read starting through a different r
 ### Bag product navigation
 
 Two additional cases reproduced three product reads/routes from three retained taps and an unintended quantity change through a cached Bag control while its product route was open. Product navigation now sets the existing opening guard synchronously and releases it when the child closes; returning refreshes the same Bag once. All 43 navigation/dialog/profile checks pass on the final source and analysis is clean. The aggregate Android runner includes these cases for later device acceptance. The earlier full suite is still being collected and predates this navigation slice, so it is not full-suite evidence for the new source.
+
+### Purchase navigation and late replies
+
+Two new cases reproduced a delayed wallet-payment read and Buy Again acknowledgement navigating after the opening session ended. Capture a scope before each request, check it after the reply and pass it into the payment/Bag destination. Wallet navigation validates the existing backend `Buyer/WalletPayment` component and requested payment ID. Buy Again requires positive integer Bag item IDs before building the selected-item route.
+
+All ten final purchase-navigation cases pass, including both current-session destinations and six malformed-ID responses. The related checkout/post-purchase selection passes 29 cases and full analysis is clean. The preceding configured Android build passed before this slice; current-source build/device acceptance are still required. The preceding full-suite run is still being collected and is not evidence for these new cases. Phone interaction remains deferred at the owner's request.
