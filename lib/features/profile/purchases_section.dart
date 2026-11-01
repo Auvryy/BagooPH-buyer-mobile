@@ -119,6 +119,51 @@ class PurchasesSection extends StatefulWidget {
 
 class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
   bool _confirming = false;
+  final _filterScroll = ScrollController();
+  final _filterKeys = {
+    for (final status in buyerOrderFilters.keys) status: GlobalKey(),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelected();
+  }
+
+  @override
+  void didUpdateWidget(covariant PurchasesSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page.props['currentOrderStatus'] !=
+        widget.page.props['currentOrderStatus']) {
+      _revealSelected();
+    }
+  }
+
+  void _revealSelected() {
+    final status = widget.page.props['currentOrderStatus']?.toString() ?? 'all';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_filterScroll.hasClients ||
+          (widget.page.props['currentOrderStatus']?.toString() ?? 'all') !=
+              status) {
+        return;
+      }
+      final target = _filterKeys[status]?.currentContext?.findRenderObject();
+      if (target != null) {
+        _filterScroll.position.ensureVisible(
+          target,
+          alignment: .5,
+          duration: Duration.zero,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _filterScroll.dispose();
+    super.dispose();
+  }
 
   Future<void> _confirmReceipt(Map<String, dynamic> order) async {
     final id = order['id'];
@@ -190,11 +235,13 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
         Icons.inventory_2_outlined,
       ),
       SingleChildScrollView(
+        controller: _filterScroll,
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
             for (final status in buyerOrderFilters.entries)
               Semantics(
+                key: _filterKeys[status.key],
                 button: true,
                 selected: current == status.key,
                 child: InkWell(

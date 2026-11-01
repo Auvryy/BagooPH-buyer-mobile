@@ -155,6 +155,17 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
       onUserChanged: (_) {},
     ),
   ),
+  'purchases' => Scaffold(
+    appBar: AppBar(title: const Text('Your account')),
+    body: ProfilePage(
+      repository: repo,
+      user: buyer,
+      initialSection: 'orders',
+      onLogin: () {},
+      onLogout: () async {},
+      onUserChanged: (_) {},
+    ),
+  ),
   'inbox' => InboxPage(repository: ProfileRepository(repo)),
   'chat' => ChatPage(
     repository: repo,
@@ -193,6 +204,7 @@ void main() {
     'bag',
     'checkout',
     'profile',
+    'purchases',
     'chat',
     'inbox',
     'login',

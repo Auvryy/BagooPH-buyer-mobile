@@ -10,6 +10,60 @@ import 'support/fake_buyer_repository.dart' show buyer;
 import 'support/return_fixtures.dart';
 
 void main() {
+  testWidgets('initial and updated selected statuses are visible', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = AccountFixtureRepository();
+    addTearDown(repository.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'return_refund',
+            }),
+            onQuery: (_, _) {},
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Return/Refund (0)').hitTestable(), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.text('Return/Refund (0)')).style?.color,
+      BagooTheme.strong,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'all',
+            }),
+            onQuery: (_, _) {},
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('All (0)').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('purchase status tabs scroll and request the selected filter', (
     tester,
   ) async {

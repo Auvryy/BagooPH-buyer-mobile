@@ -41,3 +41,7 @@ Conversation detail uses the branded header, compact incoming and outgoing bubbl
 ## Search entry and navigation accessibility checkpoint
 
 The header search opens the retained search screen with its input focused and preserves an existing draft on return. A queued focus cannot activate the keyboard after switching to another tab. The duplicate Home search field was removed; Home filters still open search with the selected criteria. Bottom navigation grows for enlarged labels instead of overflowing. Discovery and app widget checks passed 22 cases with one worker; the focused filter and hidden-focus cases and five search cases passed. A synthetic 375-pixel Home render was inspected and focused analysis was clean. End-to-end and physical-device review remain open.
+
+## Purchase status visibility checkpoint
+
+The horizontal status strip reveals the selected status when the section opens or its filter changes, including statuses initially outside the viewport. Nine purchase-section tests passed with one worker, four responsive synthetic purchase layouts passed, and the 375-pixel preview was inspected. Focused analysis was clean. Broader regression and physical-device review remain open.
