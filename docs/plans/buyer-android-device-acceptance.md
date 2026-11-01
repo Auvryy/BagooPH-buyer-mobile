@@ -73,3 +73,7 @@ Final purchase-action selection: all 27 purchase/profile/helper cases pass with 
 ### Order receipt dialog re-entry
 
 A direct rapid callback reproduction opened two receipt dialogs for one order. The order detail now latches the decision before showing its dialog, rechecks session and receipt eligibility after confirmation, clears private order content if the session changed, and ignores delayed actions after disposal. The focused order-update suite passes all eight cases, including one-dialog/one-submit and session-change/no-submit coverage. Static analysis is clean. Full-suite, current Android build and physical acceptance remain outstanding.
+
+### Order detail child-route ownership
+
+A synthetic cancellation form still sent `/buyer/orders/11/cancel` after its buyer session was cleared. Order detail now captures the opening buyer scope and passes it into cancellation, review, return, wallet and Buy Again destinations. Cancel and review forms clear their drafts and hide purchase details after scope expiry, and mutations check the scope before submission and after replies. Successful synthetic cancellation and review replies still update the parent purchase. The combined purchase, return and responsive-journey selection passed 112 cases with one worker; the added expired-form visibility assertions also pass. Static analysis is clean. The full suite, current Android build and physical acceptance remain outstanding.
