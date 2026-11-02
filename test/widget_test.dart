@@ -1,5 +1,7 @@
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
+import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
+import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -74,6 +76,37 @@ void main() {
       await press(tester, find.text('Log out'));
       expect(find.text('You have been logged out.'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Log In'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'signed-in buyer reaches reviewed checkout from Home product detail',
+    (tester) async {
+      await tester.pumpWidget(MainApp(repository: repository));
+      await tester.enterText(field('Email address'), 'buyer@example.test');
+      await tester.enterText(field('Password'), 'Password!123');
+      await press(tester, find.widgetWithText(FilledButton, 'Log In'));
+
+      await press(tester, find.text('Everyday bag 1'));
+      expect(find.byType(ProductPage), findsOneWidget);
+      expect(repository.productCalls, 1);
+
+      await press(tester, find.widgetWithText(FilledButton, 'Buy Now'));
+      expect(find.byType(CheckoutPage), findsOneWidget);
+      expect(repository.orderCalls, 0);
+
+      await press(tester, find.widgetWithText(FilledButton, 'Review order'));
+      expect(find.text('Confirm your order'), findsOneWidget);
+      expect(repository.orderCalls, 0);
+
+      await press(tester, find.byType(CheckboxListTile).last);
+      await press(tester, find.widgetWithText(FilledButton, 'Place order'));
+      expect(repository.orderCalls, 1);
+      expect(
+        repository.submittedOrder?['checkout_token'],
+        checkoutFixtureToken(),
+      );
+      expect(find.text('Order #TEST-1 successfully placed.'), findsOneWidget);
     },
   );
 
