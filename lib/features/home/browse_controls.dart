@@ -31,6 +31,9 @@ class BrowseSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
+      final textScale = MediaQuery.textScalerOf(context).scale(16);
+      final compact = box.maxWidth < 280;
+      final compactLabel = compact && textScale > 24 ? 'Search' : label;
       final search = TextField(
         controller: controller,
         focusNode: focusNode,
@@ -39,11 +42,18 @@ class BrowseSearchField extends StatelessWidget {
         onSubmitted: onSubmitted,
         onChanged: onChanged,
         decoration: InputDecoration(
-          labelText: label,
+          labelText: compactLabel,
           floatingLabelBehavior: FloatingLabelBehavior.always,
-          hintText: 'Find products',
+          hintText: compact ? 'Find' : 'Find products',
           counterText: '',
-          prefixIcon: const Icon(Icons.search_rounded),
+          isDense: compact,
+          contentPadding: compact
+              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
+              : null,
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          prefixIconConstraints: compact
+              ? const BoxConstraints(minWidth: 40, minHeight: 48)
+              : null,
           suffixIcon: IconButton(
             tooltip: clearable && controller.text.isNotEmpty
                 ? 'Clear search'
@@ -58,6 +68,9 @@ class BrowseSearchField extends StatelessWidget {
                   : Icons.arrow_forward_rounded,
             ),
           ),
+          suffixIconConstraints: compact
+              ? const BoxConstraints(minWidth: 48, minHeight: 48)
+              : null,
         ),
       );
       if (!showFilters) return search;
@@ -69,7 +82,8 @@ class BrowseSearchField extends StatelessWidget {
               tooltip: filterLabel ?? 'Filter products',
               onPressed: onFilters,
               style: IconButton.styleFrom(
-                minimumSize: const Size(56, 56),
+                minimumSize: Size(compact ? 48 : 56, compact ? 48 : 56),
+                padding: EdgeInsets.zero,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(BagooTheme.controlRadius),
                 ),
@@ -84,8 +98,7 @@ class BrowseSearchField extends StatelessWidget {
                 label: Text(filterLabel!),
               ),
             );
-      if (MediaQuery.textScalerOf(context).scale(16) > 24 ||
-          box.maxWidth < 280) {
+      if (textScale > 24 || box.maxWidth < 232) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

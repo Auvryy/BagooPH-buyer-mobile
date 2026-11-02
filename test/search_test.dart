@@ -131,6 +131,52 @@ void main() {
     controller.dispose();
     repo.session.close();
   });
+  testWidgets(
+    'phone search keeps filters beside the field unless text is enlarged',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final repo = SearchRepository();
+      addTearDown(repo.session.close);
+
+      Widget screen(double scale) => MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: MediaQuery(
+            data: MediaQueryData(
+              size: const Size(320, 900),
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: SearchPage(repository: repo),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(screen(1));
+      await tester.pumpAndSettle();
+      final field = find.byType(TextField).first;
+      final filters = find.byTooltip('Filters');
+      final fieldBounds = tester.getRect(field);
+      final filterBounds = tester.getRect(filters);
+      expect(
+        (fieldBounds.center.dy - filterBounds.center.dy).abs(),
+        lessThan(1),
+      );
+      expect(filterBounds.left, greaterThan(fieldBounds.right));
+
+      await tester.pumpWidget(screen(2));
+      await tester.pumpAndSettle();
+      expect(find.text('Search'), findsOneWidget);
+      final enlargedFieldBounds = tester.getRect(field);
+      final enlargedFilterBounds = tester.getRect(filters);
+      expect(
+        enlargedFilterBounds.top,
+        greaterThanOrEqualTo(enlargedFieldBounds.bottom + 7),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   for (final layout in [(375.0, 1.0), (1200.0, 1.0), (375.0, 2.0)]) {
     testWidgets(
       'filters and results fit width ${layout.$1} with text ${layout.$2}',

@@ -276,6 +276,7 @@ void main() {
   ]) {
     for (final scene in [
       (const Size(320, 740), 1.0, 0.0),
+      if (name == 'search') (const Size(320, 740), 2.0, 0.0),
       (const Size(375, 812), 1.0, 0.0),
       (const Size(700, 375), 2.0, 120.0),
       (const Size(1024, 768), 1.0, 0.0),
@@ -333,6 +334,16 @@ void main() {
               tester.getSize(find.byType(CheckboxListTile)).height,
               greaterThanOrEqualTo(48),
             );
+          }
+          if (name == 'search' && scene.$1.width == 320) {
+            final field = tester.getRect(find.byType(TextField).first);
+            final filters = tester.getRect(find.byTooltip('Filters'));
+            if (scene.$2 == 1) {
+              expect((field.center.dy - filters.center.dy).abs(), lessThan(1));
+              expect(filters.left, greaterThan(field.right));
+            } else {
+              expect(filters.top, greaterThanOrEqualTo(field.bottom + 7));
+            }
           }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
