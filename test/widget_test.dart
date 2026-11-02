@@ -1,5 +1,6 @@
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,7 +64,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Log out'),
         300,
-        scrollable: find.byType(Scrollable).last,
+        scrollable: find
+            .descendant(
+              of: find.byType(ProfilePage),
+              matching: find.byType(Scrollable),
+            )
+            .last,
       );
       await press(tester, find.text('Log out'));
       expect(find.text('You have been logged out.'), findsOneWidget);
@@ -76,11 +82,12 @@ void main() {
     (tester) async {
       await tester.pumpWidget(MainApp(repository: repository));
       await press(tester, find.text('Browse the marketplace'));
+      await press(tester, find.byKey(const ValueKey('buyer-header-search')));
       await tester.enterText(find.byType(TextField).first, 'tea & coffee');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(repository.searchRequests.last['search'], 'tea & coffee');
-      expect(input('Search products'), findsOneWidget);
+      expect(find.byKey(const ValueKey('buyer-header-search')), findsOneWidget);
       await press(tester, find.byTooltip('Filters'));
       final departments = find.widgetWithText(
         DropdownButtonFormField<String>,

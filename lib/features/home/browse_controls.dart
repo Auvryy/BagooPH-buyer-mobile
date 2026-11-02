@@ -16,6 +16,7 @@ class BrowseSearchField extends StatelessWidget {
     this.filterLabel,
     this.clearable = false,
     this.showFilters = true,
+    this.focusNode,
   });
   final TextEditingController controller;
   final String label;
@@ -25,12 +26,14 @@ class BrowseSearchField extends StatelessWidget {
   final String? filterLabel;
   final bool clearable;
   final bool showFilters;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final search = TextField(
         controller: controller,
+        focusNode: focusNode,
         maxLength: 100,
         textInputAction: TextInputAction.search,
         onSubmitted: onSubmitted,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme.dart';
 import '../../core/web_session.dart';
 import '../../core/foreground_refresh.dart';
 import '../../core/widgets.dart';
@@ -153,7 +154,12 @@ class _InboxPageState extends State<InboxPage> {
       enabled: !_accessLost,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Store & Courier Messages'),
+          backgroundColor: BagooTheme.strong,
+          foregroundColor: Colors.white,
+          title: const Text(
+            'Messages',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
           actions: [
             IconButton(
               tooltip: 'Refresh inbox',
@@ -214,35 +220,113 @@ class _InboxPageState extends State<InboxPage> {
                         }
                         final conversation = rows[index - 1];
                         final recipient = mapOf(conversation['user']);
+                        final unread =
+                            (conversation['unread_count'] as num? ?? 0).toInt();
+                        final name =
+                            mapOf(recipient['shop'])['name']?.toString() ??
+                            recipient['name']?.toString() ??
+                            'Conversation';
+                        final time =
+                            conversation['last_time']?.toString() ?? '';
                         return ProfilePanel(
-                          padding: 8,
-                          child: ListTile(
-                            leading: ProfileAvatar(
-                              recipient,
-                              widget.repository.session,
-                              size: 44,
+                          padding: 0,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(
+                              BagooTheme.panelRadius,
                             ),
-                            title: Text(
-                              mapOf(recipient['shop'])['name']?.toString() ??
-                                  recipient['name'].toString(),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
+                            onTap: _loading ? null : () => _open(conversation),
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  ProfileAvatar(
+                                    recipient,
+                                    widget.repository.session,
+                                    size: 44,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 5),
+                                        Text(
+                                          '${conversation['last_message'] ?? ''}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            height: 1.4,
+                                            color: BagooTheme.muted,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 5),
+                                        Text(
+                                          recipient['role'] == 'courier'
+                                              ? 'Courier'
+                                              : 'Store',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: BagooTheme.muted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  SizedBox(
+                                    width: 64,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        if (time.isNotEmpty)
+                                          Text(
+                                            time,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.end,
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: BagooTheme.muted,
+                                            ),
+                                          ),
+                                        if (unread > 0) ...[
+                                          const SizedBox(height: 8),
+                                          Semantics(
+                                            label: '$unread unread messages',
+                                            excludeSemantics: true,
+                                            child: Badge(
+                                              backgroundColor:
+                                                  BagooTheme.strong,
+                                              textStyle: const TextStyle(
+                                                fontFamily: 'Plus Jakarta Sans',
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                              label: Text(
+                                                unread > 99 ? '99+' : '$unread',
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            subtitle: Text(
-                              '${conversation['last_message'] ?? ''}\n${recipient['role'] == 'courier' ? 'Courier' : 'Store'} · ${conversation['last_time'] ?? ''}',
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing:
-                                (conversation['unread_count'] as num? ?? 0) > 0
-                                ? Badge(
-                                    label: Text(
-                                      conversation['unread_count'].toString(),
-                                    ),
-                                  )
-                                : const Icon(Icons.chevron_right),
-                            onTap: _loading ? null : () => _open(conversation),
                           ),
                         );
                       },

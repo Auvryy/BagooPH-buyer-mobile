@@ -10,6 +10,121 @@ import 'support/fake_buyer_repository.dart' show buyer;
 import 'support/return_fixtures.dart';
 
 void main() {
+  testWidgets('initial and updated selected statuses are visible', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = AccountFixtureRepository();
+    addTearDown(repository.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'return_refund',
+            }),
+            onQuery: (_, _) {},
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Return/Refund (0)').hitTestable(), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.text('Return/Refund (0)')).style?.color,
+      BagooTheme.strong,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'all',
+            }),
+            onQuery: (_, _) {},
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('All (0)').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  testWidgets('purchase status tabs scroll and request the selected filter', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+    final repository = AccountFixtureRepository();
+    addTearDown(repository.session.close);
+    String? requested;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: PurchasesSection(
+            repository: repository,
+            page: WebPage('Buyer/Profile', {
+              ...accountPage().props,
+              'orders': {'data': []},
+              'currentOrderStatus': 'all',
+            }),
+            onQuery: (status, _) => requested = status,
+            reload: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final selected = tester.widget<Text>(find.text('All (0)'));
+    expect(selected.style?.color, BagooTheme.strong);
+    expect(
+      tester.getSemantics(find.text('All (0)')),
+      isSemantics(
+        label: 'All (0)',
+        isButton: true,
+        isSelected: true,
+        hasTapAction: true,
+      ),
+    );
+    final target = find
+        .ancestor(of: find.text('All (0)'), matching: find.byType(InkWell))
+        .first;
+    expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+    expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
+    final strip = find.byWidgetPredicate(
+      (widget) =>
+          widget is SingleChildScrollView &&
+          widget.scrollDirection == Axis.horizontal,
+    );
+    expect(strip, findsOneWidget);
+    await tester.drag(strip, const Offset(-1500, 0));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Return/Refund (0)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Return/Refund (0)'));
+    await tester.pump();
+    expect(requested, 'return_refund');
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
   for (final resume in [true, false]) {
     testWidgets(
       resume

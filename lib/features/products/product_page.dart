@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
@@ -42,6 +43,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   bool _busy = false;
   bool _saving = false;
   bool _reminding = false;
+  bool _approvalPromptOpen = false;
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
   final _scroll = ScrollController();
@@ -289,6 +291,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   void _purchase(bool buyNow) {
+    if (_approvalPromptOpen) return;
     if (!_accountCurrent) {
       unawaited(_load(quiet: true));
       return;
@@ -297,6 +300,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     if (s.page.isCached) return;
     if (buyNow && s.page.user == null) {
       _login();
+      return;
+    }
+    if (buyNow && !s.approved) {
+      unawaited(_add(true));
       return;
     }
     if (!s.complete) {
@@ -394,10 +401,26 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       return;
     }
     if (buyNow && !selection.approved) {
-      _message(
-        'An active approved buyer account is required for checkout. You may keep shopping and add items to your Bag.',
-        error: true,
-      );
+      if (_approvalPromptOpen) return;
+      _approvalPromptOpen = true;
+      final epoch = repo.session.identityEpoch;
+      try {
+        final review = await showBuyerVerificationPrompt(
+          context,
+          selection.page.user!,
+        );
+        if (review &&
+            mounted &&
+            _accountCurrent &&
+            identical(_selection, selection)) {
+          _checkoutAccount.check(page: selection.page);
+          if (mounted) BuyerActions.reviewVerification(context);
+        }
+      } on BackendException {
+        await _recoverAfterSessionChange(epoch);
+      } finally {
+        _approvalPromptOpen = false;
+      }
       return;
     }
     selection.quantityText = _quantity.text;
@@ -533,9 +556,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     enabled: _hasSale && !_busy && !_saving && !_reminding,
     child: Scaffold(
       appBar: AppBar(
+        backgroundColor: BagooTheme.strong,
+        foregroundColor: Colors.white,
         title: const Text(
           'Product',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
@@ -1125,10 +1150,10 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     child: Text(
       s.product['name'].toString(),
       style: const TextStyle(
-        fontSize: 24,
+        fontSize: 21,
         height: 1.3,
         fontWeight: FontWeight.w800,
-        letterSpacing: -.4,
+        letterSpacing: -.3,
       ),
     ),
   );
@@ -1217,8 +1242,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             Text(
               s.priceLabel,
               style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
                 color: BagooTheme.crimson,
               ),
             ),
@@ -1270,6 +1295,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               .map(
                 (o) => ChoiceChip(
                   selected: s.color == o['name'],
+                  showCheckmark: false,
+                  side: BorderSide(
+                    color: s.color == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.line,
+                  ),
+                  labelStyle: TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: s.color == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                   avatar: _optionAvatar(o),
                   label: Text(o['name'].toString()),
                   selectedColor: BagooTheme.rose,
@@ -1305,6 +1344,20 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               .map(
                 (o) => ChoiceChip(
                   selected: s.size == o['name'],
+                  showCheckmark: false,
+                  side: BorderSide(
+                    color: s.size == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.line,
+                  ),
+                  labelStyle: TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: s.size == o['name']
+                        ? BagooTheme.strong
+                        : BagooTheme.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                   label: Text(o['name'].toString()),
                   selectedColor: BagooTheme.rose,
                   onSelected: _busy || !s.sizeAvailable(o['name'].toString())
@@ -1637,28 +1690,42 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           const ProductHeading('Product specifications'),
           for (final row in rows.entries)
             Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final label = Text(
                     row.key,
                     style: const TextStyle(
                       fontSize: 12,
+                      height: 1.5,
                       color: BagooTheme.muted,
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
+                  );
+                  final value = Text(
                     row.value.toString().isEmpty
                         ? 'Not listed'
                         : row.value.toString(),
                     style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
+                      height: 1.5,
                       fontWeight: FontWeight.w600,
                     ),
-                  ),
-                ],
+                  );
+                  if (box.maxWidth < 280 ||
+                      MediaQuery.textScalerOf(context).scale(12) >= 20) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [label, const SizedBox(height: 3), value],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: box.maxWidth * .38, child: label),
+                      Expanded(child: value),
+                    ],
+                  );
+                },
               ),
             ),
           const Text(
@@ -1693,9 +1760,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               ),
           ],
           const ProductHeading('Product Description'),
-          Text(
-            p['description']?.toString() ?? 'No description provided.',
-            style: const TextStyle(fontSize: 14, height: 1.7),
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              p['description']?.toString() ?? 'No description provided.',
+              textAlign: TextAlign.start,
+              style: const TextStyle(fontSize: 13, height: 1.65),
+            ),
           ),
         ],
       ),

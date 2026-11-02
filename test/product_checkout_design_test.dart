@@ -18,6 +18,78 @@ void main() {
     )..addFont(rootBundle.load('assets/fonts/PlusJakartaSans.ttf'))).load();
   });
 
+  for (final scale in [1.0, 2.0]) {
+    testWidgets(
+      'product specifications remain aligned and readable at text scale $scale',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(375, 812);
+        addTearDown(tester.view.reset);
+        final repo = FakeBuyerRepository();
+        addTearDown(repo.session.close);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: BagooTheme.light,
+            builder: (_, child) => MediaQuery(
+              data: MediaQueryData(
+                size: const Size(375, 812),
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: child!,
+            ),
+            home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final label = find.text('Declared weight');
+        final value = find.text('1.1 kg');
+        await tester.scrollUntilVisible(
+          label,
+          400,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(label, findsOneWidget);
+        expect(value, findsOneWidget);
+        final labelRect = tester.getRect(label);
+        final valueRect = tester.getRect(value);
+        if (scale == 1) {
+          expect(valueRect.left, greaterThan(labelRect.left));
+          expect(valueRect.top, closeTo(labelRect.top, 1));
+        } else {
+          expect(valueRect.top, greaterThanOrEqualTo(labelRect.bottom));
+        }
+        final descriptionHeading = find.text('Product Description');
+        await tester.scrollUntilVisible(
+          descriptionHeading,
+          300,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        final description = find.text(
+          'Everyday essentials with a durable finish.',
+        );
+        expect(description, findsOneWidget);
+        expect(
+          tester.getRect(description).left,
+          closeTo(tester.getRect(descriptionHeading).left, 1),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   testWidgets('a long product failure remains scrollable above the keyboard', (
     tester,
   ) async {

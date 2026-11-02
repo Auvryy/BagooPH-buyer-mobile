@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/verification_prompt.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
@@ -12,6 +13,8 @@ import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/chat_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -50,6 +53,25 @@ class ReviewRepository extends FakeBuyerRepository {
         'feedProducts': {...mapOf(page.props['feedProducts']), 'total': 6},
       });
     };
+  }
+
+  @override
+  Future<WebPage> document(String path) async {
+    if (path == '/buyer/messages') {
+      return const WebPage('Buyer/Messages', {
+        'auth': {'user': buyer},
+        'conversations': [
+          {
+            'user': {'id': 3, 'name': 'Everyday Goods', 'role': 'seller'},
+            'last_message': 'Your order is being prepared. Thank you!',
+            'last_time': 'Today',
+            'unread_count': 2,
+            'messages': [],
+          },
+        ],
+      });
+    }
+    return super.document(path);
   }
 
   @override
@@ -115,13 +137,45 @@ class ReviewRepository extends FakeBuyerRepository {
   ];
 }
 
+Widget verificationReview() => Scaffold(
+  body: Center(
+    child: Builder(
+      builder: (context) => FilledButton(
+        onPressed: () => showBuyerVerificationPrompt(context, {
+          ...buyer,
+          'kyc_status': 'unverified',
+        }),
+        child: const Text('Show verification'),
+      ),
+    ),
+  ),
+);
+
 Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
   'home' => HomePage(repository: repo, onLogin: () {}, onLogout: () async {}),
+  'signed-home' => HomePage(
+    repository: repo,
+    initial: homePage(signedIn: true),
+    onLogin: () {},
+    onLogout: () async {},
+  ),
+  'signed-search' => HomePage(
+    repository: repo,
+    initial: homePage(signedIn: true),
+    onLogin: () {},
+    onLogout: () async {},
+  ),
+  'shell-search' => HomePage(
+    repository: repo,
+    onLogin: () {},
+    onLogout: () async {},
+  ),
   'search' => Scaffold(
     appBar: AppBar(title: const Text('Search Bagoo')),
     body: SearchPage(repository: repo),
   ),
   'product' => ProductPage(repository: repo, slug: 'everyday-bag-1'),
+  'verification' => verificationReview(),
   'bag' => BagPage(repository: repo),
   'checkout' => CheckoutPage(repository: repo, initial: checkoutPage()),
   'profile' => Scaffold(
@@ -134,6 +188,18 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
       onUserChanged: (_) {},
     ),
   ),
+  'purchases' => Scaffold(
+    appBar: AppBar(title: const Text('Your account')),
+    body: ProfilePage(
+      repository: repo,
+      user: buyer,
+      initialSection: 'orders',
+      onLogin: () {},
+      onLogout: () async {},
+      onUserChanged: (_) {},
+    ),
+  ),
+  'inbox' => InboxPage(repository: ProfileRepository(repo)),
   'chat' => ChatPage(
     repository: repo,
     userId: 7,
@@ -166,12 +232,18 @@ void main() {
   );
   for (final name in [
     'home',
+    'signed-home',
+    'signed-search',
+    'shell-search',
     'search',
     'product',
+    'verification',
     'bag',
     'checkout',
     'profile',
+    'purchases',
     'chat',
+    'inbox',
     'login',
   ]) {
     for (final scene in [
@@ -195,19 +267,36 @@ void main() {
               child: MaterialApp(
                 theme: BagooTheme.light,
                 debugShowCheckedModeBanner: false,
-                home: MediaQuery(
+                builder: (_, child) => MediaQuery(
                   data: MediaQueryData(
                     size: scene.$1,
                     textScaler: TextScaler.linear(scene.$2),
                     viewInsets: EdgeInsets.only(bottom: scene.$3),
                     disableAnimations: true,
                   ),
-                  child: reviewScreen(name, repo),
+                  child: child!,
                 ),
+                home: reviewScreen(name, repo),
               ),
             ),
           );
           await tester.pumpAndSettle();
+          if (name == 'shell-search' || name == 'signed-search') {
+            final search = find.byKey(const ValueKey('buyer-header-search'));
+            await tester.tap(search);
+            await tester.pumpAndSettle();
+            if (name == 'signed-search') {
+              await tester.enterText(search, 'wireless headphones');
+              await tester.pumpAndSettle();
+            }
+          }
+          if (name == 'verification') {
+            await tester.tap(
+              find.widgetWithText(FilledButton, 'Show verification'),
+            );
+            await tester.pumpAndSettle();
+            expect(find.text('Verification needed'), findsOneWidget);
+          }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
           if (name == 'home' &&
@@ -220,7 +309,13 @@ void main() {
                 .first;
             expect(
               tester.getRect(price).bottom,
-              lessThan(tester.getRect(find.byType(NavigationBar)).top),
+              lessThan(
+                tester
+                    .getRect(
+                      find.byKey(const ValueKey('buyer-bottom-navigation')),
+                    )
+                    .top,
+              ),
             );
           }
           if (name == 'home' && scene.$1.width == 1024 && scene.$2 == 1) {

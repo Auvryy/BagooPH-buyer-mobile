@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
+import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/catalogue_loading.dart';
 import 'package:bagoo_buyer_mobile/features/home/browse_controls.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
+import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,6 +42,22 @@ Future<void> showFirstProduct(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+class NavigationSession extends FakeSession {
+  int inboxReads = 0;
+
+  @override
+  Future<WebPage> page(String path, {bool bootstrap = false}) async {
+    if (path == '/buyer/messages') {
+      inboxReads++;
+      return const WebPage('Buyer/Messages', {
+        'auth': {'user': buyer},
+        'conversations': [],
+      });
+    }
+    return super.page(path, bootstrap: bootstrap);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
@@ -48,14 +67,136 @@ void main() {
   });
 
   testWidgets(
-    'Home keeps the search draft through compact and inline headers',
+    'bottom navigation has accessible selected state and touch targets',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final semantics = tester.ensureSemantics();
+      final session = NavigationSession();
+      final repo = BuyerRepository(session);
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: HomePage(
+            repository: repo,
+            initial: homePage(signedIn: true),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      expect(tester.getSize(header).height, greaterThanOrEqualTo(48));
+      for (final tooltip in ['Notifications', 'Shopping Bag', 'Your profile']) {
+        final target = find
+            .ancestor(
+              of: find.byTooltip(tooltip),
+              matching: find.byType(IconButton),
+            )
+            .first;
+        expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+        expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
+      }
+      final nav = find.byKey(const ValueKey('buyer-bottom-navigation'));
+      for (final label in ['Home', 'Bag', 'Messages', 'Profile']) {
+        final text = find.descendant(of: nav, matching: find.text(label));
+        final target = find
+            .ancestor(of: text, matching: find.byType(InkWell))
+            .first;
+        expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+        expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
+      }
+      final home = find.descendant(of: nav, matching: find.text('Home'));
+      expect(
+        tester.getSemantics(home),
+        isSemantics(
+          label: 'Home',
+          isButton: true,
+          isSelected: true,
+          hasTapAction: true,
+        ),
+      );
+      final messages = find.descendant(
+        of: nav,
+        matching: find.text('Messages'),
+      );
+      await tester.tap(messages);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(messages),
+        isSemantics(
+          label: 'Messages',
+          isButton: true,
+          isSelected: true,
+          hasTapAction: true,
+        ),
+      );
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('header search and guest messages remain reachable', (
+    tester,
+  ) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    var loginCalls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(),
+          onLogin: () => loginCalls++,
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Messages'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in to see your messages'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Log In'));
+    expect(loginCalls, 1);
+    await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+    final input = find.byKey(const ValueKey('buyer-header-search'));
+    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
+    await tester.enterText(input, 'canvas bag');
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('buyer-bottom-navigation')),
+        matching: find.text('Home'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(input).controller!.text, 'canvas bag');
+    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'header search updates results and clears a draft after returning Home',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(375, 812);
-      addTearDown(() {
-        tester.view.reset();
-        tester.platformDispatcher.clearTextScaleFactorTestValue();
-      });
+      addTearDown(tester.view.reset);
       final repo = FakeBuyerRepository();
       addTearDown(repo.session.close);
       await tester.pumpWidget(
@@ -70,28 +211,315 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final search = find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == 'Search products',
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      await tester.tap(header);
+      await tester.pumpAndSettle();
+      await tester.enterText(header, 'canvas');
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last['search'], 'canvas');
+      final requestCount = repo.searchRequests.length;
+      tester.widget<TextField>(header).controller!.selection =
+          const TextSelection.collapsed(offset: 2);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.length, requestCount);
+      expect(
+        find.descendant(
+          of: find.byType(SearchPage),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is TextField &&
+                widget.decoration?.labelText == 'Search products',
+          ),
+        ),
+        findsNothing,
       );
-      await tester.enterText(search, 'canvas tote');
-      for (final scene in [
-        (const Size(900, 768), 1.4),
-        (const Size(1024, 768), 1.0),
-        (const Size(375, 812), 1.0),
-      ]) {
-        tester.platformDispatcher.textScaleFactorTestValue = scene.$2;
-        tester.view.physicalSize = scene.$1;
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<TextField>(search).controller!.text,
-          'canvas tote',
-        );
-        expect(tester.takeException(), isNull);
-      }
-      expect(repo.homeRequests, isEmpty);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('buyer-bottom-navigation')),
+          matching: find.text('Home'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Clear search'));
+      await tester.pumpAndSettle();
+      await tester.tap(header);
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last.containsKey('search'), isFalse);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets(
+    'header search and filters fit a narrow screen with enlarged text',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: HomePage(
+            repository: repo,
+            initial: homePage(),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      await tester.tap(header);
+      await tester.pumpAndSettle();
+      await tester.enterText(header, 'coffee');
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last['search'], 'coffee');
+      expect(find.byTooltip('Filters'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'a filter request received while search is hidden applies when reopened',
+    (tester) async {
+      final repo = FakeBuyerRepository();
+      final controller = TextEditingController();
+      addTearDown(repo.session.close);
+      addTearDown(controller.dispose);
+      const initial = SearchFilters();
+      const filtered = SearchFilters(category: 'electronics');
+      Widget screen(bool active, SearchFilters request) => MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: SearchPage(
+            repository: repo,
+            controller: controller,
+            embedded: true,
+            active: active,
+            request: request,
+          ),
+        ),
+      );
+      await tester.pumpWidget(screen(true, initial));
+      await tester.pumpAndSettle();
+      final count = repo.searchRequests.length;
+      await tester.pumpWidget(screen(false, filtered));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.length, count);
+      await tester.pumpWidget(screen(true, filtered));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last['category'], 'electronics');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'signed-in header keeps search and actions usable on a narrow screen',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      final repo = FakeBuyerRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(
+              size: Size(320, 740),
+              textScaler: TextScaler.linear(2),
+            ),
+            child: child!,
+          ),
+          home: HomePage(
+            repository: repo,
+            initial: homePage(signedIn: true),
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Notifications'), findsOneWidget);
+      expect(find.byTooltip('Shopping Bag'), findsOneWidget);
+      expect(find.byTooltip('Your profile'), findsOneWidget);
+      final header = find.byKey(const ValueKey('buyer-header-search'));
+      final idleWidth = tester.getSize(header).width;
+      await tester.tap(header);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(header).width, greaterThan(idleWidth + 20));
+      expect(find.text('Done'), findsOneWidget);
+      expect(find.byTooltip('Notifications'), findsNothing);
+      await tester.enterText(header, 'canvas');
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(repo.searchRequests.last['search'], 'canvas');
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(header).focusNode!.hasFocus, isFalse);
+      expect(tester.widget<TextField>(header).controller!.text, 'canvas');
+      expect(find.byTooltip('Notifications'), findsOneWidget);
+      expect(find.byTooltip('Shopping Bag'), findsOneWidget);
+      expect(find.byTooltip('Your profile'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('search focus does not open the keyboard after switching tabs', (
+    tester,
+  ) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(),
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final searchTap = tester
+        .widget<TextField>(find.byKey(const ValueKey('buyer-header-search')))
+        .onTap!;
+    final messagesTap = tester
+        .widget<InkWell>(
+          find
+              .ancestor(
+                of: find.text('Messages'),
+                matching: find.byType(InkWell),
+              )
+              .first,
+        )
+        .onTap!;
+    searchTap();
+    messagesTap();
+    await tester.pumpAndSettle();
+    final input = find.byKey(const ValueKey('buyer-header-search'));
+    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isFalse);
+    expect(find.text('Sign in to see your messages'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Home filters open search with the chosen price', (tester) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(),
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Filters'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Under ₱500'));
+    await tester.tap(find.text('Under ₱500'));
+    await tester.ensureVisible(find.text('Apply filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply filters'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(repo.searchRequests.last['max_price'], '500');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('messages tab loads the buyer inbox only while active', (
+    tester,
+  ) async {
+    final session = NavigationSession();
+    final repo = BuyerRepository(session);
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(signedIn: true),
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(session.inboxReads, 0);
+    await tester.tap(find.text('Messages'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InboxPage), findsOneWidget);
+    expect(session.inboxReads, 1);
+    await tester.tap(find.text('Home').last);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 20));
+    expect(session.inboxReads, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Search keeps its draft across phone and tablet layouts', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 812);
+    addTearDown(() {
+      tester.view.reset();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: homePage(),
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+    await tester.pumpAndSettle();
+    final search = find.byKey(const ValueKey('buyer-header-search'));
+    await tester.enterText(search, 'canvas tote');
+    for (final scene in [
+      (const Size(900, 768), 1.4),
+      (const Size(1024, 768), 1.0),
+      (const Size(375, 812), 1.0),
+    ]) {
+      tester.platformDispatcher.textScaleFactorTestValue = scene.$2;
+      tester.view.physicalSize = scene.$1;
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(search).controller!.text, 'canvas tote');
+      expect(tester.takeException(), isNull);
+    }
+    expect(repo.homeRequests, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   for (final size in [const Size(375, 812), const Size(700, 375)]) {
     testWidgets(
@@ -261,7 +689,17 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'canvas');
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('buyer-bottom-navigation')),
+          matching: find.text('Home'),
+        ),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextButton, 'Sort'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Price: low to high'));
@@ -269,6 +707,8 @@ void main() {
       await tester.tap(find.text('Price: low to high'));
       await tester.pumpAndSettle();
       expect(repo.homeRequests.last['sort'], 'price_asc');
+      await tester.tap(find.byKey(const ValueKey('buyer-header-search')));
+      await tester.pumpAndSettle();
       expect(
         tester.widget<TextField>(find.byType(TextField).first).controller!.text,
         'canvas',

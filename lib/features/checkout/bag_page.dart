@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
@@ -349,7 +350,28 @@ class _BagContentsState extends State<_BagContents>
       BuyerActions.login(context, destination: 'cart');
       return;
     }
-    if (!_bag.approved || !_bag.ready || _opening) return;
+    if (!_bag.approved) {
+      setState(() => _modalOpen = true);
+      try {
+        final review = await showBuyerVerificationPrompt(
+          context,
+          _bag.data!.user!,
+        );
+        if (review && mounted && _ensureAccount()) {
+          _checkoutAccount.check(page: _bag.data!);
+          if (mounted) BuyerActions.reviewVerification(context);
+        }
+      } on BackendException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      } finally {
+        if (mounted) setState(() => _modalOpen = false);
+      }
+      return;
+    }
+    if (!_bag.ready || _opening) return;
     setState(() => _opening = true);
     try {
       if (!identical(_checkoutAccount.session, widget.repository.session)) {
@@ -425,10 +447,11 @@ class _BagContentsState extends State<_BagContents>
       : pesos(_bag.quote![key]);
   Widget _button() => FilledButton.icon(
     onPressed:
-        !_bag.ready ||
-            _opening ||
+        _opening ||
             _modalOpen ||
-            (_bag.data?.user != null && !_bag.approved)
+            !_bag.isCurrent ||
+            _bag.busy ||
+            (_bag.data?.user == null || _bag.approved) && !_bag.ready
         ? null
         : _checkout,
     icon: const Icon(Icons.arrow_forward),
@@ -530,8 +553,25 @@ class _BagContentsState extends State<_BagContents>
     final priced = mapsOf(_bag.quote?['items'])
         .where((row) => row['id'] == id)
         .firstOrNull;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _bag.selected.contains(id) ? BagooTheme.rose : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _bag.selected.contains(id)
+              ? const Color(0xFFF4C8D2)
+              : BagooTheme.line,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D0F172A),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -759,6 +799,20 @@ class _BagContentsState extends State<_BagContents>
                     ChoiceChip(
                       label: Text(filter.value),
                       selected: _filter == filter.key,
+                      showCheckmark: false,
+                      side: BorderSide(
+                        color: _filter == filter.key
+                            ? BagooTheme.strong
+                            : BagooTheme.line,
+                      ),
+                      labelStyle: TextStyle(
+                        fontFamily: 'Plus Jakarta Sans',
+                        color: _filter == filter.key
+                            ? BagooTheme.strong
+                            : BagooTheme.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                       onSelected: (_) =>
                           _editFilters(() => _filter = filter.key),
                     ),
@@ -883,7 +937,12 @@ class _BagContentsState extends State<_BagContents>
       final current = _ensureAccount(notify: false);
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Shopping Bag'),
+          backgroundColor: BagooTheme.strong,
+          foregroundColor: Colors.white,
+          title: const Text(
+            'Shopping Bag',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
           actions: [
             IconButton(
               tooltip: 'Refresh Bag',

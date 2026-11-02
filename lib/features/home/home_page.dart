@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -28,6 +29,8 @@ import '../tracking/parcel_tracking_page.dart';
 import '../products/product_page.dart';
 import '../checkout/bag_page.dart';
 import '../profile/profile_page.dart';
+import '../profile/profile_repository.dart';
+import '../profile/inbox_page.dart';
 import '../../core/buyer_actions.dart';
 
 class HomePage extends StatefulWidget {
@@ -37,6 +40,7 @@ class HomePage extends StatefulWidget {
     required this.onLogin,
     required this.onLogout,
     this.initial,
+    this.verificationRequests,
     this.initialProductSlug,
     this.onProductRestored,
     this.initialDestination = 0,
@@ -46,6 +50,7 @@ class HomePage extends StatefulWidget {
   final VoidCallback onLogin;
   final Future<void> Function() onLogout;
   final WebPage? initial;
+  final Listenable? verificationRequests;
   final String? initialProductSlug;
   final VoidCallback? onProductRestored;
   final int initialDestination;
@@ -56,11 +61,14 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final HomeController _home;
+  late final ProfileRepository _inboxRepository;
   late final BuyerAdvertisementSession _advertisements;
-  final _search = TextEditingController();
   int _tab = 0;
   final _visited = <int>{0};
   SearchFilters? _searchRequest;
+  final _headerSearch = TextEditingController();
+  final _headerSearchFocus = FocusNode();
+  int _searchSubmitRequest = 0;
   int? _notificationCount;
   Object? _notificationOwner;
   int _notificationGeneration = 0;
@@ -81,10 +89,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _home = HomeController(widget.repository, initial: widget.initial);
+    _inboxRepository = ProfileRepository(widget.repository);
     _advertisements = BuyerAdvertisementSession(
       BuyerEngagementRepository(widget.repository).reportAdvertisement,
     );
     _home.addListener(_homeChanged);
+    _headerSearchFocus.addListener(_headerFocusChanged);
+    widget.verificationRequests?.addListener(_showVerification);
     _homeChanged();
     _tab = widget.initialDestination;
     _visited.add(_tab);
@@ -112,10 +123,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.verificationRequests?.removeListener(_showVerification);
     _home.removeListener(_homeChanged);
     _home.dispose();
-    _search.dispose();
+    _headerSearch.dispose();
+    _headerSearchFocus.removeListener(_headerFocusChanged);
+    _headerSearchFocus.dispose();
     super.dispose();
+  }
+
+  void _showVerification() => _openProfileSection('identity');
+
+  void _headerFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.verificationRequests != widget.verificationRequests) {
+      oldWidget.verificationRequests?.removeListener(_showVerification);
+      widget.verificationRequests?.addListener(_showVerification);
+    }
   }
 
   @override
@@ -142,7 +171,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final filters = await showBuyerSearchFilters(
         context,
         value: SearchFilters(
-          query: _search.text.trim(),
+          query: _home.search,
           category: _home.category,
           sort: _home.sort,
         ),
@@ -183,6 +212,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _openSearch({String query = '', String category = ''}) {
     FocusManager.instance.primaryFocus?.unfocus();
+    _headerSearch.text = query.trim();
     setState(() {
       _searchRequest = SearchFilters(query: query.trim(), category: category);
       _tab = 2;
@@ -190,8 +220,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
+  void _focusSearch() {
+    if (_tab == 2) return;
+    setState(() {
+      if (!_visited.contains(2)) {
+        _searchRequest = SearchFilters(query: _headerSearch.text.trim());
+      }
+      _tab = 2;
+      _visited.add(2);
+    });
+  }
+
   void _openSearchFilters(SearchFilters filters) {
     FocusManager.instance.primaryFocus?.unfocus();
+    _headerSearch.text = filters.query;
     setState(() {
       _searchRequest = filters;
       _tab = 2;
@@ -349,62 +391,137 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _home,
     builder: (context, _) => Scaffold(
-      appBar: _tab == 1
+      appBar: _tab == 1 || (_tab == 4 && _home.user != null)
           ? null
           : AppBar(
-              toolbarHeight: 64,
-              title: const FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Brand(size: 32),
+              backgroundColor: BagooTheme.strong,
+              foregroundColor: Colors.white,
+              toolbarHeight: math.max(
+                60,
+                MediaQuery.textScalerOf(context).scale(13) + 34,
+              ),
+              titleSpacing: 12,
+              title: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _headerSearch,
+                builder: (context, value, _) => TextField(
+                  key: const ValueKey('buyer-header-search'),
+                  controller: _headerSearch,
+                  focusNode: _headerSearchFocus,
+                  onTap: _focusSearch,
+                  onChanged: (_) {
+                    if (_tab != 2) _focusSearch();
+                  },
+                  onSubmitted: (_) {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    setState(() => _searchSubmitRequest++);
+                  },
+                  textInputAction: TextInputAction.search,
+                  maxLength: 100,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    fontSize: 13,
+                    color: BagooTheme.ink,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'Search',
+                    hintText: 'Search',
+                    labelStyle: const TextStyle(
+                      fontFamily: 'Plus Jakarta Sans',
+                      fontSize: 13,
+                      color: BagooTheme.muted,
+                    ),
+                    floatingLabelBehavior: FloatingLabelBehavior.never,
+                    counterText: '',
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: BagooTheme.muted,
+                      size: 20,
+                    ),
+                    suffixIcon: value.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            onPressed: _headerSearch.clear,
+                            icon: const Icon(
+                              Icons.close,
+                              color: BagooTheme.muted,
+                              size: 19,
+                            ),
+                          ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(
+                        color: BagooTheme.ink,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
               ),
               actions: [
-                if (_home.user != null)
-                  IconButton(
-                    tooltip: _notificationCount == null
-                        ? 'Notifications'
-                        : _notificationCount == 0
-                        ? 'Notifications'
-                        : 'Notifications, $_notificationCount unread',
-                    onPressed: _openNotifications,
-                    icon: Badge(
-                      isLabelVisible:
-                          _notificationCount != null && _notificationCount! > 0,
-                      label: Text(
-                        _notificationCount != null && _notificationCount! > 99
-                            ? '99+'
-                            : '${_notificationCount ?? 0}',
+                if (_headerSearchFocus.hasFocus)
+                  TextButton(
+                    onPressed: _headerSearchFocus.unfocus,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 48),
+                      textStyle: const TextStyle(
+                        fontFamily: 'Plus Jakarta Sans',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
-                      child: const Icon(Icons.notifications_outlined),
                     ),
-                  ),
-                IconButton(
-                  tooltip: 'Shopping Bag',
-                  icon: const Icon(Icons.shopping_bag_outlined),
-                  onPressed: () => _selectTab(1),
-                ),
-                if (_home.user == null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: TextButton(
-                      onPressed: widget.onLogin,
-                      child: const Text('Log In'),
-                    ),
+                    child: const Text('Done'),
                   )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: IconButton(
-                      tooltip: 'Your profile',
-                      onPressed: () => _selectTab(3),
-                      icon: const Icon(Icons.person_outline_rounded),
+                else ...[
+                  if (_home.user != null)
+                    IconButton(
+                      tooltip:
+                          _notificationCount == null || _notificationCount == 0
+                          ? 'Notifications'
+                          : 'Notifications, $_notificationCount unread',
+                      onPressed: _openNotifications,
+                      icon: Badge(
+                        isLabelVisible:
+                            _notificationCount != null &&
+                            _notificationCount! > 0,
+                        label: Text(
+                          _notificationCount != null && _notificationCount! > 99
+                              ? '99+'
+                              : '${_notificationCount ?? 0}',
+                        ),
+                        child: const Icon(Icons.notifications_outlined),
+                      ),
                     ),
+                  IconButton(
+                    tooltip: 'Shopping Bag',
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    onPressed: () => _selectTab(1),
                   ),
+                  IconButton(
+                    tooltip: _home.user == null ? 'Log In' : 'Your profile',
+                    icon: const Icon(Icons.person_outline_rounded),
+                    onPressed: _home.user == null
+                        ? widget.onLogin
+                        : () => _selectTab(3),
+                  ),
+                ],
+                const SizedBox(width: 4),
               ],
-              bottom: const PreferredSize(
-                preferredSize: Size.fromHeight(1),
-                child: Divider(height: 1),
-              ),
             ),
       body: SafeArea(
         top: false,
@@ -428,6 +545,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           SearchPage(
                             repository: widget.repository,
                             request: _searchRequest,
+                            controller: _headerSearch,
+                            embedded: true,
+                            submitRequest: _searchSubmitRequest,
+                            active: _tab == 2,
                           )
                         else
                           const SizedBox.shrink(),
@@ -462,6 +583,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           )
                         else
                           const SizedBox.shrink(),
+                        if (_visited.contains(4))
+                          _home.user == null
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.forum_outlined,
+                                          size: 44,
+                                          color: BagooTheme.strong,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        const Text(
+                                          'Sign in to see your messages',
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        FilledButton(
+                                          onPressed: widget.onLogin,
+                                          child: const Text('Log In'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : InboxPage(
+                                  key: ValueKey(
+                                    'buyer-inbox-${_home.user?['id']}-${widget.repository.session.identityEpoch}',
+                                  ),
+                                  repository: _inboxRepository,
+                                )
+                        else
+                          const SizedBox.shrink(),
                       ].indexed
                       .map(
                         (tab) =>
@@ -472,68 +628,104 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _selectTab,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded, color: BagooTheme.strong),
-            label: 'Home',
+      bottomNavigationBar: SafeArea(
+        key: const ValueKey('buyer-bottom-navigation'),
+        top: false,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .08),
+                blurRadius: 12,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.shopping_bag_outlined),
-            selectedIcon: Icon(
-              Icons.shopping_bag_rounded,
-              color: BagooTheme.strong,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _bottomItem(0, Icons.home_outlined, Icons.home_rounded, 'Home'),
+                _bottomItem(
+                  1,
+                  Icons.shopping_bag_outlined,
+                  Icons.shopping_bag_rounded,
+                  'Bag',
+                ),
+                _bottomItem(
+                  4,
+                  Icons.forum_outlined,
+                  Icons.forum_rounded,
+                  'Messages',
+                ),
+                _bottomItem(
+                  3,
+                  Icons.person_outline_rounded,
+                  Icons.person_rounded,
+                  'Profile',
+                ),
+              ],
             ),
-            label: 'Bag',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search, color: BagooTheme.strong),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded, color: BagooTheme.strong),
-            label: 'Profile',
-          ),
-        ],
+        ),
       ),
     ),
   );
 
-  Widget _browseTools({required bool roomy}) {
-    final search = BrowseSearchField(
-      controller: _search,
-      label: 'Search products',
-      onSubmitted: (value) => _openSearch(query: value),
-      onFilters: _openingFilters ? null : _advancedFilters,
+  Widget _bottomItem(
+    int tab,
+    IconData icon,
+    IconData selectedIcon,
+    String label,
+  ) {
+    final selected = _tab == tab;
+    final color = selected ? BagooTheme.strong : BagooTheme.muted;
+    return Expanded(
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: InkWell(
+          onTap: () => _selectTab(tab),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 62),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(selected ? selectedIcon : icon, color: color, size: 23),
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
-    final utilities = _buyerUtilities();
-    return roomy
-        ? Row(
-            children: [
-              Expanded(child: search),
-              const SizedBox(width: 16),
-              utilities,
-            ],
-          )
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              search,
-              const SizedBox(height: 4),
-              Align(alignment: Alignment.centerLeft, child: utilities),
-            ],
-          );
   }
 
   Widget _buyerUtilities() => Wrap(
     spacing: 8,
     runSpacing: 0,
     children: [
+      TextButton.icon(
+        onPressed: _openingFilters ? null : _advancedFilters,
+        icon: const Icon(Icons.tune_rounded, size: 18),
+        label: const Text('Filters'),
+      ),
       TextButton.icon(
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -640,7 +832,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _browseTools(roomy: roomy),
+                    _buyerUtilities(),
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 4,
@@ -823,7 +1015,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           alignment: Alignment.centerLeft,
                           child: TextButton.icon(
                             onPressed: () {
-                              _search.clear();
                               _home.reset();
                             },
                             icon: const Icon(Icons.close, size: 18),
@@ -856,7 +1047,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               ),
                               TextButton(
                                 onPressed: () {
-                                  _search.clear();
                                   _home.reset();
                                 },
                                 child: const Text('Reset filters'),

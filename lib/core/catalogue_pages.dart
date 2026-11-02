@@ -30,44 +30,47 @@ class CataloguePages extends StatelessWidget {
             ? '$from–$to of $total products'
             : '$total products · Page $current of $last',
       ),
-      IconButton(
-        tooltip: 'Previous page',
-        onPressed: busy || current <= 1 ? null : () => onPage(current - 1),
-        icon: const Icon(Icons.chevron_left),
-      ),
-      SizedBox(
-        width: 100,
-        child: TextFormField(
-          key: ValueKey('catalogue-page-$current'),
-          initialValue: '$current',
-          enabled: !busy && last > 1,
-          keyboardType: TextInputType.number,
-          inputFormatters: [unsignedIntegerFormatter],
-          textInputAction: TextInputAction.go,
-          decoration: const InputDecoration(labelText: 'Go to page'),
-          autovalidateMode: AutovalidateMode.onUserInteraction,
-          validator: (value) {
-            final number = int.tryParse(value ?? '');
-            return number == null || number < 1 || number > last
-                ? '1–$last'
-                : null;
-          },
-          onFieldSubmitted: (value) {
-            final number = int.tryParse(value);
-            if (number != null &&
-                number >= 1 &&
-                number <= last &&
-                number != current) {
-              onPage(number);
-            }
-          },
+      if (last > 1)
+        IconButton(
+          tooltip: 'Previous page',
+          onPressed: busy || current <= 1 ? null : () => onPage(current - 1),
+          icon: const Icon(Icons.chevron_left),
         ),
-      ),
-      IconButton(
-        tooltip: 'Next page',
-        onPressed: busy || current >= last ? null : () => onPage(current + 1),
-        icon: const Icon(Icons.chevron_right),
-      ),
+      if (last > 1)
+        SizedBox(
+          width: 100,
+          child: TextFormField(
+            key: ValueKey('catalogue-page-$current'),
+            initialValue: '$current',
+            enabled: !busy && last > 1,
+            keyboardType: TextInputType.number,
+            inputFormatters: [unsignedIntegerFormatter],
+            textInputAction: TextInputAction.go,
+            decoration: const InputDecoration(labelText: 'Page'),
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            validator: (value) {
+              final number = int.tryParse(value ?? '');
+              return number == null || number < 1 || number > last
+                  ? '1–$last'
+                  : null;
+            },
+            onFieldSubmitted: (value) {
+              final number = int.tryParse(value);
+              if (number != null &&
+                  number >= 1 &&
+                  number <= last &&
+                  number != current) {
+                onPage(number);
+              }
+            },
+          ),
+        ),
+      if (last > 1)
+        IconButton(
+          tooltip: 'Next page',
+          onPressed: busy || current >= last ? null : () => onPage(current + 1),
+          icon: const Icon(Icons.chevron_right),
+        ),
     ],
   );
 }

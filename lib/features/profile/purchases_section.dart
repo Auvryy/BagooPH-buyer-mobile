@@ -119,6 +119,51 @@ class PurchasesSection extends StatefulWidget {
 
 class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
   bool _confirming = false;
+  final _filterScroll = ScrollController();
+  final _filterKeys = {
+    for (final status in buyerOrderFilters.keys) status: GlobalKey(),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelected();
+  }
+
+  @override
+  void didUpdateWidget(covariant PurchasesSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page.props['currentOrderStatus'] !=
+        widget.page.props['currentOrderStatus']) {
+      _revealSelected();
+    }
+  }
+
+  void _revealSelected() {
+    final status = widget.page.props['currentOrderStatus']?.toString() ?? 'all';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_filterScroll.hasClients ||
+          (widget.page.props['currentOrderStatus']?.toString() ?? 'all') !=
+              status) {
+        return;
+      }
+      final target = _filterKeys[status]?.currentContext?.findRenderObject();
+      if (target != null) {
+        _filterScroll.position.ensureVisible(
+          target,
+          alignment: .5,
+          duration: Duration.zero,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _filterScroll.dispose();
+    super.dispose();
+  }
 
   Future<void> _confirmReceipt(Map<String, dynamic> order) async {
     final id = order['id'];
@@ -189,23 +234,55 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
         'Review your purchases and follow the recorded parcel journey.',
         Icons.inventory_2_outlined,
       ),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final status in buyerOrderFilters.entries)
-            ChoiceChip(
-              label: Text('${status.value} (${counts[status.key] ?? 0})'),
-              selected: current == status.key,
-              onSelected: busy || widget.loading
-                  ? null
-                  : (_) {
-                      if (!_confirming && ensureBuyerAccess()) {
-                        widget.onQuery(status.key, 1);
-                      }
-                    },
-            ),
-        ],
+      SingleChildScrollView(
+        controller: _filterScroll,
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final status in buyerOrderFilters.entries)
+              Semantics(
+                key: _filterKeys[status.key],
+                button: true,
+                selected: current == status.key,
+                child: InkWell(
+                  onTap: busy || widget.loading
+                      ? null
+                      : () {
+                          if (!_confirming && ensureBuyerAccess()) {
+                            widget.onQuery(status.key, 1);
+                          }
+                        },
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: current == status.key
+                              ? BagooTheme.strong
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      '${status.value} (${counts[status.key] ?? 0})',
+                      style: TextStyle(
+                        color: current == status.key
+                            ? BagooTheme.strong
+                            : BagooTheme.muted,
+                        fontSize: 13,
+                        fontWeight: current == status.key
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
       const SizedBox(height: 24),
       if (widget.loading) const LinearProgressIndicator(),
