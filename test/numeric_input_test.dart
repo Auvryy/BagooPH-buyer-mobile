@@ -44,4 +44,63 @@ void main() {
       );
     }
   });
+
+  test(
+    'decimal formatter rejects malformed edits and keeps the old selection',
+    () {
+      const previous = TextEditingValue(
+        text: '12.50',
+        selection: TextSelection(baseOffset: 1, extentOffset: 4),
+      );
+      for (final value in [
+        '-1',
+        '+1',
+        'NaN',
+        'Infinity',
+        '1e2',
+        '1.234',
+        '1,000',
+        '₱12.50',
+        '.5',
+        '12..5',
+        '12\u200b50',
+        '12.50\n',
+      ]) {
+        expect(
+          unsignedDecimalFormatter.formatEditUpdate(
+            previous,
+            TextEditingValue(text: value),
+          ),
+          previous,
+          reason: value,
+        );
+      }
+    },
+  );
+
+  test(
+    'decimal formatter allows editing, deletion, and selected replacement',
+    () {
+      const previous = TextEditingValue(
+        text: '12.50',
+        selection: TextSelection(baseOffset: 0, extentOffset: 2),
+      );
+      for (final value in ['', '0', '12', '12.', '12.5', '12.50']) {
+        final next = TextEditingValue(
+          text: value,
+          selection: TextSelection.collapsed(offset: value.length),
+        );
+        expect(unsignedDecimalFormatter.formatEditUpdate(previous, next), next);
+      }
+
+      const replacement = TextEditingValue(
+        text: '9.50',
+        selection: TextSelection.collapsed(offset: 1),
+      );
+      expect(
+        unsignedDecimalFormatter.formatEditUpdate(previous, replacement),
+        replacement,
+      );
+    },
+  );
 }

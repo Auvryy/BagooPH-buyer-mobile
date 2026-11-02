@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/numeric_input.dart';
 import '../products/product_widgets.dart';
 import 'search_controller.dart';
 
@@ -184,6 +185,7 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
         TextFormField(
           controller: _min,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [unsignedDecimalFormatter],
           decoration: const InputDecoration(
             labelText: 'Minimum price',
             prefixText: '₱ ',
@@ -194,6 +196,7 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
         TextFormField(
           controller: _max,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [unsignedDecimalFormatter],
           decoration: const InputDecoration(
             labelText: 'Maximum price',
             prefixText: '₱ ',

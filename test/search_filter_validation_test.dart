@@ -5,6 +5,64 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('search price fields reject malformed typing and pastes', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 900);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SearchFiltersForm(
+              value: const SearchFilters(),
+              categories: const [],
+              locations: const [],
+              onApply: (_) {},
+              onReset: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final label in ['Minimum price', 'Maximum price']) {
+      final field = find.widgetWithText(TextFormField, label);
+      await tester.ensureVisible(field);
+      final controller = tester.widget<TextFormField>(field).controller!;
+      await tester.enterText(field, '12.50');
+      await tester.pump();
+      expect(controller.text, '12.50');
+
+      for (final invalid in [
+        '-1',
+        '+1',
+        'NaN',
+        'Infinity',
+        '1e2',
+        '1.234',
+        '1,000',
+        '₱12.50',
+        '.5',
+      ]) {
+        await tester.enterText(field, invalid);
+        await tester.pump();
+        expect(controller.text, '12.50', reason: '$label: $invalid');
+      }
+
+      await tester.enterText(field, '12.');
+      await tester.pump();
+      expect(controller.text, '12.');
+      await tester.enterText(field, '');
+      await tester.pump();
+      expect(controller.text, isEmpty);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   for (final value in [
     '-1',
     '+1',
