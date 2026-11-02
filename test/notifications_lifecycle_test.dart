@@ -111,6 +111,42 @@ void main() {
   );
 
   testWidgets(
+    'narrow notification pagination stays aligned and keeps accessible navigation',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 740);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(_app(repository));
+      await tester.pumpAndSettle();
+
+      final previous = find.byTooltip('Previous notifications page');
+      final next = find.byTooltip('Next notifications page');
+      final page = find.text('Page 1 of 2');
+      expect(previous, findsOneWidget);
+      expect(next, findsOneWidget);
+      expect(page, findsOneWidget);
+      expect(tester.getSize(previous).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(previous).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(next).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(next).height, greaterThanOrEqualTo(48));
+      expect(
+        tester.getRect(previous).center.dy,
+        closeTo(tester.getRect(page).center.dy, 1),
+      );
+      expect(
+        tester.getRect(next).center.dy,
+        closeTo(tester.getRect(page).center.dy, 1),
+      );
+
+      await tester.tap(next);
+      await tester.pumpAndSettle();
+      expect(session.pageRequests.last, '/notifications?filter=all&page=2');
+      expect(find.text('Page 2 of 2'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'a confirmed read finishing after disposal starts no new requests',
     (tester) async {
       final pending = Completer<Map<String, dynamic>>();
