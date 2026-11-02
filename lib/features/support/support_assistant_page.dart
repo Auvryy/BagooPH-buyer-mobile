@@ -210,46 +210,51 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text(
-        'Help & Support',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      actions: [
-        IconButton(
-          tooltip: 'Chat with Bagoo Customer Care',
-          onPressed: _available && !_openingChat ? _talkToPerson : null,
-          icon: const Icon(Icons.support_agent_outlined),
+  Widget build(BuildContext context) {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Help & Support',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-      ],
-    ),
-    body: SafeArea(
-      top: false,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
-          child: !_available
-              ? _unavailable()
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compact =
-                        constraints.maxHeight < 420 ||
-                        MediaQuery.textScalerOf(context).scale(16) > 24;
-                    if (compact) return _conversation(includeComposer: true);
-                    return Column(
-                      children: [
-                        Expanded(child: _conversation()),
-                        _composer(),
-                      ],
-                    );
-                  },
-                ),
+        actions: [
+          IconButton(
+            tooltip: 'Chat with Bagoo Customer Care',
+            onPressed: _available && !_openingChat ? _talkToPerson : null,
+            icon: const Icon(Icons.support_agent_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: !_available
+                ? _unavailable()
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact =
+                          constraints.maxHeight < 420 ||
+                          MediaQuery.textScalerOf(context).scale(16) > 24;
+                      if (compact && keyboardOpen) {
+                        return _conversation(includeComposer: true);
+                      }
+                      return Column(
+                        children: [
+                          Expanded(child: _conversation()),
+                          _composer(),
+                        ],
+                      );
+                    },
+                  ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   Widget _unavailable() => ListView(
     padding: const EdgeInsets.all(24),

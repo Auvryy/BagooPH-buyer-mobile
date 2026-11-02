@@ -316,6 +316,23 @@ void main() {
     expect(session.posts, isEmpty);
   });
 
+  testWidgets('short landscape keeps the support composer within reach', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(667, 375);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(repository, scale: 2));
+    await tester.pumpAndSettle();
+
+    final composer = find.byKey(const ValueKey('support-composer'));
+    expect(composer.hitTestable(), findsOneWidget);
+    expect(_input('Message').hitTestable(), findsOneWidget);
+    expect(tester.getRect(composer).bottom, lessThanOrEqualTo(375));
+    expect(tester.takeException(), isNull);
+    expect(session.posts, isEmpty);
+  });
+
   for (final layout in [
     (size: const Size(375, 667), scale: 1.0, keyboard: 0.0),
     (size: const Size(375, 667), scale: 2.0, keyboard: 220.0),
