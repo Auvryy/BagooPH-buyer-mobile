@@ -12,6 +12,7 @@ import '../../core/file_selection.dart';
 import '../../core/uploads.dart';
 import 'product_widgets.dart';
 import 'product_page.dart';
+import 'chat_history.dart';
 import '../home/product_card.dart';
 
 String requestKey() {
@@ -146,15 +147,18 @@ class _ChatPageState extends State<ChatPage> {
           status: 401,
         );
       }
-      final known = _messages.map((m) => m['id']).toSet();
-      final added = messages.any((m) => !known.contains(m['id']));
+      final update = reconcileChatHistory(_messages, messages);
       final follow = !_scroll.hasClients || _scroll.position.extentAfter < 80;
-      setState(() {
-        _messages = {for (final m in messages) m['id']: m}.values.toList();
-        _updateError = null;
-        _loading = false;
-      });
-      if (added && follow) _bottom();
+      if (!identical(update.messages, _messages) ||
+          _updateError != null ||
+          _loading) {
+        setState(() {
+          _messages = update.messages;
+          _updateError = null;
+          _loading = false;
+        });
+      }
+      if (update.hasNewMessages && follow) _bottom();
       return ReadOutcome.success;
     } on BackendException catch (e) {
       if (!mounted || !ticket.isCurrent) return ReadOutcome.success;
