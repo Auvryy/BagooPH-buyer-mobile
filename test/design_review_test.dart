@@ -7,14 +7,18 @@ import 'package:bagoo_buyer_mobile/core/verification_prompt.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
+import 'package:bagoo_buyer_mobile/features/collections/followed_shops_page.dart';
+import 'package:bagoo_buyer_mobile/features/collections/saved_products_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/chat_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
+import 'package:bagoo_buyer_mobile/features/products/shop_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/inbox_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
+import 'package:bagoo_buyer_mobile/features/promotions/promotion_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -57,6 +61,48 @@ class ReviewRepository extends FakeBuyerRepository {
 
   @override
   Future<WebPage> document(String path) async {
+    if (path.startsWith('/buyer/saved-products')) {
+      return WebPage('Buyer/SavedProducts', {
+        'auth': {'user': buyer},
+        'entries': {
+          'data': [
+            {
+              'product_id': 1,
+              'product': {
+                ...product(1),
+                'name': 'Everyday Carry Canvas Tote',
+                'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
+              },
+            },
+          ],
+          'current_page': 1,
+          'last_page': 2,
+          'total': 1,
+        },
+      });
+    }
+    if (path.startsWith('/buyer/followed-shops')) {
+      return WebPage('Buyer/FollowedShops', {
+        'auth': {'user': buyer},
+        'entries': {
+          'data': [
+            {
+              'shop_id': 2,
+              'shop': {
+                'id': 2,
+                'slug': 'everyday-goods',
+                'name': 'Everyday Goods',
+                'description': 'Useful local goods, packed with care.',
+                'city': 'San Pablo City',
+              },
+            },
+          ],
+          'current_page': 1,
+          'last_page': 2,
+          'total': 1,
+        },
+      });
+    }
     if (path == '/buyer/messages') {
       return const WebPage('Buyer/Messages', {
         'auth': {'user': buyer},
@@ -73,6 +119,55 @@ class ReviewRepository extends FakeBuyerRepository {
     }
     return super.document(path);
   }
+
+  @override
+  Future<WebPage> shop(
+    String slug, {
+    int page = 1,
+    String search = '',
+    String category = '',
+    String storeCategory = 'all',
+    String sort = 'relevance',
+  }) async => WebPage('Marketplace/ShopDetail', {
+    'auth': {'user': buyer},
+    'shop': {
+      'id': 2,
+      'name': 'Everyday Goods',
+      'description': 'Useful local goods, packed with care.',
+      'city': 'San Pablo City',
+      'products_count': 6,
+    },
+    'products': {
+      'data': [
+        {
+          ...product(1),
+          'name': 'Everyday Carry Canvas Tote',
+          'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
+        },
+      ],
+      'current_page': page,
+      'last_page': 2,
+      'total': 6,
+      'from': 1,
+      'to': 1,
+    },
+    'categories': [
+      {'slug': 'bags', 'name': 'Bags'},
+    ],
+    'storeCategories': [
+      {'id': 10, 'name': 'Bags', 'parent_id': null},
+      {'id': 11, 'name': 'Travel', 'parent_id': 10},
+    ],
+    'savedProductIds': <int>[],
+    'isFollowing': false,
+    'followerCount': 86,
+    'shopStats': {
+      'rating': 4.8,
+      'review_count': 32,
+      'response_rate': '96%',
+      'joined': '2022-05-01T00:00:00Z',
+    },
+  });
 
   @override
   Future<WebPage> bag() async => WebPage('Cart/Index', {
@@ -175,6 +270,45 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
     body: SearchPage(repository: repo),
   ),
   'product' => ProductPage(repository: repo, slug: 'everyday-bag-1'),
+  'shop' => ShopPage(repository: repo, slug: 'everyday-goods'),
+  'promotion' => PromotionPage(
+    repository: repo,
+    initial: WebPage('Buyer/Promotion', {
+      'auth': {'user': buyer},
+      'promotion': {
+        'available': true,
+        'title': 'Weekend Local Finds',
+        'starts_at': '2026-10-28T00:00:00Z',
+        'ends_at': '2026-11-02T15:59:00Z',
+        'summary': 'Discover practical picks from neighborhood shops.',
+        'offer': {
+          'name': 'Local Finds voucher',
+          'shop_name': 'Everyday Goods',
+          'discount_type': 'percent',
+          'percentage_bps': 1500,
+          'code': 'LOCAL15',
+          'description': 'Valid on selected products while supplies last.',
+          'starts_at': '2026-10-28T00:00:00Z',
+          'ends_at': '2026-11-02T15:59:00Z',
+          'minimum_cents': 100000,
+          'maximum_cents': 20000,
+          'per_buyer_limit': 1,
+        },
+        'target': {'url': '/buyer/search', 'label': 'featured items'},
+      },
+      'products': [
+        {
+          ...product(1),
+          'name': 'Everyday Carry Canvas Tote',
+          'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
+        },
+      ],
+    }),
+    onOpenDestination: (_) async {},
+    onProfileSection: (_) {},
+  ),
+  'saved-products' => SavedProductsPage(repository: repo, ownerId: 7),
+  'followed-shops' => FollowedShopsPage(repository: repo, ownerId: 7),
   'verification' => verificationReview(),
   'bag' => BagPage(repository: repo),
   'checkout' => CheckoutPage(repository: repo, initial: checkoutPage()),
@@ -357,6 +491,10 @@ void main() {
     'shell-search',
     'search',
     'product',
+    'shop',
+    'promotion',
+    'saved-products',
+    'followed-shops',
     'verification',
     'bag',
     'checkout',
@@ -369,6 +507,13 @@ void main() {
     for (final scene in [
       (const Size(320, 740), 1.0, 0.0),
       if (name == 'search') (const Size(320, 740), 2.0, 0.0),
+      if ([
+        'shop',
+        'promotion',
+        'saved-products',
+        'followed-shops',
+      ].contains(name))
+        (const Size(320, 740), 2.0, 0.0),
       (const Size(375, 812), 1.0, 0.0),
       (const Size(700, 375), 2.0, 0.0),
       (const Size(1024, 768), 1.0, 0.0),
@@ -437,6 +582,23 @@ void main() {
               expect(filters.top, greaterThanOrEqualTo(field.bottom + 7));
             }
           }
+          if (name == 'shop' && scene.$1.width == 320 && scene.$2 == 1.0) {
+            expect(find.text('Department'), findsNothing);
+            final toggle = find.byKey(const ValueKey('shop-filter-toggle'));
+            expect(tester.getRect(toggle).bottom, lessThan(scene.$1.height));
+            expect(
+              tester.getRect(find.byType(ProductCard).first).top,
+              lessThan(scene.$1.height),
+            );
+            expect(
+              tester.getRect(find.text('Everyday Carry Canvas Tote')).bottom,
+              lessThan(scene.$1.height),
+            );
+            expect(
+              tester.getRect(find.text('₱1,200.00')).bottom,
+              lessThan(scene.$1.height),
+            );
+          }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
           if (name == 'home' &&
@@ -471,6 +633,21 @@ void main() {
             );
           }
           if (export) {
+            Future<void> saveRender(String filename) =>
+                tester.runAsync(() async {
+                  final render =
+                      boundary.currentContext!.findRenderObject()!
+                          as RenderRepaintBoundary;
+                  final rendered = await render.toImage();
+                  final bytes = await rendered.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  final directory = Directory('.git/buyer-design/$phase');
+                  await directory.create(recursive: true);
+                  await File('${directory.path}/$filename.png')
+                      .writeAsBytes(bytes!.buffer.asUint8List());
+                  rendered.dispose();
+                });
             if (name == 'home' || name == 'login') {
               await tester.runAsync(
                 () => precacheImage(
@@ -480,21 +657,35 @@ void main() {
               );
               await tester.pumpAndSettle();
             }
-            await tester.runAsync(() async {
-              final render =
-                  boundary.currentContext!.findRenderObject()!
-                      as RenderRepaintBoundary;
-              final rendered = await render.toImage();
-              final bytes = await rendered.toByteData(
-                format: ui.ImageByteFormat.png,
-              );
-              final directory = Directory('.git/buyer-design/$phase');
-              await directory.create(recursive: true);
-              await File(
-                '${directory.path}/${name}_${scene.$1.width.toInt()}_${scene.$2}.png',
-              ).writeAsBytes(bytes!.buffer.asUint8List());
-              rendered.dispose();
-            });
+            await saveRender('${name}_${scene.$1.width.toInt()}_${scene.$2}');
+            if (name == 'shop' && scene.$1.width == 320) {
+              final toggle = find.byKey(const ValueKey('shop-filter-toggle'));
+              if (scene.$2 > 1.0) {
+                await tester.dragUntilVisible(
+                  toggle,
+                  find.byType(CustomScrollView),
+                  const Offset(0, -250),
+                );
+                await tester.pumpAndSettle();
+              }
+              await tester.tap(toggle);
+              await tester.pumpAndSettle();
+              expect(find.text('Department'), findsOneWidget);
+              expect(find.text('Store category'), findsOneWidget);
+              final dropdowns = find.byType(DropdownButtonFormField<String>);
+              expect(dropdowns, findsNWidgets(3));
+              for (final (index, value) in [
+                'All departments',
+                'All products',
+                'Recommended',
+              ].indexed) {
+                final field = tester.getRect(dropdowns.at(index));
+                final selected = tester.getRect(find.text(value));
+                expect(selected.top, greaterThanOrEqualTo(field.top));
+                expect(selected.bottom, lessThanOrEqualTo(field.bottom));
+              }
+              await saveRender('shop-filters_320_${scene.$2}');
+            }
           }
           await tester.pumpWidget(const SizedBox.shrink());
         },
