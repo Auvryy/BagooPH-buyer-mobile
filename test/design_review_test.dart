@@ -230,7 +230,7 @@ void main() {
     'BAGOO_REVIEW_PHASE',
     defaultValue: 'current',
   );
-  testWidgets('checkboxes use Bagoo colors and a rounded control shape', (
+  testWidgets('shared toggles use Bagoo colors and accessible targets', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -241,6 +241,9 @@ void main() {
             children: [
               Checkbox(value: false, onChanged: (_) {}),
               Checkbox(value: true, onChanged: (_) {}),
+              Switch(value: false, onChanged: (_) {}),
+              Switch(value: true, onChanged: (_) {}),
+              const Switch(value: true, onChanged: null),
             ],
           ),
         ),
@@ -256,7 +259,96 @@ void main() {
     expect(theme.fillColor?.resolve({WidgetState.disabled}), BagooTheme.canvas);
     expect(theme.checkColor?.resolve({}), Colors.white);
     expect(theme.shape, isA<RoundedRectangleBorder>());
+    expect(
+      tester.getSize(find.byType(Checkbox).first).width,
+      greaterThanOrEqualTo(48),
+    );
+    final switchTheme = Theme.of(tester.element(find.byType(Switch).first))
+        .switchTheme;
+    expect(switchTheme.thumbColor?.resolve({}), BagooTheme.muted);
+    expect(
+      switchTheme.thumbColor?.resolve({WidgetState.selected}),
+      Colors.white,
+    );
+    expect(
+      switchTheme.thumbColor?.resolve({WidgetState.disabled}),
+      BagooTheme.muted,
+    );
+    expect(switchTheme.trackColor?.resolve({}), Colors.white);
+    expect(
+      switchTheme.trackColor?.resolve({WidgetState.selected}),
+      BagooTheme.crimson,
+    );
+    expect(
+      switchTheme.trackColor?.resolve({WidgetState.disabled}),
+      BagooTheme.canvas,
+    );
+    expect(switchTheme.trackOutlineColor?.resolve({}), BagooTheme.muted);
+    expect(
+      switchTheme.trackOutlineColor?.resolve({WidgetState.selected}),
+      BagooTheme.crimson,
+    );
+    expect(
+      switchTheme.trackOutlineColor?.resolve({WidgetState.disabled}),
+      BagooTheme.border,
+    );
+    expect(switchTheme.materialTapTargetSize, MaterialTapTargetSize.padded);
     expect(tester.takeException(), isNull);
+  });
+  testWidgets('search filter switch is branded in its phone layout', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 740);
+    addTearDown(tester.view.reset);
+    final repo = ReviewRepository();
+    addTearDown(repo.session.close);
+    final boundary = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+          theme: BagooTheme.light.copyWith(platform: TargetPlatform.android),
+          builder: (_, child) => MediaQuery(
+            data: const MediaQueryData(size: Size(320, 740)),
+            child: child!,
+          ),
+          home: Scaffold(body: SearchPage(repository: repo)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    final toggle = find.text('In stock only');
+    await tester.scrollUntilVisible(
+      toggle,
+      160,
+      scrollable: find
+          .descendant(
+            of: find.byType(SingleChildScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(Switch), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    if (export) {
+      await tester.runAsync(() async {
+        final render =
+            boundary.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+        final rendered = await render.toImage();
+        final bytes = await rendered.toByteData(format: ui.ImageByteFormat.png);
+        final directory = Directory('.git/buyer-design/$phase');
+        await directory.create(recursive: true);
+        await File('${directory.path}/search-filter-switch_320_1.0.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        rendered.dispose();
+      });
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
   });
   for (final name in [
     'home',
