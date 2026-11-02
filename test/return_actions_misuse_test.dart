@@ -153,6 +153,29 @@ void main() {
     },
   );
 
+  testWidgets('return actions reject unsafe notes before submitting', (
+    tester,
+  ) async {
+    await command(tester);
+    final reason = find.widgetWithText(
+      TextFormField,
+      'Reason or receipt details',
+    );
+    for (final value in [
+      'Reason with <script>payload</script>',
+      'javascript:report()',
+      'Call\tme today',
+      'Hidden\u200btext is here',
+    ]) {
+      tester.widget<TextFormField>(reason).controller!.text = value;
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Withdraw request'),
+      );
+      expect(session.submissions, isEmpty, reason: value);
+    }
+  });
+
   testWidgets(
     'uncertain command retry preserves its exact token, version and reason',
     (tester) async {
@@ -255,6 +278,26 @@ void main() {
       }
     },
   );
+
+  testWidgets('return description rejects unsafe notes before submitting', (
+    tester,
+  ) async {
+    await form(tester);
+    final description = find.widgetWithText(TextFormField, 'What happened?');
+    for (final value in [
+      'The damage is <script>shown</script>.',
+      'javascript:send-private-data()',
+      'The label has a\ttab in it.',
+      'The seam is hidden\u200bfrom view.',
+    ]) {
+      tester.widget<TextFormField>(description).controller!.text = value;
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Request a return'),
+      );
+      expect(session.submissions, isEmpty, reason: value);
+    }
+  });
 
   testWidgets('a return needs selected items and at least one photo', (
     tester,

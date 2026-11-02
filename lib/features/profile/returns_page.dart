@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/application_text_validation.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
@@ -391,6 +392,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
       max: 1000,
       lines: 5,
       enabled: _submitted == null,
+      check: buyerNotesTextError,
     ),
     OutlinedButton.icon(
       onPressed: busy || _submitted != null || _photos.length >= 5
@@ -882,6 +884,7 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
                       max: 1000,
                       lines: 4,
                       enabled: _submitted == null,
+                      check: buyerNotesTextError,
                     ),
                     if (_submitted != null)
                       const Notice(
