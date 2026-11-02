@@ -287,6 +287,39 @@ void main() {
     },
   );
 
+  testWidgets('malformed variation rows do not show partial product options', (
+    tester,
+  ) async {
+    final repo = FakeBuyerRepository();
+    addTearDown(repo.session.close);
+    final page = productPage();
+    page.props['variations'] = {
+      'colors': [
+        {'name': 'Red', 'in_stock': true},
+        'malformed color row',
+      ],
+      'sizes': [],
+    };
+    repo.productResponse = page;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(ChoiceChip, 'Red'), findsNothing);
+    expect(
+      find.text(
+        'Available stock and Bag quantities could not be confirmed. Refresh this product.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   for (final scene in [
     (1.0, 'Test delivery company'),
     (2.0, 'Test delivery company'),

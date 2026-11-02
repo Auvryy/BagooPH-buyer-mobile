@@ -5,10 +5,14 @@ import 'package:flutter/services.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/count_metadata.dart';
 import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/numeric_input.dart';
+import '../../core/resource_ids.dart';
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -23,6 +27,70 @@ import 'product_widgets.dart';
 import 'shop_page.dart';
 import 'chat_page.dart';
 import 'sale_clock.dart';
+
+List<String> _reviewImageUrls(Object? value) => value is List
+    ? value.whereType<String>().where((path) => path.trim().isNotEmpty).toList()
+    : const [];
+
+List<Map<String, dynamic>>? _completeProductReviews(Object? raw) {
+  if (raw is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return null;
+    final review = Map<String, dynamic>.from(row);
+    final id = positiveResourceId(review['id']);
+    final rating = review['rating'];
+    final createdAt = review['created_at'];
+    final comment = review['comment'];
+    if (id == null ||
+        !ids.add(id) ||
+        rating is! int ||
+        rating < 1 ||
+        rating > 5 ||
+        createdAt is! String ||
+        strictDateTime(createdAt) == null ||
+        comment != null && comment is! String ||
+        review['verified_purchase'] is! bool) {
+      return null;
+    }
+    final buyer = review['buyer'];
+    if (buyer != null &&
+        (buyer is! Map ||
+            buyer.keys.any((key) => key is! String) ||
+            buyer['name'] is! String)) {
+      return null;
+    }
+    final options = review['purchased_options'];
+    if (options != null &&
+        (options is! Map ||
+            options.keys.any((key) => key is! String) ||
+            options.values.any((value) => value != null && value is! String))) {
+      return null;
+    }
+    final reply = review['reply'];
+    if (reply != null) {
+      if (reply is! Map || reply.keys.any((key) => key is! String)) {
+        return null;
+      }
+      final replyText = reply['text'];
+      final replyCreatedAt = reply['created_at'];
+      final replyUpdatedAt = reply['updated_at'];
+      if (replyText is! String ||
+          replyText.trim().isEmpty ||
+          replyCreatedAt is! String ||
+          strictDateTime(replyCreatedAt) == null ||
+          replyUpdatedAt != null &&
+              (replyUpdatedAt is! String ||
+                  strictDateTime(replyUpdatedAt) == null) ||
+          reply['shop_name'] != null && reply['shop_name'] is! String) {
+        return null;
+      }
+    }
+    rows.add(review);
+  }
+  return rows;
+}
 
 class ProductPage extends StatefulWidget {
   const ProductPage({super.key, required this.repository, required this.slug});
@@ -43,6 +111,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   bool _busy = false;
   bool _saving = false;
   bool _reminding = false;
+  late final RetryCooldown _reminderCooldown;
   bool _approvalPromptOpen = false;
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
@@ -55,6 +124,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   int _generation = 0;
   DateTime? _verifiedAt;
   ProductSelection get s => _selection!;
+  List<Map<String, dynamic>> get _relatedProducts =>
+      completeRelatedProducts(s.page.props['relatedProducts']) ?? const [];
   BuyerRepository get repo => widget.repository;
   bool get _sessionBindingCurrent =>
       identical(_checkoutAccount.session, repo.session) &&
@@ -76,6 +147,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     super.initState();
     _checkoutAccount = BuyerAccountScope(repo.session);
     _identityEpoch = repo.session.identityEpoch;
+    _reminderCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _updates = ForegroundRead(
       interval: const Duration(seconds: 30),
@@ -99,6 +173,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       return;
     }
     _generation++;
+    _reminderCooldown.clear(notify: false);
     _checkoutAccount.invalidate();
     _checkoutAccount = BuyerAccountScope(repo.session);
     _identityEpoch = repo.session.identityEpoch;
@@ -135,6 +210,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           _checkoutAccount.invalidate();
           _checkoutAccount = BuyerAccountScope(repo.session);
           _identityEpoch = repo.session.identityEpoch;
+          _reminderCooldown.clear(notify: false);
           _selection = null;
           _feedback = null;
           _feedbackError = false;
@@ -354,8 +430,15 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     if (!selection.approved || _saving) {
       return;
     }
-    final id = ((item ?? selection.product)['id'] as num).toInt();
-    final saved = (selection.page.props['savedProductIds'] as List? ?? [])
+    final id = positiveResourceId((item ?? selection.product)['id']);
+    if (id == null) {
+      _message(
+        'This product could not be confirmed. Refresh and try again.',
+        error: true,
+      );
+      return;
+    }
+    final saved = positiveResourceIds(selection.page.props['savedProductIds'])
         .contains(id);
     final epoch = repo.session.identityEpoch;
     setState(() => _saving = true);
@@ -365,9 +448,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         await _recoverAfterSessionChange(epoch);
         return;
       }
-      final ids = Set<dynamic>.from(
-        selection.page.props['savedProductIds'] as List? ?? [],
-      );
+      final ids = positiveResourceIds(selection.page.props['savedProductIds']);
       saved ? ids.remove(id) : ids.add(id);
       setState(() => selection.page.props['savedProductIds'] = ids.toList());
     } on BackendException catch (e) {
@@ -497,6 +578,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         !_accountCurrent) {
       return;
     }
+    if (_reminderCooldown.active) return;
     final selection = s;
     if (selection.page.isCached) return;
     if (selection.page.user == null) {
@@ -508,7 +590,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     }
     final upcoming = mapOf(mapOf(selection.product['sale_offer'])['upcoming']);
     final state = mapOf(selection.page.props['saleReminder']);
-    if (upcoming['id'] is! num ||
+    final upcomingId = positiveResourceId(upcoming['id']);
+    if (upcomingId == null ||
         state['delivered'] == true && state['subscribed'] != true) {
       return;
     }
@@ -517,7 +600,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     try {
       final data = await repo.reminder(
         widget.slug,
-        (upcoming['id'] as num).toInt(),
+        upcomingId,
         state['subscribed'] != true,
       );
       if (!_mutationIsCurrent(selection, epoch)) {
@@ -528,6 +611,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       setState(() => selection.page = data);
     } on BackendException catch (e) {
       if (_mutationIsCurrent(selection, epoch)) {
+        if (e.status == 429) {
+          _reminderCooldown.start(e.data, retryAt: e.retryAt, notify: false);
+        }
         _message(e.message, error: true);
       } else {
         await _recoverAfterSessionChange(epoch);
@@ -542,6 +628,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     _checkoutAccount.invalidate();
+    _reminderCooldown.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _updates.dispose();
     _quantity.dispose();
@@ -735,7 +822,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                         ),
                         _specifications(),
                         _reviews(),
-                        if (mapsOf(s.page.props['relatedProducts']).isNotEmpty)
+                        if (_relatedProducts.isNotEmpty)
                           ProductPanel(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -830,7 +917,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         spacing: 14,
         runSpacing: 14,
         children: [
-          for (final product in mapsOf(s.page.props['relatedProducts']))
+          for (final product in _relatedProducts)
             SizedBox(
               width: width,
               height: width + productCardBodyHeight * scale,
@@ -839,9 +926,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 session: repo.session,
                 saved:
                     _accountCurrent &&
-                    (s.page.props['savedProductIds'] as List? ?? []).contains(
-                      product['id'],
-                    ),
+                    positiveResourceIds(s.page.props['savedProductIds'])
+                        .contains(product['id']),
                 saving: _saving,
                 saveLabel: !_accountCurrent
                     ? 'Refresh to continue'
@@ -851,9 +937,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                     ? 'Sign in to save'
                     : !s.approved
                     ? 'Approval required'
-                    : (s.page.props['savedProductIds'] as List? ?? []).contains(
-                        product['id'],
-                      )
+                    : positiveResourceIds(s.page.props['savedProductIds'])
+                          .contains(product['id'])
                     ? 'Remove from saved'
                     : 'Save product',
                 onSave:
@@ -1007,7 +1092,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ),
                 icon: Icon(
                   _accountCurrent &&
-                          (s.page.props['savedProductIds'] as List? ?? [])
+                          positiveResourceIds(s.page.props['savedProductIds'])
                               .contains(s.product['id'])
                       ? Icons.favorite_rounded
                       : Icons.favorite_border_rounded,
@@ -1116,9 +1201,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       ? 'Sign in to save'
       : !s.approved
       ? 'Approval required'
-      : (s.page.props['savedProductIds'] as List? ?? []).contains(
-          s.product['id'],
-        )
+      : positiveResourceIds(s.page.props['savedProductIds'])
+            .contains(s.product['id'])
       ? 'Remove from saved'
       : 'Save product';
 
@@ -1201,12 +1285,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             ),
           ),
           Stars(s.product['rating']),
-          if (s.product['verified_review_count'] case final num count)
+          if (nonNegativeCount(s.product['verified_review_count'])
+              case final int count)
             Text(
               '$count verified ratings',
               style: const TextStyle(fontSize: 12),
             ),
-          if (s.product['sales_count'] case final num count)
+          if (nonNegativeCount(s.product['sales_count']) case final int count)
             Text('$count sold', style: const TextStyle(fontSize: 12)),
         ],
       ),
@@ -1281,7 +1366,15 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
         ),
       _sales(),
       SizedBox(key: _optionsKey, height: 1),
-      if (s.colors.isNotEmpty) ...[
+      if (!s.inventoryCountsValid)
+        const Padding(
+          padding: EdgeInsets.only(top: 20),
+          child: Notice(
+            'Available stock and Bag quantities could not be confirmed. Refresh this product.',
+            error: true,
+          ),
+        ),
+      if (s.inventoryCountsValid && s.colors.isNotEmpty) ...[
         const SizedBox(height: 20),
         Text(
           '${s.variants['option1_name'] ?? 'Color / Edition'}: ${s.color ?? 'Choose an option'}',
@@ -1330,7 +1423,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               .toList(),
         ),
       ],
-      if (s.sizes.isNotEmpty) ...[
+      if (s.inventoryCountsValid && s.sizes.isNotEmpty) ...[
         const SizedBox(height: 20),
         Text(
           '${s.variants['option2_name'] ?? 'Specification / Size'}: ${s.size ?? 'Choose an option'}',
@@ -1425,12 +1518,14 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             ],
           ),
           Text(
-            s.stock <= 0
+            !s.inventoryCountsValid
+                ? 'Availability could not be confirmed'
+                : s.stock <= 0
                 ? 'This selection is out of stock'
                 : '${s.maxQuantity} more available to add · ${s.totalInBag} in your Bag',
             style: const TextStyle(fontSize: 12, color: BagooTheme.muted),
           ),
-          if (s.complete && s.quantityError != null)
+          if (s.inventoryCountsValid && s.complete && s.quantityError != null)
             Text(
               s.quantityError!,
               style: const TextStyle(
@@ -1522,6 +1617,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                   !_accountCurrent ||
                       s.page.isCached ||
                       _reminding ||
+                      _reminderCooldown.active ||
                       reminder['delivered'] == true &&
                           reminder['subscribed'] != true
                   ? null
@@ -1532,6 +1628,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                     ? 'Saving…'
                     : !_accountCurrent
                     ? 'Refresh to continue'
+                    : _reminderCooldown.active
+                    ? 'Try again in ${_reminderCooldown.remainingSeconds}s'
                     : reminder['subscribed'] == true
                     ? 'Remove reminder'
                     : reminder['delivered'] == true
@@ -1554,6 +1652,13 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   Widget _shop() {
     final shop = mapOf(s.product['shop']);
     final stats = mapOf(s.page.props['shopStats']);
+    final rawSlug = shop['slug'];
+    final shopSlug =
+        rawSlug is String &&
+            rawSlug.trim().isNotEmpty &&
+            rawSlug == rawSlug.trim()
+        ? rawSlug
+        : null;
     return ProductPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1600,14 +1705,12 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             runSpacing: 8,
             children: [
               OutlinedButton(
-                onPressed: shop['slug'] == null
+                onPressed: shopSlug == null
                     ? null
                     : () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => ShopPage(
-                            repository: repo,
-                            slug: shop['slug'].toString(),
-                          ),
+                          builder: (_) =>
+                              ShopPage(repository: repo, slug: shopSlug),
                         ),
                       ),
                 child: const Text('View Shop'),
@@ -1774,18 +1877,18 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   }
 
   Widget _reviews() {
-    final reviews = mapsOf(s.product['reviews']);
+    final parsedReviews = _completeProductReviews(s.product['reviews']);
+    final reviews = parsedReviews ?? const <Map<String, dynamic>>[];
+    final reviewsValid = parsedReviews != null;
     final photos = reviews
-        .expand(
-          (review) => (review['images'] as List? ?? []).whereType<String>(),
-        )
+        .expand((review) => _reviewImageUrls(review['images']))
         .toList();
     return ProductPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const ProductHeading('Customer Reviews & Photos'),
-          if (photos.isNotEmpty) ...[
+          if (reviewsValid && photos.isNotEmpty) ...[
             const Text(
               'Customer photo gallery',
               style: TextStyle(fontWeight: FontWeight.w700),
@@ -1832,7 +1935,8 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ),
               ),
               Stars(s.product['rating']),
-              if (s.product['verified_review_count'] case final num count)
+              if (nonNegativeCount(s.product['verified_review_count'])
+                  case final int count)
                 Text(
                   '($count verified reviews)',
                   style: const TextStyle(fontSize: 12),
@@ -1843,6 +1947,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           if (reviews.isEmpty && s.page.isCached)
             const Text(
               'Refresh from Bagoo to load customer reviews.',
+              style: TextStyle(color: BagooTheme.muted, height: 1.5),
+            )
+          else if (!reviewsValid)
+            const Text(
+              'Customer reviews could not be confirmed. Refresh this product.',
               style: TextStyle(color: BagooTheme.muted, height: 1.5),
             )
           else if (reviews.isEmpty)
@@ -1863,120 +1972,121 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                 ],
               ),
             ),
-          for (final r in reviews)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      Text(
-                        mapOf(r['buyer'])['name']?.toString() ?? 'Shopper',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      Text(
-                        r['verified_purchase'] == true
-                            ? 'Verified Purchase'
-                            : 'Unverified legacy review',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: BagooTheme.muted,
+          if (reviewsValid)
+            for (final r in reviews)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        Text(
+                          mapOf(r['buyer'])['name']?.toString() ?? 'Shopper',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                      ),
-                      Text(
-                        readableDate(r['created_at']),
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Stars(r['rating']),
-                  if (r['purchased_options'] != null)
-                    Text(
-                      'Purchased option: ${mapOf(r['purchased_options']).values.whereType<String>().join(' · ')}',
-                      style: const TextStyle(fontSize: 12),
+                        Text(
+                          r['verified_purchase'] == true
+                              ? 'Verified Purchase'
+                              : 'Unverified legacy review',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: BagooTheme.muted,
+                          ),
+                        ),
+                        Text(
+                          readableDate(r['created_at']),
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ],
                     ),
-                  const SizedBox(height: 8),
-                  Text(
-                    r['comment']?.toString() ?? '',
-                    style: const TextStyle(fontSize: 13, height: 1.6),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final photo
-                          in (r['images'] as List? ?? []).whereType<String>())
-                        SizedBox.square(
-                          dimension: 64,
-                          child: OutlinedButton(
-                            onPressed: () => viewImage(
-                              context,
-                              repo.session,
-                              photo,
-                              'Review photo',
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                            ),
-                            child: Semantics(
-                              label:
-                                  'Open review photo ${(r['images'] as List).indexOf(photo) + 1}',
-                              excludeSemantics: true,
-                              child: RemoteImage(
-                                uri: imageUri(repo.session, photo),
-                                thumbnail: true,
+                    const SizedBox(height: 8),
+                    Stars(r['rating']),
+                    if (r['purchased_options'] != null)
+                      Text(
+                        'Purchased option: ${mapOf(r['purchased_options']).values.whereType<String>().join(' · ')}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    const SizedBox(height: 8),
+                    Text(
+                      r['comment']?.toString() ?? '',
+                      style: const TextStyle(fontSize: 13, height: 1.6),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final (index, photo) in _reviewImageUrls(
+                          r['images'],
+                        ).indexed)
+                          SizedBox.square(
+                            dimension: 64,
+                            child: OutlinedButton(
+                              onPressed: () => viewImage(
+                                context,
+                                repo.session,
+                                photo,
+                                'Review photo',
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: Semantics(
+                                label: 'Open review photo ${index + 1}',
+                                excludeSemantics: true,
+                                child: RemoteImage(
+                                  uri: imageUri(repo.session, photo),
+                                  thumbnail: true,
+                                ),
                               ),
                             ),
                           ),
+                      ],
+                    ),
+                    if (r['reply'] != null)
+                      Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: BagooTheme.canvas,
+                          border: Border.all(color: BagooTheme.border),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                    ],
-                  ),
-                  if (r['reply'] != null)
-                    Container(
-                      margin: const EdgeInsets.only(top: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: BagooTheme.canvas,
-                        border: Border.all(color: BagooTheme.border),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Seller reply · ${mapOf(r['reply'])['shop_name'] ?? mapOf(s.product['shop'])['name']}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: BagooTheme.strong,
-                            ),
-                          ),
-                          Text(
-                            mapOf(r['reply'])['text']?.toString() ?? '',
-                            style: const TextStyle(fontSize: 12, height: 1.6),
-                          ),
-                          Text(
-                            'Posted ${readableDateTime(mapOf(r['reply'])['created_at'])}',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          if (mapOf(r['reply'])['updated_at'] != null &&
-                              mapOf(r['reply'])['updated_at'] !=
-                                  mapOf(r['reply'])['created_at'])
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              'Updated ${readableDateTime(mapOf(r['reply'])['updated_at'])}',
+                              'Seller reply · ${mapOf(r['reply'])['shop_name'] ?? mapOf(s.product['shop'])['name']}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: BagooTheme.strong,
+                              ),
+                            ),
+                            Text(
+                              mapOf(r['reply'])['text']?.toString() ?? '',
+                              style: const TextStyle(fontSize: 12, height: 1.6),
+                            ),
+                            Text(
+                              'Posted ${readableDateTime(mapOf(r['reply'])['created_at'])}',
                               style: const TextStyle(fontSize: 11),
                             ),
-                        ],
+                            if (mapOf(r['reply'])['updated_at'] != null &&
+                                mapOf(r['reply'])['updated_at'] !=
+                                    mapOf(r['reply'])['created_at'])
+                              Text(
+                                'Updated ${readableDateTime(mapOf(r['reply'])['updated_at'])}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
         ],
       ),
     );

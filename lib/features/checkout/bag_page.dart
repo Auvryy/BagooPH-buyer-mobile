@@ -6,6 +6,7 @@ import '../../core/verification_prompt.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
@@ -187,14 +188,12 @@ class _BagContentsState extends State<_BagContents>
         return _sort == 'price_high' ? -result : result;
       }
       final aTime =
-          DateTime.tryParse(
-            (a['updated_at'] ?? a['created_at'])?.toString() ?? '',
-          )?.millisecondsSinceEpoch ??
+          strictDateTime(a['updated_at'] ?? a['created_at'])
+              ?.millisecondsSinceEpoch ??
           0;
       final bTime =
-          DateTime.tryParse(
-            (b['updated_at'] ?? b['created_at'])?.toString() ?? '',
-          )?.millisecondsSinceEpoch ??
+          strictDateTime(b['updated_at'] ?? b['created_at'])
+              ?.millisecondsSinceEpoch ??
           0;
       final result = bTime.compareTo(aTime);
       return result == 0 ? (b['id'] as num).compareTo(a['id'] as num) : result;
@@ -546,7 +545,7 @@ class _BagContentsState extends State<_BagContents>
   );
   Widget _item(Map<String, dynamic> item) {
     final product = mapOf(item['product']);
-    final id = (item['id'] as num).toInt();
+    final id = item['id'] as int;
     final available = item['available_for_purchase'] == true;
     final maximum = bagMaximumQuantity(item, _bag.items);
     final disabled = _bag.busy || _opening || _modalOpen || !_bag.canChange;
@@ -836,7 +835,7 @@ class _BagContentsState extends State<_BagContents>
                           _bag.selectable.isEmpty
                       ? null
                       : (v) => _bag.select(
-                          _bag.selectable.map((i) => (i['id'] as num).toInt()),
+                          _bag.selectable.map((i) => i['id'] as int),
                           v == true,
                         ),
                 ),
@@ -916,7 +915,7 @@ class _BagContentsState extends State<_BagContents>
                   onChanged: _bag.busy || _opening || _modalOpen
                       ? null
                       : (v) => _bag.select(
-                          group.map((i) => (i['id'] as num).toInt()),
+                          group.map((i) => i['id'] as int),
                           v == true,
                         ),
                 ),

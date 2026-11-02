@@ -5,6 +5,7 @@ import '../../app/theme.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/contact_input.dart';
 import '../../core/numeric_input.dart';
+import '../../core/pagination_metadata.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -456,14 +457,32 @@ class ProfilePagination extends StatelessWidget {
     this.onPage, {
     super.key,
     this.disabled = false,
+    this.pageSize = 12,
   });
   final Map<String, dynamic> page;
   final ValueChanged<int> onPage;
   final bool disabled;
+  final int pageSize;
   @override
   Widget build(BuildContext context) {
-    final current = (page['current_page'] as num?)?.toInt() ?? 1;
-    final last = (page['last_page'] as num?)?.toInt() ?? 1;
+    final rawRows = page['data'];
+    if (rawRows is! List ||
+        rawRows.any(
+          (row) => row is! Map || row.keys.any((key) => key is! String),
+        )) {
+      return const SizedBox.shrink();
+    }
+    final currentPage = page['current_page'];
+    if (currentPage is! int) return const SizedBox.shrink();
+    final metadata = parseContractPaginationMetadata(
+      page,
+      rowCount: rawRows.length,
+      requestedPage: currentPage,
+      pageSize: pageSize,
+    );
+    if (metadata == null) return const SizedBox.shrink();
+    final current = metadata.currentPage;
+    final last = metadata.lastPage;
     if (last <= 1) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -644,16 +663,38 @@ class _PrivateDocumentPageState extends State<PrivateDocumentPage>
                         ),
                       )
                     : Center(
-                        child: InteractiveViewer(
-                          maxScale: 5,
-                          child: Image.memory(
-                            document.bytes,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) => const Notice(
-                              'This image cannot be displayed.',
-                              error: true,
-                            ),
-                          ),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            const maximumDecodeDimension = 2048;
+                            final devicePixelRatio =
+                                MediaQuery.devicePixelRatioOf(context);
+                            int decodeExtent(double logicalExtent) {
+                              if (!logicalExtent.isFinite ||
+                                  logicalExtent <= 0) {
+                                return maximumDecodeDimension;
+                              }
+                              return (logicalExtent * devicePixelRatio * 2)
+                                  .round()
+                                  .clamp(1, maximumDecodeDimension)
+                                  .toInt();
+                            }
+
+                            return InteractiveViewer(
+                              maxScale: 5,
+                              child: Image.memory(
+                                document.bytes,
+                                cacheWidth: decodeExtent(constraints.maxWidth),
+                                cacheHeight: decodeExtent(
+                                  constraints.maxHeight,
+                                ),
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, _, _) => const Notice(
+                                  'This image cannot be displayed.',
+                                  error: true,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       );
               },

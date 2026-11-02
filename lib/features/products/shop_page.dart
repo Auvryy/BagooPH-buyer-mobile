@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/count_metadata.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
@@ -12,6 +15,45 @@ import '../home/product_card.dart';
 import 'product_model.dart';
 import 'product_page.dart';
 import 'product_widgets.dart';
+
+List<Map<String, dynamic>> _completeStoreCategoryChoices(Object? raw) {
+  if (raw is! List) return const [];
+  final rows = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  final names = <String>{};
+  final parentIds = <int, int?>{};
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) {
+      return const [];
+    }
+    final category = Map<String, dynamic>.from(row);
+    final id = positiveResourceId(category['id']);
+    final name = category['name'];
+    final parentValue = category['parent_id'];
+    final parentId = parentValue == null
+        ? null
+        : positiveResourceId(parentValue);
+    if (id == null ||
+        !ids.add(id) ||
+        name is! String ||
+        name.trim().isEmpty ||
+        !names.add(name.trim().toLowerCase()) ||
+        parentValue != null && parentId == null) {
+      return const [];
+    }
+    parentIds[id] = parentId;
+    rows.add(category);
+  }
+  if (rows.any((row) {
+    final id = row['id'] as int;
+    final parent = parentIds[id];
+    return parent != null &&
+        (parent == id || !ids.contains(parent) || parentIds[parent] != null);
+  })) {
+    return const [];
+  }
+  return rows;
+}
 
 class ShopPage extends StatefulWidget {
   const ShopPage({
@@ -40,17 +82,43 @@ class _ShopPageState extends State<ShopPage> {
   int _last = 1;
   int _generation = 0;
   int _total = 0;
+  late int _identityEpoch;
   int? _from, _to;
   String _category = '', _storeCategory = 'all', _sort = 'relevance';
   @override
   void initState() {
     super.initState();
+    _identityEpoch = widget.repository.session.identityEpoch;
     _storeCategory = widget.storeCategory;
     _load();
   }
 
   Future<void> _load({bool more = false, int? number}) async {
+    final session = widget.repository.session;
+    final epoch = session.identityEpoch;
+    if (_identityEpoch != epoch) {
+      setState(() {
+        _identityEpoch = epoch;
+        _clearAccountPage();
+      });
+    }
     final generation = ++_generation;
+    final search = _search.text.trim();
+    if (search.runes.length > 100) {
+      setState(() {
+        _busy = false;
+        _error = 'Use no more than 100 characters to search this shop.';
+      });
+      return;
+    }
+    final requestedPage = more ? _number + 1 : number ?? 1;
+    if (!isValidBuyerPageRequest(requestedPage)) {
+      setState(() {
+        _busy = false;
+        _error = 'Choose a valid product page.';
+      });
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -58,8 +126,8 @@ class _ShopPageState extends State<ShopPage> {
     try {
       final page = await widget.repository.shop(
         widget.slug,
-        page: more ? _number + 1 : number ?? 1,
-        search: _search.text.trim(),
+        page: requestedPage,
+        search: search,
         category: _category,
         storeCategory: _storeCategory,
         sort: _sort,
@@ -67,23 +135,47 @@ class _ShopPageState extends State<ShopPage> {
       if (!mounted || generation != _generation) {
         return;
       }
+      if (epoch != session.identityEpoch) {
+        await _reloadForIdentityChange(epoch);
+        return;
+      }
       final feed = mapOf(page.props['products']);
+      final rows = completeProductCards(feed['data']);
+      if (rows == null) {
+        throw const BackendException(
+          'Shop products could not be confirmed. Refresh and try again.',
+        );
+      }
+      final pagination = parseContractPaginationMetadata(
+        feed,
+        rowCount: rows.length,
+        requestedPage: requestedPage,
+        pageSize: 18,
+      );
+      if (pagination == null) {
+        throw const BackendException(
+          'Shop pagination could not be confirmed. Refresh and try again.',
+        );
+      }
       setState(() {
         _page = page;
         if (!more) {
           _products.clear();
         }
-        _products.addAll(mapsOf(feed['data']));
-        _number = (feed['current_page'] as num?)?.toInt() ?? 1;
-        _last = (feed['last_page'] as num?)?.toInt() ?? 1;
-        _total = (feed['total'] as num?)?.toInt() ?? _products.length;
-        _from = more
-            ? _from ?? (feed['from'] as num?)?.toInt()
-            : (feed['from'] as num?)?.toInt();
-        _to = (feed['to'] as num?)?.toInt();
+        final ids = _products.map((product) => product['id']).toSet();
+        _products.addAll(rows.where((product) => ids.add(product['id'])));
+        _number = pagination.currentPage;
+        _last = pagination.lastPage;
+        _total = pagination.total;
+        _from = more ? _from ?? pagination.from : pagination.from;
+        _to = pagination.to;
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
+        if (epoch != session.identityEpoch) {
+          await _reloadForIdentityChange(epoch);
+          return;
+        }
         setState(() => _error = e.message);
       }
     } finally {
@@ -93,11 +185,47 @@ class _ShopPageState extends State<ShopPage> {
     }
   }
 
+  void _clearAccountPage() {
+    _generation++;
+    _page = null;
+    _products.clear();
+    _saving.clear();
+    _following = false;
+    _number = 1;
+    _last = 1;
+    _total = 0;
+    _from = null;
+    _to = null;
+    _error = null;
+  }
+
+  Future<void> _reloadForIdentityChange(int previousEpoch) async {
+    if (!mounted ||
+        previousEpoch == widget.repository.session.identityEpoch ||
+        _identityEpoch == widget.repository.session.identityEpoch) {
+      return;
+    }
+    setState(() {
+      _identityEpoch = widget.repository.session.identityEpoch;
+      _clearAccountPage();
+    });
+    await _load();
+  }
+
+  Future<bool> _ensureIdentity() async {
+    final epoch = widget.repository.session.identityEpoch;
+    if (_identityEpoch == epoch) return true;
+    await _reloadForIdentityChange(_identityEpoch);
+    return false;
+  }
+
   bool get _eligible =>
       _page?.user?['role'] == 'buyer' &&
       _page?.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(_page?.user?['kyc_status']);
   Future<void> _follow() async {
+    if (!await _ensureIdentity()) return;
+    if (!mounted) return;
     if (_page?.user == null) {
       BuyerActions.login(context);
       return;
@@ -107,27 +235,36 @@ class _ShopPageState extends State<ShopPage> {
     }
     final shop = mapOf(_page?.props['shop']);
     final next = _page?.props['isFollowing'] != true;
+    final session = widget.repository.session;
+    final epoch = session.identityEpoch;
     setState(() => _following = true);
     try {
-      final result = await widget.repository.session.jsonPost(
+      final result = await session.jsonPost(
         '/buyer/followed-shops/${shop['id']}',
         {},
         method: next ? 'POST' : 'DELETE',
       );
+      if (!mounted) return;
+      if (epoch != session.identityEpoch) {
+        await _reloadForIdentityChange(epoch);
+        return;
+      }
       if (result['following'] != next) {
         throw const BackendException('The follow change was not confirmed.');
       }
-      if (mounted) {
-        setState(() {
-          _page?.props['isFollowing'] = next;
-          if (result['followers'] is num) {
-            _page?.props['followerCount'] = result['followers'];
-          }
-        });
-      }
+      setState(() {
+        _page?.props['isFollowing'] = next;
+        if (result['followers'] is int && (result['followers'] as int) >= 0) {
+          _page?.props['followerCount'] = result['followers'];
+        }
+      });
     } on BackendException catch (e) {
       if (mounted) {
-        setState(() => _error = e.message);
+        if (epoch != session.identityEpoch) {
+          await _reloadForIdentityChange(epoch);
+        } else {
+          setState(() => _error = e.message);
+        }
       }
     } finally {
       if (mounted) {
@@ -147,6 +284,17 @@ class _ShopPageState extends State<ShopPage> {
   Widget build(BuildContext context) {
     final shop = mapOf(_page?.props['shop']);
     final stats = mapOf(_page?.props['shopStats']);
+    final departmentChoices = completeSearchFilterChoices(
+      _page?.props['categories'],
+      valueKey: 'slug',
+      labelKey: 'name',
+    );
+    final storeCategoryChoices = _completeStoreCategoryChoices(
+      _page?.props['storeCategories'],
+    );
+    final productCount = nonNegativeCount(shop['products_count']) ?? _total;
+    final followerCount = nonNegativeCount(_page?.props['followerCount']);
+    final reviewCount = nonNegativeCount(stats['review_count']);
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -237,10 +385,10 @@ class _ShopPageState extends State<ShopPage> {
                                       : 'Location unavailable',
                                 ),
                                 Text(
-                                  'Rating ${ratingLabel(stats['rating'])} · ${shop['products_count'] ?? _total} products',
+                                  'Rating ${ratingLabel(stats['rating'])} · $productCount products',
                                 ),
                                 Text(
-                                  '${_page?.props['followerCount'] ?? 0} followers · ${stats['review_count'] ?? 0} reviews',
+                                  '${followerCount ?? '—'} followers · ${reviewCount ?? '—'} reviews',
                                   style: const TextStyle(height: 1.7),
                                 ),
                                 Text(
@@ -284,9 +432,11 @@ class _ShopPageState extends State<ShopPage> {
                           ),
                         TextField(
                           controller: _search,
+                          maxLength: 100,
                           onSubmitted: (_) => _load(),
                           decoration: InputDecoration(
                             labelText: 'Search this shop',
+                            counterText: '',
                             suffixIcon: IconButton(
                               tooltip: 'Search shop',
                               onPressed: _load,
@@ -333,24 +483,19 @@ class _ShopPageState extends State<ShopPage> {
                             const SizedBox(height: 12),
                             _filter('Department', _category, {
                               '': 'All departments',
-                              for (final row in mapsOf(
-                                _page?.props['categories'],
-                              ))
+                              for (final row in departmentChoices)
                                 row['slug'].toString(): row['name'].toString(),
                             }, (value) => _category = value),
                             _filter('Store category', _storeCategory, {
                               'all': 'All products',
                               'uncategorized': 'Uncategorized',
-                              for (final root in mapsOf(
-                                _page?.props['storeCategories'],
-                              ).where((row) => row['parent_id'] == null)) ...{
+                              for (final root in storeCategoryChoices.where(
+                                (row) => row['parent_id'] == null,
+                              )) ...{
                                 root['id'].toString(): root['name'].toString(),
-                                for (final child
-                                    in mapsOf(_page?.props['storeCategories'])
-                                        .where(
-                                          (row) =>
-                                              row['parent_id'] == root['id'],
-                                        ))
+                                for (final child in storeCategoryChoices.where(
+                                  (row) => row['parent_id'] == root['id'],
+                                ))
                                   child['id'].toString(): '  ${child['name']}',
                               },
                             }, (value) => _storeCategory = value),
@@ -393,10 +538,10 @@ class _ShopPageState extends State<ShopPage> {
                     ),
                     itemBuilder: (context, i) {
                       final product = _products[i];
-                      final id = (product['id'] as num).toInt();
-                      final saved =
-                          (_page?.props['savedProductIds'] as List? ?? [])
-                              .contains(id);
+                      final id = product['id'] as int;
+                      final saved = positiveResourceIds(
+                        _page?.props['savedProductIds'],
+                      ).contains(id);
                       return ProductCard(
                         product: product,
                         session: widget.repository.session,
@@ -420,6 +565,15 @@ class _ShopPageState extends State<ShopPage> {
                         onSave: _page?.user != null && !_eligible
                             ? null
                             : () async {
+                                if (_saving.contains(id)) return;
+                                if (_identityEpoch !=
+                                    widget.repository.session.identityEpoch) {
+                                  await _reloadForIdentityChange(
+                                    _identityEpoch,
+                                  );
+                                  return;
+                                }
+                                if (!context.mounted) return;
                                 if (_page?.user == null) {
                                   BuyerActions.login(
                                     context,
@@ -427,17 +581,22 @@ class _ShopPageState extends State<ShopPage> {
                                   );
                                   return;
                                 }
+                                final session = widget.repository.session;
+                                final epoch = session.identityEpoch;
                                 setState(() => _saving.add(id));
                                 try {
                                   await widget.repository.saveProduct(
                                     id,
                                     !saved,
                                   );
+                                  if (!mounted) return;
+                                  if (epoch != session.identityEpoch) {
+                                    await _reloadForIdentityChange(epoch);
+                                    return;
+                                  }
                                   if (mounted) {
-                                    final ids = Set<dynamic>.from(
-                                      _page?.props['savedProductIds']
-                                              as List? ??
-                                          [],
+                                    final ids = positiveResourceIds(
+                                      _page?.props['savedProductIds'],
                                     );
                                     saved ? ids.remove(id) : ids.add(id);
                                     setState(
@@ -447,7 +606,11 @@ class _ShopPageState extends State<ShopPage> {
                                   }
                                 } on BackendException catch (e) {
                                   if (mounted) {
-                                    setState(() => _error = e.message);
+                                    if (epoch != session.identityEpoch) {
+                                      await _reloadForIdentityChange(epoch);
+                                    } else {
+                                      setState(() => _error = e.message);
+                                    }
                                   }
                                 } finally {
                                   if (mounted) {

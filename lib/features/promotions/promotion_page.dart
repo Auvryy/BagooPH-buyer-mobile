@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/form_metadata.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
+import '../products/product_model.dart';
 import '../products/product_page.dart';
 import '../products/product_widgets.dart';
 
@@ -24,7 +27,8 @@ class PromotionPage extends StatelessWidget {
   final ValueChanged<String> onProfileSection;
 
   Map<String, dynamic> get promotion => mapOf(initial.props['promotion']);
-  List<Map<String, dynamic>> get products => mapsOf(initial.props['products']);
+  List<Map<String, dynamic>> get products =>
+      completeRelatedProducts(initial.props['products']) ?? const [];
 
   @override
   Widget build(BuildContext context) {
@@ -271,7 +275,8 @@ class _OfferPanel extends StatelessWidget {
         : '${_pesoCents(offer['value_cents'])} off';
     final minimum = amount(offer['minimum_cents']);
     final maximum = amount(offer['maximum_cents']);
-    final limit = amount(offer['per_buyer_limit']);
+    final rawLimit = offer['per_buyer_limit'];
+    final limit = strictNonNegativeInteger(rawLimit);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -345,8 +350,13 @@ class _OfferPanel extends StatelessWidget {
             _OfferDetail(label: 'Minimum spend', value: _pesoCents(minimum)),
           if (maximum != null && maximum > 0)
             _OfferDetail(label: 'Maximum discount', value: _pesoCents(maximum)),
-          if (limit != null && limit > 0)
-            _OfferDetail(label: 'Uses per buyer', value: '${limit.toInt()}'),
+          if (rawLimit != null)
+            _OfferDetail(
+              label: 'Uses per buyer',
+              value: limit != null && limit > 0
+                  ? '$limit'
+                  : 'Could not be confirmed',
+            ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: onViewVouchers,
@@ -457,7 +467,7 @@ String _pesoCents(dynamic raw) {
 }
 
 String _manilaDate(dynamic raw) {
-  final parsed = DateTime.tryParse(raw?.toString() ?? '');
+  final parsed = strictDateTime(raw);
   if (parsed == null) return 'Date unavailable';
   final date = parsed.toUtc().add(const Duration(hours: 8));
   const months = [

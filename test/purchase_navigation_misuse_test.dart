@@ -191,4 +191,57 @@ void main() {
       await tester.pump();
     });
   }
+
+  for (final returnedItems in [
+    <Object>[
+      {'cart_item_id': 3},
+      'malformed Bag row',
+    ],
+    <Object>[
+      {'cart_item_id': 3},
+      {'cart_item_id': 3},
+    ],
+  ]) {
+    testWidgets('Buy again rejects incomplete or duplicate returned Bag rows', (
+      tester,
+    ) async {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      final repository = ProfileRepository(BuyerRepository(session));
+      session.onPost = (_) async => {
+        'result': {'order_id': 11, 'items': returnedItems},
+      };
+      session.onPage = (_) async => const WebPage('Cart/Index', {
+        'auth': {'user': buyer},
+        'items': [],
+      });
+      BackendException? failure;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  try {
+                    await buyAgain(context, repository, 11, 'synthetic-token');
+                  } on BackendException catch (error) {
+                    failure = error;
+                  }
+                },
+                child: const Text('Buy again'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Buy again'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BagPage), findsNothing);
+      expect(failure, isNotNull);
+      expect(session.pageRequests, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    });
+  }
 }

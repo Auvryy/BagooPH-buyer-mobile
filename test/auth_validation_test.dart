@@ -29,4 +29,37 @@ void main() {
     expect(emailValidator('${'x' * 256}@example.test'), isNotNull);
     expect(emailValidator('buyer@example.test'), isNull);
   });
+
+  test('registration names follow the backend plain-name contract', () {
+    for (final value in ['Ana María', 'Jose\u0301 Dela Cruz', 'Ａｎｎｅ']) {
+      expect(
+        registrationNameValidator(value, label: 'first name'),
+        isNull,
+        reason: value,
+      );
+    }
+    for (final value in ['A', 'Ana2', '<script>', 'A' * 51]) {
+      expect(
+        registrationNameValidator(value, label: 'first name'),
+        isNotNull,
+        reason: value,
+      );
+    }
+  });
+
+  test('registration middle initials and addresses match server rules', () {
+    for (final value in ['', 'M', 'MD', 'MD.']) {
+      expect(registrationMiddleInitialValidator(value), isNull, reason: value);
+    }
+    for (final value in ['12', 'A B', 'ABC', '<x>']) {
+      expect(
+        registrationMiddleInitialValidator(value),
+        isNotNull,
+        reason: value,
+      );
+    }
+    expect(registrationAddressValidator("Unit #4, St. John's Road"), isNull);
+    expect(registrationAddressValidator('123 <script>'), isNotNull);
+    expect(registrationAddressValidator('A' * 501), isNotNull);
+  });
 }

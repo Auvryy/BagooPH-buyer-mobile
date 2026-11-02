@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/pagination_metadata.dart';
 import '../../core/web_session.dart';
+import '../products/product_model.dart';
 
 const searchSorts = {
   'relevance': 'Recommended',
@@ -13,6 +15,48 @@ const searchSorts = {
   'price_asc': 'Price: low to high',
   'price_desc': 'Price: high to low',
 };
+
+List<Map<String, dynamic>> completeSearchFilterChoices(
+  Object? raw, {
+  required String valueKey,
+  required String labelKey,
+}) {
+  if (raw is! List) return const [];
+  final rows = <Map<String, dynamic>>[];
+  final values = <String>{};
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return const [];
+    final choice = Map<String, dynamic>.from(row);
+    final value = choice[valueKey];
+    final label = choice[labelKey];
+    if (value is! String ||
+        value.trim().isEmpty ||
+        value != value.trim() ||
+        label is! String ||
+        label.trim().isEmpty ||
+        !values.add(value)) {
+      return const [];
+    }
+    rows.add(choice);
+  }
+  return rows;
+}
+
+List<String> _completeSearchSuggestions(Object? raw) {
+  if (raw is! List) return const [];
+  final suggestions = <String>[];
+  final seen = <String>{};
+  for (final item in raw) {
+    if (item is! String ||
+        item.trim().isEmpty ||
+        item != item.trim() ||
+        !seen.add(item)) {
+      return const [];
+    }
+    suggestions.add(item);
+  }
+  return suggestions;
+}
 
 class SearchFilters {
   const SearchFilters({
@@ -86,13 +130,20 @@ class CatalogueSearchController extends ChangeNotifier {
   int? from, to;
   (String, int)? _acceptedRequest;
   bool get hasMore => data?.isCached != true && currentPage < lastPage;
-  List<Map<String, dynamic>> get categories =>
-      mapsOf(data?.props['categories']);
-  List<Map<String, dynamic>> get locations => mapsOf(data?.props['locations']);
+  List<Map<String, dynamic>> get categories => completeSearchFilterChoices(
+    data?.props['categories'],
+    valueKey: 'slug',
+    labelKey: 'name',
+  );
+  List<Map<String, dynamic>> get locations => completeSearchFilterChoices(
+    data?.props['locations'],
+    valueKey: 'value',
+    labelKey: 'label',
+  );
   List<Map<String, dynamic>> get related =>
-      mapsOf(data?.props['relatedProducts']);
+      completeRelatedProducts(data?.props['relatedProducts']) ?? const [];
   List<String> get suggestions =>
-      (data?.props['suggestions'] as List? ?? []).whereType<String>().toList();
+      _completeSearchSuggestions(data?.props['suggestions']);
   Map<String, dynamic>? get user => data?.user;
   Future<void> apply(SearchFilters value) {
     filters = value;
@@ -103,10 +154,29 @@ class CatalogueSearchController extends ChangeNotifier {
   Future<void> load({bool more = false, int? pageNumber}) async {
     if (_disposed || more && (loading || loadingMore || !hasMore)) return;
     final generation = ++_generation;
+    if (filters.query.runes.length > 100) {
+      loading = false;
+      loadingMore = false;
+      error = 'Use no more than 100 characters for your search.';
+      moreError = null;
+      notifyListeners();
+      return;
+    }
     final epoch = repository.session.identityEpoch;
     final cacheGeneration = repository.catalogueCache.generation;
     final parameters = Map<String, String>.of(filters.parameters);
     final number = more ? currentPage + 1 : pageNumber ?? 1;
+    if (!isValidBuyerPageRequest(number)) {
+      loading = false;
+      loadingMore = false;
+      if (more) {
+        moreError = 'Choose a valid product page.';
+      } else {
+        error = 'Choose a valid product page.';
+      }
+      notifyListeners();
+      return;
+    }
     final request = (Uri(queryParameters: parameters).query, number);
     if (more) {
       loadingMore = true;
@@ -132,9 +202,13 @@ class CatalogueSearchController extends ChangeNotifier {
                 loading &&
                 epoch == repository.session.identityEpoch &&
                 cacheGeneration == repository.catalogueCache.generation) {
-              _accept(cached);
-              _acceptedRequest = request;
-              notifyListeners();
+              try {
+                _accept(cached, requestedPage: number);
+                _acceptedRequest = request;
+                notifyListeners();
+              } on BackendException {
+                // Ignore malformed or stale local previews.
+              }
             }
           }, onError: (Object _, StackTrace _) {}),
         );
@@ -147,7 +221,7 @@ class CatalogueSearchController extends ChangeNotifier {
           status: 401,
         );
       }
-      _accept(page, more: more);
+      _accept(page, more: more, requestedPage: number);
       _acceptedRequest = request;
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) return;
@@ -169,9 +243,25 @@ class CatalogueSearchController extends ChangeNotifier {
     }
   }
 
-  void _accept(WebPage page, {bool more = false}) {
+  void _accept(WebPage page, {bool more = false, required int requestedPage}) {
     final feed = mapOf(page.props['products']);
-    final rows = mapsOf(feed['data']);
+    final rows = completeProductCards(feed['data']);
+    if (rows == null) {
+      throw const BackendException(
+        'Search results could not be confirmed. Refresh and try again.',
+      );
+    }
+    final pagination = parseContractPaginationMetadata(
+      feed,
+      rowCount: rows.length,
+      requestedPage: requestedPage,
+      pageSize: 24,
+    );
+    if (pagination == null) {
+      throw const BackendException(
+        'Search pagination could not be confirmed. Refresh and try again.',
+      );
+    }
     data = page;
     if (more) {
       final ids = products.map((p) => p['id']).toSet();
@@ -179,13 +269,11 @@ class CatalogueSearchController extends ChangeNotifier {
     } else {
       products = rows;
     }
-    currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
-    lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
-    total = (feed['total'] as num?)?.toInt() ?? products.length;
-    from = more
-        ? from ?? (feed['from'] as num?)?.toInt()
-        : (feed['from'] as num?)?.toInt();
-    to = (feed['to'] as num?)?.toInt();
+    currentPage = pagination.currentPage;
+    lastPage = pagination.lastPage;
+    total = pagination.total;
+    from = more ? from ?? pagination.from : pagination.from;
+    to = pagination.to;
   }
 
   @override

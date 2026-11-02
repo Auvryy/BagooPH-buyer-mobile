@@ -1,10 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/numeric_input.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/verification_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 
@@ -21,7 +21,7 @@ Future<String?> verifyEmailCode(
       repository: repository,
       email: email,
       purpose: purpose,
-      cooldown: (sent['cooldown'] as num?)?.toInt() ?? 60,
+      cooldown: verificationCooldownSeconds(sent),
     ),
   ),
 );
@@ -45,32 +45,23 @@ class VerificationPage extends StatefulWidget {
 class _VerificationPageState extends State<VerificationPage> {
   final _code = TextEditingController();
   final _form = GlobalKey<FormState>();
-  Timer? _timer;
-  late int _remaining;
+  late final RetryCooldown _sendCooldown, _verifyCooldown;
   bool _busy = false;
   String? _error;
   @override
   void initState() {
     super.initState();
-    _remaining = widget.cooldown;
-    _tick();
-  }
+    void changed() {
+      if (mounted) setState(() {});
+    }
 
-  void _tick() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_remaining <= 0) {
-        timer.cancel();
-        return;
-      }
-      if (mounted) {
-        setState(() => _remaining--);
-      }
-    });
+    _sendCooldown = RetryCooldown(changed);
+    _verifyCooldown = RetryCooldown(changed);
+    _sendCooldown.startFor(Duration(seconds: widget.cooldown), notify: false);
   }
 
   Future<void> _verify() async {
-    if (_busy || !_form.currentState!.validate()) {
+    if (_busy || _verifyCooldown.active || !_form.currentState!.validate()) {
       return;
     }
     setState(() {
@@ -88,6 +79,9 @@ class _VerificationPageState extends State<VerificationPage> {
       }
     } on BackendException catch (error) {
       if (mounted) {
+        if (error.status == 429) {
+          _verifyCooldown.start(error.data, retryAt: error.retryAt);
+        }
         setState(() => _error = error.fields['code'] ?? error.message);
       }
     } finally {
@@ -98,7 +92,7 @@ class _VerificationPageState extends State<VerificationPage> {
   }
 
   Future<void> _resend() async {
-    if (_busy || _remaining > 0) {
+    if (_busy || _sendCooldown.active) {
       return;
     }
     setState(() {
@@ -114,13 +108,13 @@ class _VerificationPageState extends State<VerificationPage> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _remaining = (result['cooldown'] as num?)?.toInt() ?? 60;
-        _code.clear();
-      });
-      _tick();
+      _sendCooldown.start(result);
+      setState(_code.clear);
     } on BackendException catch (error) {
       if (mounted) {
+        if (error.status == 429) {
+          _sendCooldown.start(error.data, retryAt: error.retryAt);
+        }
         setState(() => _error = error.message);
       }
     } finally {
@@ -132,7 +126,8 @@ class _VerificationPageState extends State<VerificationPage> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _sendCooldown.dispose();
+    _verifyCooldown.dispose();
     _code.dispose();
     super.dispose();
   }
@@ -204,16 +199,20 @@ class _VerificationPageState extends State<VerificationPage> {
               ),
               const SizedBox(height: 24),
               SubmitButton(
-                label: _busy ? 'Verifying…' : 'Verify email',
+                label: _verifyCooldown.active
+                    ? 'Verify in ${_verifyCooldown.remainingSeconds}s'
+                    : _busy
+                    ? 'Verifying…'
+                    : 'Verify email',
                 busy: _busy,
-                onPressed: _verify,
+                onPressed: _verifyCooldown.active ? null : _verify,
               ),
               const SizedBox(height: 16),
               TextButton(
-                onPressed: _busy || _remaining > 0 ? null : _resend,
+                onPressed: _busy || _sendCooldown.active ? null : _resend,
                 child: Text(
-                  _remaining > 0
-                      ? 'Resend code in ${_remaining}s'
+                  _sendCooldown.active
+                      ? 'Resend code in ${_sendCooldown.remainingSeconds}s'
                       : 'Resend code',
                 ),
               ),

@@ -26,8 +26,16 @@ class ShopRepository extends FakeBuyerRepository {
     String storeCategory = 'all',
     String sort = 'relevance',
   }) async {
+    const pageSize = 18;
+    const total = 54;
+    final products = [
+      for (var index = 0; index < pageSize; index++)
+        product((page - 1) * pageSize + index + 1),
+    ];
+    final from = (page - 1) * pageSize + 1;
     requests.add({
       'page': page,
+      'search': search,
       'category': category,
       'store_category': storeCategory,
       'sort': sort,
@@ -40,12 +48,13 @@ class ShopRepository extends FakeBuyerRepository {
         'address': '123 Test Street',
       },
       'products': {
-        'data': [product(1)],
+        'data': products,
         'current_page': page,
         'last_page': 3,
-        'total': 3,
-        'from': page,
-        'to': page,
+        'per_page': pageSize,
+        'total': total,
+        'from': from,
+        'to': from + products.length - 1,
       },
       'categories': [
         {'slug': 'tech', 'name': 'Technology'},
@@ -214,6 +223,32 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('shop search rejects overlong controller input before loading', (
+    tester,
+  ) async {
+    final repo = ShopRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ShopPage(repository: repo, slug: 'test'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.maxLength, 100);
+    final before = repo.requests.length;
+    field.controller!.text = List.filled(101, 'x').join();
+    field.onSubmitted!('ignored');
+    await tester.pumpAndSettle();
+
+    expect(repo.requests, hasLength(before));
+    expect(
+      find.text('Use no more than 100 characters to search this shop.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'voucher product URLs open native product detail with the capped benefit',
     (tester) async {
@@ -233,7 +268,11 @@ void main() {
                 'max_discount': 50,
                 'product_scope': 'selected',
                 'eligible_products': [
-                  {'name': 'Eligible bag', 'url': '/product/everyday-bag-1'},
+                  {
+                    'id': 44,
+                    'name': 'Eligible bag',
+                    'url': '/product/everyday-bag-1',
+                  },
                 ],
               },
             ),

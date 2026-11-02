@@ -95,9 +95,7 @@ class _NotificationPreviewState extends State<NotificationPreview>
       setState(() {
         _notices = mapsOf(data['notices']).take(6).toList();
       });
-      widget.onSummaryChanged?.call(
-        (mapOf(data['summary'])['unread'] as num).toInt(),
-      );
+      widget.onSummaryChanged?.call(mapOf(data['summary'])['unread'] as int);
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
         setState(() {

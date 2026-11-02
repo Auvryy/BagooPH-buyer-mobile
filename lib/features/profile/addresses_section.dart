@@ -4,11 +4,71 @@ import 'package:flutter/material.dart';
 
 import '../../core/application_text_validation.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/form_metadata.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../checkout/location_picker.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
+
+bool _completeSavedAddress(Map<String, dynamic> address) {
+  bool optionalText(String key) =>
+      address[key] == null || address[key] is String;
+  bool requiredText(String key) =>
+      address[key] is String && (address[key] as String).trim().isNotEmpty;
+
+  final region = address['region'];
+  final postalCode = address['postal_code'];
+  final type = address['type'];
+  final latitude = address['latitude'];
+  final longitude = address['longitude'];
+  final hasCoordinates = latitude != null || longitude != null;
+  return address['is_default'] is bool &&
+      requiredText('recipient_name') &&
+      requiredText('phone') &&
+      requiredText('street') &&
+      requiredText('city') &&
+      (region == null ||
+          region is String && RegExp(r'^[0-9]{10}$').hasMatch(region)) &&
+      optionalText('province') &&
+      optionalText('barangay') &&
+      optionalText('landmark') &&
+      (postalCode == null ||
+          postalCode == '' ||
+          postalCode is String && RegExp(r'^[0-9]{4}$').hasMatch(postalCode)) &&
+      (type == null || const {'Home', 'Office', 'Other'}.contains(type)) &&
+      (hasCoordinates
+          ? latitude is num &&
+                longitude is num &&
+                latitude.isFinite &&
+                longitude.isFinite &&
+                latitude >= -90 &&
+                latitude <= 90 &&
+                longitude >= -180 &&
+                longitude <= 180
+          : true);
+}
+
+List<Map<String, dynamic>>? confirmedSavedAddresses(Object? raw) {
+  if (raw is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  for (final value in raw) {
+    if (value is! Map || value.keys.any((key) => key is! String)) {
+      return null;
+    }
+    final address = <String, dynamic>{
+      for (final entry in value.entries) entry.key as String: entry.value,
+    };
+    final id = positiveResourceId(address['id']);
+    if (id == null || !ids.add(id) || !_completeSavedAddress(address)) {
+      return null;
+    }
+    rows.add(address);
+  }
+  return rows;
+}
 
 class AddressesSection extends StatefulWidget {
   const AddressesSection({
@@ -34,13 +94,30 @@ class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
   bool _confirming = false;
   bool get _pending => busy || _confirming;
 
+  List<Map<String, dynamic>>? get _confirmedAddresses =>
+      confirmedSavedAddresses(widget.page.props['addresses']);
+  List<Map<String, dynamic>> get _addressRows =>
+      _confirmedAddresses ?? const [];
+  bool get _addressesValid => _confirmedAddresses != null;
+
   List<Map<String, dynamic>> get addresses =>
-      mapsOf(widget.page.props['addresses']);
+      _addressesValid ? _addressRows : const [];
   bool get eligible => widget.page.props['canUsePortal'] == true;
-  int get limit =>
-      (widget.page.props['addressBookLimit'] as num?)?.toInt() ?? 10;
+  int? get addressLimit {
+    final value = widget.page.props['addressBookLimit'];
+    return value == null ? 10 : strictNonNegativeInteger(value);
+  }
+
+  bool get _canAddAddress {
+    final limit = addressLimit;
+    return _addressesValid && limit != null && addresses.length < limit;
+  }
+
   Future<void> _edit([Map<String, dynamic>? address]) async {
-    if (_pending || !eligible || !ensureBuyerAccess()) return;
+    if (_pending || !eligible || !_addressesValid || !ensureBuyerAccess()) {
+      return;
+    }
+    final limit = addressLimit;
     await perform(() async {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -53,7 +130,7 @@ class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
                 hasBuyerAccess &&
                 eligible &&
                 (address == null
-                    ? addresses.length < limit
+                    ? limit != null && addresses.length < limit
                     : addresses.any((saved) => saved['id'] == address['id'])),
             address: address,
             count: addresses.length,
@@ -67,7 +144,9 @@ class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
   }
 
   Future<void> _change(Map<String, dynamic> address, bool remove) async {
-    if (_pending || !eligible || !ensureBuyerAccess()) return;
+    if (_pending || !eligible || !_addressesValid || !ensureBuyerAccess()) {
+      return;
+    }
     if (remove) {
       setState(() => _confirming = true);
       try {
@@ -106,9 +185,25 @@ class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
   Widget build(BuildContext context) => content([
     ProfileHeading(
       'Delivery Address Book',
-      '${addresses.length} of $limit addresses saved. Changes apply to future deliveries; existing orders keep their original address.',
+      '${addresses.length} of ${addressLimit?.toString() ?? 'an unknown limit'} addresses saved. Changes apply to future deliveries; existing orders keep their original address.',
       Icons.location_on_outlined,
     ),
+    if (addressLimit == null)
+      const Padding(
+        padding: EdgeInsets.only(bottom: 20),
+        child: Notice(
+          'The address book limit could not be confirmed. Reload your profile before adding an address.',
+          error: true,
+        ),
+      ),
+    if (!_addressesValid)
+      const Padding(
+        padding: EdgeInsets.only(bottom: 20),
+        child: Notice(
+          'Saved address details could not be confirmed. Reload your profile before editing or changing an address.',
+          error: true,
+        ),
+      ),
     if (!eligible)
       const Padding(
         padding: EdgeInsets.only(bottom: 20),
@@ -117,14 +212,12 @@ class _AddressesSectionState extends BuyerProfileFormState<AddressesSection> {
         ),
       ),
     OutlinedButton.icon(
-      onPressed: _pending || !eligible || addresses.length >= limit
-          ? null
-          : _edit,
+      onPressed: _pending || !eligible || !_canAddAddress ? null : _edit,
       icon: const Icon(Icons.add),
       label: const Text('Add delivery address'),
     ),
     const SizedBox(height: 24),
-    if (addresses.isEmpty)
+    if (addresses.isEmpty && _addressesValid)
       const Padding(
         padding: EdgeInsets.symmetric(vertical: 32),
         child: Text(
@@ -292,7 +385,8 @@ class _AddressEditor extends StatefulWidget {
   final BuyerAccountScope account;
   final bool Function() canChange;
   final Map<String, dynamic>? address;
-  final int count, limit;
+  final int count;
+  final int? limit;
   final ValueChanged<WebPage> onChanged;
   @override
   State<_AddressEditor> createState() => _AddressEditorState();
@@ -379,8 +473,13 @@ class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
         'Wait for the current location choices to load.',
       );
     }
-    if (widget.address == null && widget.count >= widget.limit) {
-      throw BackendException('You can save up to ${widget.limit} addresses.');
+    final limit = widget.limit;
+    if (widget.address == null && (limit == null || widget.count >= limit)) {
+      throw BackendException(
+        limit == null
+            ? 'The address book limit could not be confirmed. Reload your profile before adding an address.'
+            : 'You can save up to $limit addresses.',
+      );
     }
     final values = {
       for (final field in _fields.entries) field.key: field.value.text.trim(),

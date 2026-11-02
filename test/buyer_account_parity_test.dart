@@ -8,6 +8,7 @@ import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/auth/register_page.dart';
 import 'package:bagoo_buyer_mobile/features/auth/password_link_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/account_status_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
 import 'package:flutter/material.dart';
@@ -18,10 +19,13 @@ import 'support/fake_buyer_repository.dart';
 import 'support/widget_helpers.dart';
 
 WebPage statusPage({
-  int owner = 7,
+  Object owner = 7,
   String token =
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   bool pending = false,
+  Object? sources,
+  Object? requests,
+  Object? emailUpdate,
 }) => WebPage('Auth/AccountStatus', {
   'auth': {
     'user': {...buyer, 'id': owner},
@@ -30,26 +34,45 @@ WebPage statusPage({
     'title': 'Account restricted',
     'message': 'Review this recorded restriction.',
     'account': {...buyer, 'id': owner},
-    'sources': [
-      {
-        'type': 'account',
-        'id': owner,
-        'source_token': token,
-        'name': 'Buyer account',
-        'status': 'suspended',
-        'reason': 'Review required.',
-        'pending_request_id': pending ? 12 : null,
-      },
-    ],
-    'requests': [],
+    'sources':
+        sources ??
+        [
+          {
+            'type': 'account',
+            'id': owner,
+            'source_token': token,
+            'name': 'Buyer account',
+            'status': 'suspended',
+            'reason': 'Review required.',
+            'pending_request_id': pending ? 12 : null,
+          },
+        ],
+    'requests': requests ?? [],
+    'email_update': ?emailUpdate,
   },
 });
 
 class EmailRepository extends FakeBuyerRepository {
   final checks = <String, Completer<bool>>{};
+  Future<bool> Function(String)? check;
   @override
-  Future<bool> registrationEmailAvailable(String email) =>
-      (checks[email] = Completer<bool>()).future;
+  Future<bool> registrationEmailAvailable(String email) => check == null
+      ? (checks[email] = Completer<bool>()).future
+      : check!(email);
+}
+
+class InvalidPolicyRepository extends FakeBuyerRepository {
+  @override
+  Future<WebPage> registration() async => const WebPage('Auth/Register', {
+    'birthDateLimits': {'adult_maximum': '2008-10-26', 'today': '2026-10-26'},
+    'policies': {
+      'required': true,
+      'terms_version': '2026-10-12',
+      'privacy_version': '2026-10-12',
+      'terms_url': '/account',
+      'privacy_url': '/privacy/2026-10-12',
+    },
+  });
 }
 
 class RecognizedRepository extends FakeBuyerRepository {
@@ -74,6 +97,25 @@ class PasswordRepository extends FakeBuyerRepository {
 }
 
 void main() {
+  test('profile repository requires a positive integer buyer ID', () {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    final repository = ProfileRepository(BuyerRepository(session));
+    for (final id in [0, -1, 7.5, '7', null]) {
+      final page = WebPage('Buyer/Profile', {
+        'auth': {
+          'user': {...buyer, 'id': id},
+        },
+        'user': {...buyer, 'id': id},
+      });
+      expect(
+        () => repository.checked(page),
+        throwsA(isA<BackendException>()),
+        reason: 'invalid buyer ID $id',
+      );
+    }
+  });
+
   testWidgets(
     'opening a buyer reset link requires explicit valid password submission',
     (tester) async {
@@ -178,6 +220,75 @@ void main() {
   });
 
   testWidgets(
+    'rate-limited email availability does not request on every edit',
+    (tester) async {
+      final repo = EmailRepository();
+      addTearDown(repo.session.close);
+      var checks = 0;
+      repo.check = (_) async {
+        checks++;
+        throw BackendException(
+          'Email checks are temporarily limited.',
+          status: 429,
+          retryAt: DateTime.now().add(const Duration(seconds: 30)),
+        );
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: RegisterPage(
+            repository: repo,
+            onBack: () {},
+            onBrowse: () {},
+            onComplete: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final email = find.widgetWithText(TextFormField, 'Email address');
+      await tester.enterText(email, 'first@example.test');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+      await tester.enterText(email, 'second@example.test');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      expect(checks, 1);
+      expect(find.textContaining('Try again in '), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('invalid policy links block buyer registration', (tester) async {
+    final repo = InvalidPolicyRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: RegisterPage(
+          repository: repo,
+          onBack: () {},
+          onBrowse: () {},
+          onComplete: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Account policy links could not be confirmed'),
+      findsOneWidget,
+    );
+    final continueButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Continue'),
+    );
+    expect(continueButton.onPressed, isNull);
+    expect(repo.validationCalls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
     'review conflict retains the draft and cannot submit an old status token',
     (tester) async {
       final session = ControlledWebSession();
@@ -235,6 +346,88 @@ void main() {
     },
   );
 
+  testWidgets('account review request rejects markup before submission', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    session.onPage = (_) async => statusPage();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: AccountStatusPage(repository: BuyerRepository(session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Explain your review request'),
+      'Please review <script>alert(1)</script> for this account.',
+    );
+    tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Request a review'),
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(session.posts, isEmpty);
+    expect(
+      find.text(
+        'Use plain text with letters or numbers, without markup or hidden characters.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'account review request waits after a rate limit and keeps draft',
+    (tester) async {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      session.onPage = (_) async => statusPage();
+      session.onPost = (_) async => throw BackendException(
+        'Too many account review requests.',
+        status: 429,
+        retryAt: DateTime.now().add(const Duration(seconds: 30)),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: AccountStatusPage(repository: BuyerRepository(session)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      const draft =
+          'Please review this restriction after I corrected the details.';
+      final field = find.widgetWithText(
+        TextFormField,
+        'Explain your review request',
+      );
+      await tester.enterText(field, draft);
+      final savedAction = tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Request a review'),
+          )
+          .onPressed!;
+      savedAction();
+      await tester.pumpAndSettle();
+      savedAction();
+      await tester.pumpAndSettle();
+
+      final retry = find.ancestor(
+        of: find.textContaining('Try again in '),
+        matching: find.byType(FilledButton),
+      );
+      expect(retry, findsOneWidget);
+      expect(tester.widget<FilledButton>(retry).onPressed, isNull);
+      expect(session.posts, hasLength(1));
+      expect(tester.widget<TextFormField>(field).controller!.text, draft);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('status from a different buyer clears private details', (
     tester,
   ) async {
@@ -254,6 +447,180 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Buyer account'), findsNothing);
     expect(find.text('Request a review'), findsNothing);
+  });
+
+  testWidgets('malformed restriction rows clear stale review actions', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    var page = statusPage();
+    session.onPage = (_) async => page;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: AccountStatusPage(repository: BuyerRepository(session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Explain your review request'),
+      'Please review this restriction after I corrected the details.',
+    );
+    final staleSubmit = tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Request a review'),
+        )
+        .onPressed!;
+
+    page = statusPage(
+      sources: [
+        {
+          'type': 'account',
+          'id': 7,
+          'source_token': 'a' * 64,
+          'name': 'Buyer account',
+          'status': 'suspended',
+          'reason': 'Review required.',
+        },
+        'unexpected row',
+      ],
+    );
+    await tester.tap(find.byTooltip('Refresh account status'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Buyer account'), findsNothing);
+    expect(find.text('Request a review'), findsNothing);
+    expect(
+      find.textContaining('Account status details could not be confirmed'),
+      findsOneWidget,
+    );
+    staleSubmit();
+    await tester.pumpAndSettle();
+    expect(session.posts, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('invalid review source tokens never expose a submit action', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    session.onPage = (_) async => statusPage(
+      sources: [
+        {
+          'type': 'account',
+          'id': 7,
+          'source_token': 'A' * 64,
+          'name': 'Buyer account',
+          'status': 'suspended',
+        },
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: AccountStatusPage(repository: BuyerRepository(session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Buyer account'), findsNothing);
+    expect(find.text('Request a review'), findsNothing);
+    expect(
+      find.textContaining('Account status details could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(session.posts, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('malformed email update metadata cannot claim delivery', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    session.onPage = (_) async =>
+        statusPage(emailUpdate: {'pending': 'true', 'attempts': 'a lot'});
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: AccountStatusPage(repository: BuyerRepository(session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('email update was delivered'), findsNothing);
+    expect(find.textContaining('awaiting delivery'), findsNothing);
+    expect(find.text('Buyer account'), findsNothing);
+    expect(
+      find.textContaining('Account status details could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'malformed review history does not leave restriction details active',
+    (tester) async {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      var page = statusPage();
+      session.onPage = (_) async => page;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: AccountStatusPage(repository: BuyerRepository(session)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      page = statusPage(
+        requests: [
+          {
+            'id': 21,
+            'status': 'rejected',
+            'created_at': '2026-10-01T10:00:00Z',
+            'message': 'Please review the recorded restriction.',
+          },
+          false,
+        ],
+      );
+      await tester.tap(find.byTooltip('Refresh account status'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Buyer account'), findsNothing);
+      expect(find.text('Review request history'), findsNothing);
+      expect(
+        find.textContaining('Account status details could not be confirmed'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('fractional account owner cannot display restricted details', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    session.onPage = (_) async => statusPage(owner: 7.5);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: AccountStatusPage(repository: BuyerRepository(session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Buyer account'), findsNothing);
+    expect(find.text('Request a review'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   test('native registration validates and submits the optional ID as multipart data', () async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'auth_shell.dart';
@@ -32,8 +33,24 @@ class _RecoveryPageState extends State<RecoveryPage> {
   String? _token;
   String? _error;
   Map<String, String> _errors = {};
+  late final RetryCooldown _codeCooldown;
+  late final RetryCooldown _resetCooldown;
+
+  @override
+  void initState() {
+    super.initState();
+    void changed() {
+      if (mounted) setState(() {});
+    }
+
+    _codeCooldown = RetryCooldown(changed);
+    _resetCooldown = RetryCooldown(changed);
+  }
+
   Future<void> _submit() async {
-    if (_busy) {
+    if (_busy ||
+        (_token == null && _codeCooldown.active) ||
+        (_token != null && _resetCooldown.active)) {
       return;
     }
     setState(() {
@@ -54,6 +71,7 @@ class _RecoveryPageState extends State<RecoveryPage> {
         if (!mounted) {
           return;
         }
+        _codeCooldown.start(sent);
         final token = await verifyEmailCode(
           context,
           widget.repository,
@@ -79,6 +97,13 @@ class _RecoveryPageState extends State<RecoveryPage> {
       if (!mounted) {
         return;
       }
+      if (error.status == 429) {
+        if (_token == null) {
+          _codeCooldown.start(error.data, retryAt: error.retryAt);
+        } else {
+          _resetCooldown.start(error.data, retryAt: error.retryAt);
+        }
+      }
       setState(() {
         _error = error.fields.isEmpty
             ? error.message
@@ -98,6 +123,8 @@ class _RecoveryPageState extends State<RecoveryPage> {
 
   @override
   void dispose() {
+    _codeCooldown.dispose();
+    _resetCooldown.dispose();
     _email.dispose();
     _password.dispose();
     _confirmation.dispose();
@@ -162,10 +189,20 @@ class _RecoveryPageState extends State<RecoveryPage> {
           ],
           SubmitButton(
             label: _token == null
-                ? 'Send verification code'
+                ? _codeCooldown.active
+                      ? 'Send code in ${_codeCooldown.remainingSeconds}s'
+                      : 'Send verification code'
+                : _resetCooldown.active
+                ? 'Try again in ${_resetCooldown.remainingSeconds}s'
                 : 'Save new password',
             busy: _busy,
-            onPressed: _submit,
+            onPressed: _token == null
+                ? _codeCooldown.active
+                      ? null
+                      : _submit
+                : _resetCooldown.active
+                ? null
+                : _submit,
           ),
           if (_token == null)
             TextButton(

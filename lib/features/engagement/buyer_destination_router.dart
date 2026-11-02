@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../home/search_controller.dart';
 import '../products/product_page.dart';
+import '../products/product_model.dart';
 import '../products/shop_page.dart';
 import '../profile/order_detail_page.dart';
 import '../profile/profile_repository.dart';
@@ -158,14 +160,14 @@ class BuyerDestinationRouter {
       '/notifications',
     ].contains(target.path)) {
       final page = await repository.currentSession();
-      if (page?.user?['id'] is! num) {
+      if (positiveResourceId(page?.user?['id']) == null) {
         throw const BackendException(
           'Sign in to your buyer account to open this screen.',
           status: 401,
         );
       }
       if (!context.mounted) return;
-      final owner = (page!.user!['id'] as num).toInt();
+      final owner = positiveResourceId(page!.user!['id'])!;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => target.path == '/buyer/saved-products'
@@ -400,8 +402,10 @@ class BuyerDestinationRouter {
         );
         return;
       case 'Buyer/Promotion':
-        if (page.props['promotion'] is! Map ||
-            page.props['products'] is! List) {
+        if (page.props['promotion'] is! Map) {
+          throw const BackendException('This promotion is unavailable.');
+        }
+        if (completeRelatedProducts(page.props['products']) == null) {
           throw const BackendException('This promotion is unavailable.');
         }
         await Navigator.of(context).push(
@@ -457,18 +461,18 @@ class BuyerDestinationRouter {
         );
         return;
       case 'Buyer/OrderDetail':
-        final id = mapOf(page.props['order'])['id'];
-        if (id is! num || id <= 0) {
+        final id = positiveResourceId(mapOf(page.props['order'])['id']);
+        if (id == null) {
           throw const BackendException('This order is unavailable.');
         }
-        await _openOrder(context, repository, '${id.toInt()}');
+        await _openOrder(context, repository, '$id');
         return;
       case 'Returns/Show':
-        final id = mapOf(page.props['returnCase'])['id'];
-        if (id is! num || id <= 0) {
+        final id = positiveResourceId(mapOf(page.props['returnCase'])['id']);
+        if (id == null) {
           throw const BackendException('This return is unavailable.');
         }
-        await _openReturn(context, repository, '${id.toInt()}');
+        await _openReturn(context, repository, '$id');
         return;
       default:
         throw const BackendException(

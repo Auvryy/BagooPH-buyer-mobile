@@ -6,6 +6,32 @@ import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'support/fake_buyer_repository.dart';
 
 void main() {
+  testWidgets('product cards omit invalid fractional sales counts', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 860);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final session = FakeSession();
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: ProductCard(
+            product: {...product(1), 'sales_count': 2.5},
+            session: session,
+            onTap: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('2.5 sold'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final scale in [1.0, 1.4, 2.0]) {
     testWidgets(
       'cards retain equal dimensions and fit saved errors at text $scale',

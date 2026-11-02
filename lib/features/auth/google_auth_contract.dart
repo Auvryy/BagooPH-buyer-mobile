@@ -1,4 +1,6 @@
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
+import 'registration_policy_contract.dart';
 
 class GoogleRegistrationContract {
   const GoogleRegistrationContract._({
@@ -19,7 +21,10 @@ class GoogleRegistrationContract {
     final expiry = data['expiresAt'];
     final name = identity['name'], email = identity['email'];
     final dates = mapOf(data['birthDateLimits']);
-    final policies = mapOf(data['policies']);
+    final policies = checkedBuyerRegistrationPolicies(
+      data['policies'],
+      session,
+    );
     final maximum = _calendarDate(dates['adult_maximum']);
     final today = _calendarDate(dates['today']);
     final past = _calendarDate(dates['past_maximum']);
@@ -40,24 +45,10 @@ class GoogleRegistrationContract {
         past == null ||
         maximum.isAfter(past) ||
         !past.isBefore(today) ||
-        policies['required'] is! bool ||
-        !['terms_version', 'privacy_version', 'terms_url', 'privacy_url'].every(
-          (key) =>
-              policies[key] is String &&
-              (policies[key] as String).trim().isNotEmpty &&
-              (policies[key] as String).length <= 2048,
-        )) {
+        policies == null) {
       throw const BackendException(
         'Google registration details are unavailable. Start Google sign-in again or use email.',
       );
-    }
-    for (final key in ['terms_url', 'privacy_url']) {
-      final target = session.resolve(policies[key]);
-      if (target.hasFragment) {
-        throw const BackendException(
-          'The registration policy link is invalid.',
-        );
-      }
     }
     return GoogleRegistrationContract._(
       name: name,
@@ -68,16 +59,7 @@ class GoogleRegistrationContract {
         isUtc: true,
       ),
       adultMaximum: maximum,
-      policies: Map.unmodifiable({
-        for (final key in [
-          'required',
-          'terms_version',
-          'privacy_version',
-          'terms_url',
-          'privacy_url',
-        ])
-          key: policies[key],
-      }),
+      policies: Map.unmodifiable({'required': true, ...policies}),
     );
   }
 
@@ -87,14 +69,7 @@ class GoogleRegistrationContract {
   bool expired(DateTime now) => !expiresAt.isAfter(now);
 
   static DateTime? _calendarDate(Object? value) {
-    if (value is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
-      return null;
-    }
-    final date = DateTime.tryParse(value);
-    if (date == null || date.toIso8601String().substring(0, 10) != value) {
-      return null;
-    }
-    return DateTime(date.year, date.month, date.day);
+    return strictDateOnly(value);
   }
 }
 

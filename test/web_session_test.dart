@@ -26,6 +26,52 @@ void main() {
     await server.close(force: true);
   });
 
+  test('empty field error arrays do not crash page validation', () {
+    final page = WebPage('Auth/Register', {
+      'errors': {
+        'email': <String>[],
+        'name': ['Enter your name.'],
+      },
+    });
+
+    expect(page.errors, {'name': 'Enter your name.'});
+    expect(
+      () => repository.requireNoErrors(page),
+      throwsA(
+        isA<BackendException>().having(
+          (error) => error.fields,
+          'field errors',
+          {'name': 'Enter your name.'},
+        ),
+      ),
+    );
+  });
+
+  test(
+    'rejects oversized server responses before buffering them in full',
+    () async {
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        final chunk = List<int>.filled(64 * 1024, 120);
+        for (var i = 0; i < 129; i++) {
+          request.response.add(chunk);
+        }
+        await request.response.close();
+      });
+
+      await expectLater(
+        session.page('/'),
+        throwsA(
+          isA<BackendException>().having(
+            (error) => error.message,
+            'response limit message',
+            contains('too large'),
+          ),
+        ),
+      );
+    },
+  );
+
   test(
     'bootstraps CSRF, sends cookies, and follows a rotated login session',
     () async {

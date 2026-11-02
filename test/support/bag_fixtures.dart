@@ -39,6 +39,10 @@ Map<String, dynamic> priced(List<int> ids) => {
     'shipping_fee': 50,
     'discount': 0,
     'shipping_discount': 0,
+    'voucher': null,
+    'vouchers': <Map<String, dynamic>>[],
+    'voucher_error': null,
+    'redemptions': <Map<String, dynamic>>[],
     'total': ids.length * 100 + 50,
     'items': [
       for (final id in ids)
@@ -48,7 +52,11 @@ Map<String, dynamic> priced(List<int> ids) => {
       {
         'shop_id': 1,
         'shop_name': 'Test shop',
+        'subtotal': ids.length * 100,
         'shipping': 50,
+        'discount': 0,
+        'product_discount': 0,
+        'shipping_discount': 0,
         'total': ids.length * 100 + 50,
       },
     ],
@@ -114,7 +122,11 @@ class ReviewBagRepository extends FakeBuyerRepository {
           {
             'shop_id': 1,
             'shop_name': 'Test shop',
+            'subtotal': subtotal,
             'shipping': 50,
+            'discount': 0,
+            'product_discount': 0,
+            'shipping_discount': 0,
             'total': subtotal + 50,
           },
         ],

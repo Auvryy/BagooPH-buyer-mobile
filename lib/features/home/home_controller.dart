@@ -3,7 +3,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
+import '../products/product_model.dart';
+
+List<Map<String, dynamic>> _completeMapRows(Object? value) {
+  if (value is! List) return const [];
+  final rows = mapsOf(value);
+  return rows.length == value.length ? rows : const [];
+}
 
 class HomeController extends ChangeNotifier {
   HomeController(this.repository, {WebPage? initial})
@@ -11,7 +20,7 @@ class HomeController extends ChangeNotifier {
       _knownUser = initial?.user,
       _knownEpoch = repository.session.identityEpoch {
     if (initial != null) {
-      _accept(initial);
+      _accept(initial, requestedPage: 1);
       _acceptedRequest = ('', '', 'relevance', currentPage);
     }
   }
@@ -34,9 +43,59 @@ class HomeController extends ChangeNotifier {
   int _generation = 0;
   bool _disposed = false;
   (String, String, String, int)? _acceptedRequest;
-  List<Map<String, dynamic>> get categories =>
-      mapsOf(data?.props['categories']);
-  List<Map<String, dynamic>> get banners => mapsOf(data?.props['banners']);
+  List<Map<String, dynamic>> get categories {
+    final rows = _completeMapRows(data?.props['categories']);
+    final ids = <int>{};
+    final slugs = <String>{};
+    if (rows.any((row) {
+      final id = positiveResourceId(row['id']);
+      final name = row['name'];
+      final slug = row['slug'];
+      return id == null ||
+          name is! String ||
+          name.trim().isEmpty ||
+          slug is! String ||
+          slug.trim().isEmpty ||
+          !ids.add(id) ||
+          !slugs.add(slug);
+    })) {
+      return const [];
+    }
+    return rows;
+  }
+
+  List<Map<String, dynamic>> get banners {
+    final rows = _completeMapRows(data?.props['banners']);
+    final ids = <int>{};
+    if (rows.any((row) {
+      final id = positiveResourceId(row['id']);
+      final image = row['image'];
+      final href = row['href'];
+      final measurement = row['measurement'];
+      if (id == null ||
+          !ids.add(id) ||
+          image is! String ||
+          image.trim().isEmpty ||
+          href is! String ||
+          href.trim().isEmpty) {
+        return true;
+      }
+      if (measurement == null) return false;
+      if (measurement is! Map) return true;
+      return positiveResourceId(measurement['revision_id']) == null ||
+          measurement['token'] is! String ||
+          (measurement['token'] as String).isEmpty ||
+          measurement['endpoint'] is! String ||
+          (measurement['endpoint'] as String).isEmpty;
+    })) {
+      return const [];
+    }
+    return rows;
+  }
+
+  List<Map<String, dynamic>> get relatedProducts =>
+      completeRelatedProducts(data?.props['relatedProducts']) ?? const [];
+
   Map<String, dynamic>? get user =>
       _knownEpoch == repository.session.identityEpoch
       ? data?.user ?? (data?.isCached == true ? _knownUser : null)
@@ -59,6 +118,25 @@ class HomeController extends ChangeNotifier {
       sort,
       more ? currentPage + 1 : pageNumber ?? 1,
     );
+    if (!isValidBuyerPageRequest(request.$4)) {
+      loading = false;
+      loadingMore = false;
+      if (more) {
+        moreError = 'Choose a valid product page.';
+      } else {
+        error = 'Choose a valid product page.';
+      }
+      notifyListeners();
+      return;
+    }
+    if (request.$1.runes.length > 100) {
+      loading = false;
+      loadingMore = false;
+      error = 'Use no more than 100 characters for your search.';
+      moreError = null;
+      notifyListeners();
+      return;
+    }
     if (more) {
       loadingMore = true;
       moreError = null;
@@ -93,9 +171,13 @@ class HomeController extends ChangeNotifier {
                     loading &&
                     epoch == repository.session.identityEpoch &&
                     cacheGeneration == repository.catalogueCache.generation) {
-                  _accept(cached);
-                  _acceptedRequest = request;
-                  notifyListeners();
+                  try {
+                    _accept(cached, requestedPage: request.$4);
+                    _acceptedRequest = request;
+                    notifyListeners();
+                  } on BackendException {
+                    // Ignore malformed or stale local previews.
+                  }
                 }
               }, onError: (Object _, StackTrace _) {}),
         );
@@ -110,7 +192,7 @@ class HomeController extends ChangeNotifier {
           status: 401,
         );
       }
-      _accept(page, more: more);
+      _accept(page, more: more, requestedPage: request.$4);
       _acceptedRequest = request;
     } on BackendException catch (e) {
       if (_disposed || generation != _generation) {
@@ -135,31 +217,55 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  void _accept(WebPage page, {bool more = false}) {
-    data = page;
+  void _accept(WebPage page, {bool more = false, required int requestedPage}) {
+    final pageUser = page.user;
+    if (pageUser != null &&
+        (pageUser['role'] != 'buyer' ||
+            positiveResourceId(pageUser['id']) == null)) {
+      throw const BackendException(
+        'Your buyer account could not be confirmed. Sign in again to continue.',
+        status: 401,
+      );
+    }
     if (!page.isCached) {
       _knownUser = page.user;
       _knownEpoch = repository.session.identityEpoch;
     }
     if (page.component != 'Buyer/Home') {
+      data = page;
       products = [];
       return;
     }
     final feed = mapOf(page.props['feedProducts']);
-    final rows = mapsOf(feed['data']);
+    final rows = completeProductCards(feed['data']);
+    if (rows == null) {
+      throw const BackendException(
+        'Product results could not be confirmed. Refresh and try again.',
+      );
+    }
+    final pagination = parseContractPaginationMetadata(
+      feed,
+      rowCount: rows.length,
+      requestedPage: requestedPage,
+      pageSize: 18,
+    );
+    if (pagination == null) {
+      throw const BackendException(
+        'Home pagination could not be confirmed. Refresh and try again.',
+      );
+    }
+    data = page;
     if (more) {
       final ids = products.map((p) => p['id']).toSet();
       products.addAll(rows.where((p) => ids.add(p['id'])));
     } else {
       products = rows;
     }
-    currentPage = (feed['current_page'] as num?)?.toInt() ?? 1;
-    lastPage = (feed['last_page'] as num?)?.toInt() ?? 1;
-    total = (feed['total'] as num?)?.toInt() ?? products.length;
-    from = more
-        ? from ?? (feed['from'] as num?)?.toInt()
-        : (feed['from'] as num?)?.toInt();
-    to = (feed['to'] as num?)?.toInt();
+    currentPage = pagination.currentPage;
+    lastPage = pagination.lastPage;
+    total = pagination.total;
+    from = more ? from ?? pagination.from : pagination.from;
+    to = pagination.to;
   }
 
   Future<void> filter({String? query, String? department, String? order}) {

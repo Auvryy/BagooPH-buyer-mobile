@@ -38,6 +38,7 @@ void main() {
   Widget app({
     Map<String, dynamic>? offer,
     bool canSave = true,
+    VoidCallback? onUse,
     VoucherReviewSession? using,
     Future<void> Function()? onSaved,
     BuyerAccountScope? account,
@@ -49,6 +50,7 @@ void main() {
           key: const ValueKey('displayed-voucher'),
           offer: offer ?? reviewOffer(),
           repository: voucherRepository(using ?? session),
+          onUse: onUse,
           canSave: canSave,
           account: account,
           onSaved:
@@ -71,6 +73,181 @@ void main() {
   ]) => tester
       .widget<TextButton>(find.widgetWithText(TextButton, label))
       .onPressed!;
+
+  for (final scenario in [
+    (
+      label: 'negative percentage',
+      overrides: {'discount_type': 'percent', 'discount_value': -5},
+      hidden: '-5% off',
+    ),
+    (
+      label: 'negative fixed discount and cap',
+      overrides: {
+        'discount_type': 'fixed',
+        'discount_value': -10,
+        'max_discount': -20,
+      },
+      hidden: '₱-10.00 off',
+    ),
+    (
+      label: 'negative minimum spend',
+      overrides: {'min_spend': -1},
+      hidden: '₱-1.00',
+    ),
+    (
+      label: 'percentage over one hundred',
+      overrides: {'discount_type': 'percent', 'discount_value': 150},
+      hidden: '150% off',
+    ),
+    (
+      label: 'malformed selected-product list',
+      overrides: {
+        'product_scope': 'selected',
+        'eligible_products': 'not-a-list',
+      },
+      hidden: 'Eligible product',
+    ),
+    (
+      label: 'selected-product list with a malformed row',
+      overrides: {
+        'product_scope': 'selected',
+        'eligible_products': [
+          {'name': 'Visible item', 'url': '/product/item'},
+          'not-a-product',
+        ],
+      },
+      hidden: 'Visible item',
+    ),
+    (
+      label: 'selected-product row without its server ID',
+      overrides: {
+        'product_scope': 'selected',
+        'eligible_products': [
+          {'name': 'Product without ID', 'url': '/product/missing-id'},
+        ],
+      },
+      hidden: 'Product without ID',
+    ),
+    (
+      label: 'duplicate selected-product IDs',
+      overrides: {
+        'product_scope': 'selected',
+        'eligible_products': [
+          {'id': 44, 'name': 'First eligible product', 'url': '/product/first'},
+          {
+            'id': 44,
+            'name': 'Second eligible product',
+            'url': '/product/second',
+          },
+        ],
+      },
+      hidden: 'First eligible product',
+    ),
+    (
+      label: 'selected-product URL on another origin',
+      overrides: {
+        'product_scope': 'selected',
+        'eligible_products': [
+          {
+            'id': 44,
+            'name': 'Foreign product',
+            'url': 'https://outside.example/product/foreign',
+          },
+        ],
+      },
+      hidden: 'Foreign product',
+    ),
+    (
+      label: 'unknown product scope',
+      overrides: {
+        'product_scope': 'future-scope',
+        'eligible_products': <Map<String, dynamic>>[],
+      },
+      hidden: 'Future scope offer',
+    ),
+    (
+      label: 'all-products scope with selected-product rows',
+      overrides: {
+        'product_scope': 'all',
+        'eligible_products': [
+          {'id': 44, 'name': 'Unexpected product', 'url': '/product/extra'},
+        ],
+      },
+      hidden: 'Unexpected product',
+    ),
+  ]) {
+    check('unconfirmed ${scenario.label} cannot be shown or used', (
+      tester,
+    ) async {
+      var uses = 0;
+      await tester.pumpWidget(
+        app(
+          offer: {...reviewOffer(), ...scenario.overrides},
+          onUse: () => uses++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Offer terms could not be confirmed.'), findsOneWidget);
+      expect(find.text(scenario.hidden), findsNothing);
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Use voucher'))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Save voucher'))
+            .onPressed,
+        isNull,
+      );
+      expect(uses, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  check('complete selected-product terms keep the eligible product link', (
+    tester,
+  ) async {
+    var uses = 0;
+    await tester.pumpWidget(
+      app(
+        offer: {
+          ...reviewOffer(),
+          'product_scope': 'selected',
+          'eligible_products': [
+            {'id': 44, 'name': 'Eligible product', 'url': '/product/eligible'},
+          ],
+        },
+        onUse: () => uses++,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Eligible product'), findsOneWidget);
+    expect(find.text('Offer terms could not be confirmed.'), findsNothing);
+    await tester.tap(find.text('Use voucher'));
+    await tester.pumpAndSettle();
+    expect(uses, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  check('valid free-shipping terms remain readable', (tester) async {
+    await open(
+      tester,
+      offer: {
+        ...reviewOffer(),
+        'discount_type': 'free_shipping',
+        'discount_value': null,
+        'max_discount': 75,
+      },
+    );
+
+    expect(find.text('Shipping discount up to ₱75.00'), findsOneWidget);
+    expect(find.text('Offer terms could not be confirmed.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   check('confirmed bookmark save and removal use the acknowledged ID', (
     tester,
@@ -256,7 +433,7 @@ void main() {
     });
   }
 
-  for (final revision in [0, -1, 1.5, double.infinity, '../12']) {
+  for (final revision in [0, -1, 1.5, double.infinity, '../12', 2147483648]) {
     check('invalid displayed revision $revision cannot be used as a path', (
       tester,
     ) async {

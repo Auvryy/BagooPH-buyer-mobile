@@ -23,7 +23,10 @@ class RefreshingSearch extends FakeBuyerRepository {
       handler == null
       ? WebPage('Buyer/Search', {
           'auth': {'user': buyer},
-          'products': homePage().props['feedProducts'],
+          'products': {
+            ...homePage().props['feedProducts'] as Map<String, dynamic>,
+            'per_page': 24,
+          },
           'categories': [],
           'locations': [],
         })

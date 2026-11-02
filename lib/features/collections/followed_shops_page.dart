@@ -11,6 +11,34 @@ import '../home/search_controller.dart';
 import 'collection_pagination.dart';
 import '../products/shop_page.dart';
 
+Map<String, dynamic> _confirmedFollowedShop(Map<String, dynamic> entry) {
+  final idValue = entry['shop_id'];
+  final rawShop = entry['shop'];
+  if (idValue is! int ||
+      idValue < 1 ||
+      rawShop is! Map ||
+      rawShop.keys.any((key) => key is! String)) {
+    return const {};
+  }
+  final id = idValue;
+  final shop = Map<String, dynamic>.from(rawShop);
+  final name = shop['name'];
+  final slug = shop['slug'];
+  final logo = shop['logo'];
+  final description = shop['description'];
+  if (shop['id'] != id ||
+      name is! String ||
+      name.trim().isEmpty ||
+      slug is! String ||
+      slug.trim().isEmpty ||
+      slug != slug.trim() ||
+      logo != null && logo is! String ||
+      description != null && description is! String) {
+    return const {};
+  }
+  return shop;
+}
+
 class FollowedShopsPage extends StatefulWidget {
   const FollowedShopsPage({
     super.key,
@@ -106,8 +134,7 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
       }
       setState(() {
         _page = result;
-        _number = (mapOf(result.props['entries'])['current_page'] as num)
-            .toInt();
+        _number = mapOf(result.props['entries'])['current_page'] as int;
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
@@ -229,8 +256,8 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
                         ),
                         itemBuilder: (context, index) {
                           final entry = _rows[index];
-                          final shop = mapOf(entry['shop']);
-                          final id = (entry['shop_id'] as num).toInt();
+                          final shop = _confirmedFollowedShop(entry);
+                          final id = entry['shop_id'] as int;
                           return _FollowedShopCard(
                             shop: shop,
                             session: widget.repository.session,
@@ -244,7 +271,7 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
                       ),
                       CollectionPagination(
                         current: _number,
-                        last: (_entries['last_page'] as num?)?.toInt() ?? 1,
+                        last: _entries['last_page'] as int? ?? 1,
                         busy: _loading,
                         onPage: (page) => _load(page: page),
                       ),
@@ -393,7 +420,7 @@ class _FollowedShopCard extends StatelessWidget {
                                     true
                                 ? shop['description'].toString()
                                 : shop.isEmpty
-                                ? 'This shop is no longer available. You can remove it from this list.'
+                                ? 'This shop is unavailable. Remove it from this list when ready.'
                                 : 'Visit this shop to browse its current catalogue.',
                             maxLines: 4,
                             overflow: TextOverflow.ellipsis,
@@ -403,18 +430,6 @@ class _FollowedShopCard extends StatelessWidget {
                               color: BagooTheme.muted,
                             ),
                           ),
-                          if (shop.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 10),
-                              child: Text(
-                                'Shop currently unavailable',
-                                style: TextStyle(
-                                  color: BagooTheme.muted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),

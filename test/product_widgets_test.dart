@@ -3,8 +3,9 @@ import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart'
-    show ImageViewer;
+    show ImageViewer, readableDate, readableDateTime;
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
+import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,91 @@ void main() {
   late FakeBuyerRepository repo;
   setUp(() => repo = FakeBuyerRepository());
   tearDown(() => repo.session.close());
+  testWidgets('malformed review and sales counts are not shown as facts', (
+    tester,
+  ) async {
+    repo.productResponse = productPage(
+      override: {'verified_review_count': 1.5, 'sales_count': -2},
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1.5 verified ratings'), findsNothing);
+    expect(find.text('(1.5 verified reviews)'), findsNothing);
+    expect(find.text('-2 sold'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final malformedSlug in ['', '   ', 12]) {
+    testWidgets(
+      'product detail disables the shop route for malformed slug $malformedSlug',
+      (tester) async {
+        final page = productPage();
+        final productData = page.props['product'] as Map;
+        final shop = productData['shop'] as Map;
+        shop['slug'] = malformedSlug;
+        repo.productResponse = page;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: BagooTheme.light,
+            home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final route = find.widgetWithText(OutlinedButton, 'View Shop');
+        await tester.scrollUntilVisible(
+          find.text('View Shop'),
+          300,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.widget<OutlinedButton>(route).onPressed, isNull);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets('a partial related-product feed does not show a complete strip', (
+    tester,
+  ) async {
+    final page = productPage();
+    page.props['relatedProducts'] = [product(2), 'malformed related product'];
+    repo.productResponse = page;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -5000));
+    await tester.pumpAndSettle();
+
+    expect(find.text('You may also like'), findsNothing);
+    expect(find.text('Everyday bag 2'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('date labels do not normalize impossible calendar values', () {
+    expect(readableDate('2026-02-30'), 'Date unavailable');
+    expect(readableDateTime('2026-02-30T10:00:00Z'), 'Not provided');
+    expect(readableDate('2024-02-29'), '29/2/2024');
+  });
+
   testWidgets('named product photo control opens the native image viewer', (
     tester,
   ) async {
@@ -38,6 +124,202 @@ void main() {
     await tester.tap(photo);
     await tester.pumpAndSettle();
     expect(find.byType(ImageViewer), findsOneWidget);
+  });
+  testWidgets('malformed review photo data does not crash the product page', (
+    tester,
+  ) async {
+    repo.productResponse = productPage(
+      override: {
+        'reviews': [
+          {
+            'id': 31,
+            'rating': 5,
+            'images': 'not-a-list',
+            'comment': 'Useful product.',
+            'created_at': '2026-11-02T00:00:00Z',
+            'verified_purchase': true,
+            'buyer': {'name': 'A***'},
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Useful product.'),
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Useful product.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('malformed review rows are not shown as a complete list', (
+    tester,
+  ) async {
+    repo.productResponse = productPage(
+      override: {
+        'verified_review_count': 2,
+        'reviews': <Object?>[
+          {
+            'id': 31,
+            'rating': 5,
+            'images': [],
+            'comment': 'Partial review list entry.',
+            'created_at': '2026-11-02T00:00:00Z',
+            'verified_purchase': true,
+          },
+          'not-a-review',
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final reviewsTab = find.widgetWithText(ActionChip, 'Reviews & photos');
+    await tester.scrollUntilVisible(
+      reviewsTab,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(reviewsTab);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Customer reviews could not be confirmed. Refresh this product.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Partial review list entry.'), findsNothing);
+    expect(find.text('No customer reviews yet'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final (label, invalidField, invalidValue) in [
+    ('string rating', 'rating', '5'),
+    ('out-of-range rating', 'rating', 6),
+    ('impossible review date', 'created_at', '2026-02-30T12:00:00Z'),
+    ('unconfirmed purchase status', 'verified_purchase', 'true'),
+  ]) {
+    testWidgets('product review list rejects $label', (tester) async {
+      repo.productResponse = productPage(
+        override: {
+          'reviews': [
+            {
+              'id': 31,
+              'rating': 5,
+              'images': [],
+              'comment': 'Review with malformed $label.',
+              'created_at': '2026-11-02T00:00:00Z',
+              'verified_purchase': true,
+              'buyer': {'name': 'A***'},
+              invalidField: invalidValue,
+            },
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final reviewsTab = find.widgetWithText(ActionChip, 'Reviews & photos');
+      await tester.scrollUntilVisible(
+        reviewsTab,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.tap(reviewsTab);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Customer reviews could not be confirmed. Refresh this product.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Review with malformed'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('malformed saved-product IDs do not crash the product page', (
+    tester,
+  ) async {
+    final page = productPage();
+    page.props['savedProductIds'] = 'not-a-list';
+    repo.productResponse = page;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Everyday bag 1'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('malformed saved-product IDs do not crash Home cards', (
+    tester,
+  ) async {
+    final page = homePage();
+    page.props['savedProductIds'] = 'not-a-list';
+    repo.homeHandler = (_, _) async => page;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(repository: repo, onLogin: () {}, onLogout: () async {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Everyday bag 1'),
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+
+    expect(find.text('Everyday bag 1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
   testWidgets(
     'home cards use equal sizes and open a fetched full product page',
@@ -93,6 +375,46 @@ void main() {
       );
     },
   );
+  testWidgets('fractional Bag counts disable product purchase controls', (
+    tester,
+  ) async {
+    repo.signedIn = true;
+    final page = productPage(signedIn: true);
+    page.props['cartQuantities'] = [
+      {'color': null, 'size': null, 'quantity': 1.5},
+    ];
+    repo.productResponse = page;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Available stock and Bag quantities could not be confirmed. Refresh this product.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Unavailable'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Buy Now'))
+          .onPressed,
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'guest Buy Now requests native login and never creates checkout',
     (tester) async {
@@ -135,6 +457,63 @@ void main() {
       expect(repo.orderCalls, 1);
       expect(repo.submittedOrder?['checkout_token'], checkoutFixtureToken());
       expect(find.text('Order #TEST-1 successfully placed.'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'malformed option prices leave Product Detail purchase actions disabled',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(375, 820);
+      addTearDown(tester.view.reset);
+      repo.signedIn = true;
+      final page = productPage(signedIn: true, override: {'price': 100});
+      page.props['variations'] = {
+        'pricing_mode': 'independent',
+        'colors': [
+          {'name': 'Red'},
+        ],
+        'sizes': [
+          {'name': 'Large'},
+        ],
+        'combinations': [
+          {'color': 'Red', 'size': 'Large', 'stock': 5, 'price': 'not a price'},
+        ],
+      };
+      repo.productResponse = page;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final red = find.widgetWithText(ChoiceChip, 'Red');
+      await tester.drag(find.byType(ListView).first, const Offset(0, -700));
+      await tester.pumpAndSettle();
+      await tester.tap(red);
+      await tester.pumpAndSettle();
+      final large = find.widgetWithText(ChoiceChip, 'Large');
+      await tester.ensureVisible(large);
+      await tester.tap(large);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Price unavailable'), findsWidgets);
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Unavailable'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Buy Now'))
+            .onPressed,
+        isNull,
+      );
+      expect(tester.takeException(), isNull);
     },
   );
   testWidgets(

@@ -74,6 +74,107 @@ void main() {
     },
   );
 
+  testWidgets('a floating company ID is not rounded into a real route choice', (
+    tester,
+  ) async {
+    final props = {...checkoutPage().props};
+    props['logisticsCompanies'] = [
+      {'id': 41.0, 'name': 'Mis-typed company'},
+    ];
+    await open(tester, WebPage('Checkout/Index', props));
+
+    expect(
+      tester
+          .widgetList<FilledButton>(
+            find.widgetWithText(FilledButton, 'Review order'),
+          )
+          .every((button) => button.onPressed == null),
+      isTrue,
+    );
+    expect(repo.orderCalls, 0);
+  });
+
+  testWidgets('non-text company metadata fails closed without crashing', (
+    tester,
+  ) async {
+    final props = {...checkoutPage().props};
+    props['logisticsCompanies'] = [
+      {'id': 41, 'name': 'Valid company', 7: 'unexpected'},
+    ];
+    await open(tester, WebPage('Checkout/Index', props));
+
+    expect(
+      tester
+          .widgetList<FilledButton>(
+            find.widgetWithText(FilledButton, 'Review order'),
+          )
+          .every((button) => button.onPressed == null),
+      isTrue,
+    );
+    expect(repo.orderCalls, 0);
+  });
+
+  testWidgets('a non-text item key makes checkout unavailable', (tester) async {
+    final props = {...checkoutPage().props};
+    final items = props['items'] as List;
+    props['items'] = [
+      <dynamic, dynamic>{...(items.first as Map), 7: 'unexpected'},
+      ...items.skip(1),
+    ];
+    await open(tester, WebPage('Checkout/Index', props));
+
+    expect(
+      find.text(
+        'These checkout details could not be confirmed. Close checkout and reopen it from your Bag.',
+      ),
+      findsOneWidget,
+    );
+    expect(repo.orderCalls, 0);
+  });
+
+  testWidgets('a non-text address key makes checkout unavailable', (
+    tester,
+  ) async {
+    final props = {...checkoutPage().props};
+    final addresses = props['addresses'] as List;
+    props['addresses'] = [
+      <dynamic, dynamic>{...(addresses.first as Map), 7: 'unexpected'},
+      ...addresses.skip(1),
+    ];
+    await open(tester, WebPage('Checkout/Index', props));
+
+    expect(
+      find.text(
+        'These checkout details could not be confirmed. Close checkout and reopen it from your Bag.',
+      ),
+      findsOneWidget,
+    );
+    expect(repo.orderCalls, 0);
+  });
+
+  testWidgets('non-text pickup-hub metadata fails closed without crashing', (
+    tester,
+  ) async {
+    final props = {...checkoutPage().props};
+    props['pickupHubs'] = [
+      {
+        'id': 82,
+        'name': 'Test Bayan Hub',
+        'city_municipality': 'Test city',
+        7: 'unexpected',
+      },
+    ];
+    await open(tester, WebPage('Checkout/Index', props));
+
+    expect(
+      find.text(
+        'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.',
+      ),
+      findsWidgets,
+    );
+    expect(repo.orderCalls, 0);
+  });
+
   testWidgets(
     'quotes include route context and orders retain saved coordinates',
     (tester) async {

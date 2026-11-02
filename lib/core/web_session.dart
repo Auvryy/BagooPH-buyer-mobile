@@ -5,12 +5,16 @@ import 'dart:typed_data';
 
 import 'uploads.dart';
 import 'session_vault.dart';
+import 'strict_datetime.dart';
 
 import 'package:html/parser.dart' as html;
 
 /// The buyer backend currently exposes Laravel web sessions and Inertia pages.
 /// Optional persistence uses the native secure store; credentials are never saved.
 class WebSession {
+  static const _maxTextResponseBytes = 8 * 1024 * 1024;
+  static const _maxBinaryResponseBytes = 20 * 1024 * 1024;
+
   WebSession(this.origin, {HttpClient? client, this._vault})
     : _client = client ?? HttpClient() {
     if (!['http', 'https'].contains(origin.scheme) ||
@@ -87,9 +91,11 @@ class WebSession {
             !origin.host.endsWith('.$domain')) {
           throw const FormatException();
         }
-        final expiry = row['expires'] == null
-            ? null
-            : DateTime.parse(row['expires']);
+        final rawExpiry = row['expires'];
+        final expiry = rawExpiry == null ? null : strictDateTime(rawExpiry);
+        if (rawExpiry != null && expiry == null) {
+          throw const FormatException();
+        }
         if (expiry != null && !expiry.isAfter(now)) continue;
         restored['${cookie.name}|${cookie.path ?? '/'}'] = _SessionCookie(
           cookie,
@@ -470,13 +476,20 @@ class WebSession {
       }
       await _saveSession();
       final chunks = BytesBuilder(copy: false);
+      final responseLimit = binary
+          ? _maxBinaryResponseBytes
+          : _maxTextResponseBytes;
+      var receivedBytes = 0;
       await for (final bytes in response.timeout(const Duration(seconds: 25))) {
-        chunks.add(bytes);
-        if (binary && chunks.length > 20 * 1024 * 1024) {
-          throw const BackendException(
-            'This document is too large to preview.',
+        receivedBytes += bytes.length;
+        if (receivedBytes > responseLimit) {
+          throw BackendException(
+            binary
+                ? 'This document is too large to preview.'
+                : 'BagooPH returned a response that is too large. Try again.',
           );
         }
+        chunks.add(bytes);
       }
       final responseBytes = chunks.takeBytes();
       if (sessionEpoch != _sessionEpoch) {
@@ -651,12 +664,18 @@ class WebPage {
     return user is Map ? Map<String, dynamic>.from(user) : null;
   }
 
-  Map<String, String> get errors => mapOf(props['errors']).map(
-    (key, value) => MapEntry(
-      key,
-      value is List ? value.first.toString() : value.toString(),
-    ),
-  );
+  Map<String, String> get errors {
+    final result = <String, String>{};
+    for (final entry in mapOf(props['errors']).entries) {
+      final value = entry.value;
+      if (value is List) {
+        if (value.isNotEmpty) result[entry.key] = value.first.toString();
+      } else {
+        result[entry.key] = value.toString();
+      }
+    }
+    return result;
+  }
 }
 
 Map<String, dynamic> mapOf(dynamic value) =>
@@ -664,6 +683,8 @@ Map<String, dynamic> mapOf(dynamic value) =>
 List<Map<String, dynamic>> mapsOf(dynamic value) => value is List
     ? value.whereType<Map>().map((v) => Map<String, dynamic>.from(v)).toList()
     : [];
+List<String> stringsOf(dynamic value) =>
+    value is List ? value.whereType<String>().toList() : const [];
 
 class BackendException implements Exception {
   const BackendException(

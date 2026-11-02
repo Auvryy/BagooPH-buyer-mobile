@@ -74,6 +74,71 @@ void main() {
     }
   }
 
+  for (final invalidLimit in [2.5, '10']) {
+    check('address book rejects malformed limit metadata: $invalidLimit', (
+      tester,
+    ) async {
+      page.value = addressPage();
+      page.value.props['addressBookLimit'] = invalidLimit;
+      await open(tester);
+
+      final add = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Add delivery address'),
+      );
+      expect(add.onPressed, isNull);
+      expect(
+        find.textContaining('address book limit could not be confirmed'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      expect(repository.calls, isEmpty);
+    });
+  }
+
+  check('duplicate saved-address IDs disable ambiguous address actions', (
+    tester,
+  ) async {
+    final addresses = page.value.props['addresses'] as List;
+    addresses.add({
+      ...Map<String, dynamic>.from(addresses.first as Map),
+      'recipient_name': 'Conflicting recipient',
+    });
+    await open(tester);
+
+    expect(
+      find.textContaining('Saved address details could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(find.text('Conflicting recipient'), findsNothing);
+    expect(find.text('Edit'), findsNothing);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Add delivery address'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(repository.calls, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  check('malformed default flags disable address actions', (tester) async {
+    final addresses = page.value.props['addresses'] as List;
+    (addresses.first as Map)['is_default'] = 'true';
+
+    await open(tester);
+
+    expect(
+      find.textContaining('Saved address details could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
+    expect(find.text('Set as default'), findsNothing);
+    expect(repository.calls, isEmpty);
+  });
+
   Finder save() => find.text('Save delivery address');
   Future<void> startSave(WidgetTester tester) async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -119,8 +184,8 @@ void main() {
       expect(call.method, 'PATCH');
       expect(call.values['recipient_name'], 'Private recipient');
       expect(call.values['phone'], '09171234567');
-      expect(call.values['latitude'], '14.0689');
-      expect(call.values['longitude'], '121.3250');
+      expect(call.values['latitude'], 14.0689);
+      expect(call.values['longitude'], 121.3250);
       expect(call.values['postal_code'], '4000');
       expect(call.values['is_default'], false);
       expect(changes, 1);

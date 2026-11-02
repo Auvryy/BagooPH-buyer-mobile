@@ -140,28 +140,44 @@ WebPage accountPage({int owner = 7, String token = ''}) =>
     });
 
 Map<String, dynamic> accountSessions({int owner = 7}) {
+  const currentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const otherId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   Map<String, dynamic> entry(String id, {bool current = false}) => {
     'id': id,
     'device': current ? 'Current QA session' : 'Private other device',
     'device_type': 'phone',
     'channel': 'mobile',
     'method': 'password',
+    'network': null,
     'current': current,
     'active': true,
     'status': 'active',
     'signed_in_at': '2026-10-01T00:00:00Z',
+    'last_seen_at': '2026-10-28T00:00:00Z',
+    'ended_at': null,
   };
-  final entries = [entry('current-id', current: true), entry('other-id')];
-  Map<String, dynamic> page() => {
-    'data': entries,
-    'current_page': 1,
-    'last_page': 1,
-  };
+  final entries = [entry(currentId, current: true), entry(otherId)];
+  Map<String, dynamic> page() {
+    final rows = entries
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+    return {
+      'data': rows,
+      'current_page': 1,
+      'last_page': 1,
+      'total': rows.length,
+      'per_page': 12,
+      'from': rows.isEmpty ? null : 1,
+      'to': rows.length,
+    };
+  }
+
   return {
     'sessionOwnerId': owner,
-    'currentSessionId': 'current-id',
+    'currentSessionId': currentId,
     'canConfirmByEmail': true,
     'historyDays': 30,
+    'lastSignIn': entry(currentId, current: true),
     'sessions': page(),
     'signIns': page(),
   };
@@ -189,7 +205,109 @@ WebPage applicationPage() {
           'label': 'First name',
           'type': 'text',
           'required': true,
+          'min_length': 2,
           'max_length': 100,
+          'options': [],
+        },
+        {
+          'key': 'middle_name',
+          'label': 'Middle name / initial',
+          'type': 'text',
+          'required': false,
+          'min_length': 1,
+          'max_length': 50,
+          'options': [],
+        },
+        {
+          'key': 'last_name',
+          'label': 'Last name',
+          'type': 'text',
+          'required': false,
+          'min_length': 2,
+          'max_length': 50,
+          'options': [],
+        },
+        {
+          'key': 'sex',
+          'label': 'Sex',
+          'type': 'select',
+          'required': true,
+          'min_length': 2,
+          'max_length': 255,
+          'options': ['Female', 'Male', 'Other'],
+        },
+        {
+          'key': 'email',
+          'label': 'Account email',
+          'type': 'email',
+          'required': true,
+          'min_length': null,
+          'max_length': 255,
+          'options': [],
+        },
+        {
+          'key': 'phone',
+          'label': 'Account mobile number',
+          'type': 'tel',
+          'required': false,
+          'min_length': null,
+          'max_length': 24,
+          'options': [],
+        },
+        {
+          'key': 'address',
+          'label': 'Street address',
+          'type': 'text',
+          'required': false,
+          'min_length': 5,
+          'max_length': 500,
+          'options': [],
+        },
+        {
+          'key': 'city',
+          'label': 'City',
+          'type': 'text',
+          'required': false,
+          'min_length': 2,
+          'max_length': 255,
+          'options': [],
+        },
+        {
+          'key': 'province',
+          'label': 'Province',
+          'type': 'text',
+          'required': false,
+          'min_length': 2,
+          'max_length': 255,
+          'options': [],
+        },
+        {
+          'key': 'municipality',
+          'label': 'Municipality',
+          'type': 'text',
+          'required': false,
+          'min_length': 2,
+          'max_length': 255,
+          'options': [],
+        },
+        {
+          'key': 'barangay',
+          'label': 'Barangay',
+          'type': 'text',
+          'required': false,
+          'min_length': 2,
+          'max_length': 255,
+          'options': [],
+        },
+        {
+          'key': 'postal_code',
+          'label': 'Postal code',
+          'type': 'text',
+          'required': false,
+          'min_length': 4,
+          'max_length': 4,
+          'input_mode': 'numeric',
+          'options': [],
         },
       ],
     },

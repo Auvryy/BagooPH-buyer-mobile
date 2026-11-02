@@ -1,19 +1,33 @@
 import 'package:flutter/foundation.dart';
 
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import 'tracking_repository.dart';
 
 class TrackingController extends ChangeNotifier {
-  TrackingController(this.repository);
+  TrackingController(this.repository) {
+    _retryCooldown = RetryCooldown(() {
+      if (_disposed) return;
+      if (!_retryCooldown.active && _cooldownMessage) {
+        problem = null;
+        _cooldownMessage = false;
+      }
+      notifyListeners();
+    });
+  }
 
   final TrackingRepository repository;
+  late final RetryCooldown _retryCooldown;
   TrackingLookup? result;
   String? problem;
   String? fieldError;
   bool loading = false;
+  bool get coolingDown => _retryCooldown.active;
+  int get retrySeconds => _retryCooldown.remainingSeconds;
   String? _activeNumber;
   int _generation = 0;
   bool _disposed = false;
+  bool _cooldownMessage = false;
 
   void edited() {
     if (_disposed) return;
@@ -21,6 +35,7 @@ class TrackingController extends ChangeNotifier {
     _activeNumber = null;
     result = null;
     problem = null;
+    _cooldownMessage = false;
     fieldError = null;
     loading = false;
     notifyListeners();
@@ -39,10 +54,22 @@ class TrackingController extends ChangeNotifier {
     }
     if (loading && _activeNumber == number) return;
     final previous = refresh && result?.number == number ? result : null;
+    if (_retryCooldown.active) {
+      _generation++;
+      _activeNumber = number;
+      result = previous;
+      problem = 'Wait before checking another tracking number.';
+      _cooldownMessage = true;
+      fieldError = null;
+      loading = false;
+      notifyListeners();
+      return;
+    }
     final generation = ++_generation;
     _activeNumber = number;
     result = previous;
     problem = null;
+    _cooldownMessage = false;
     fieldError = null;
     loading = true;
     notifyListeners();
@@ -52,6 +79,9 @@ class TrackingController extends ChangeNotifier {
       result = confirmed;
     } on BackendException catch (error) {
       if (_disposed || generation != _generation) return;
+      if (error.status == 429) {
+        _retryCooldown.start(error.data, retryAt: error.retryAt, notify: false);
+      }
       fieldError = error.fields['number'] ?? error.fields['tracking_number'];
       if (fieldError == null) {
         problem = error.message;
@@ -79,6 +109,7 @@ class TrackingController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _generation++;
+    _retryCooldown.dispose();
     super.dispose();
   }
 }

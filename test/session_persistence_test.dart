@@ -169,4 +169,25 @@ void main() {
     expect(session.imageHeaders('/'), isEmpty);
     expect(vault.values, isEmpty);
   });
+
+  test('impossible saved cookie expiry timestamps cannot restore a session', () async {
+    final now = DateTime.now().toUtc();
+    final lastDay = DateTime.utc(now.year, now.month + 1, 0).day;
+    final impossibleExpiry =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${(lastDay + 1).toString().padLeft(2, '0')}T23:59:59Z';
+    vault.values['bagoo-buyer-session-v1:${origin.origin}'] = jsonEncode({
+      'origin': origin.origin,
+      'remember': true,
+      'cookies': [
+        {'header': 'session=signed-buyer; Path=/', 'expires': impossibleExpiry},
+      ],
+    });
+    final session = WebSession(origin, vault: vault);
+    addTearDown(session.close);
+
+    await session.restoreSavedSession();
+
+    expect(session.imageHeaders('/'), isEmpty);
+    expect(vault.values, isEmpty);
+  });
 }

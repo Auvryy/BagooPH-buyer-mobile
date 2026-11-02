@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/count_metadata.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_model.dart';
@@ -50,6 +51,7 @@ class ProductCard extends StatelessWidget {
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
     final pricing = ProductPrice(product);
     final out = (amount(product['stock']) ?? 0) <= 0;
+    final salesCount = nonNegativeCount(product['sales_count']);
     final shop = mapOf(product['shop']);
     final name = product['name']?.toString() ?? 'Product';
     final location = shop['city']?.toString().trim();
@@ -203,7 +205,8 @@ class ProductCard extends StatelessWidget {
                                 ),
                                 TextSpan(
                                   text:
-                                      ' ${ratingLabel(product['rating'])}${(amount(product['sales_count']) ?? 0) > 0 ? ' · ${product['sales_count']} sold' : ''}',
+                                      ' ${ratingLabel(product['rating'])}'
+                                      '${salesCount != null && salesCount > 0 ? ' · $salesCount sold' : ''}',
                                 ),
                               ],
                             ),

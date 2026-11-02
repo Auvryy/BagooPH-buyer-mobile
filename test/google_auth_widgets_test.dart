@@ -281,6 +281,7 @@ void main() {
       updated['policies'] = {
         ...mapOf(updated['policies']),
         'terms_version': 'updated-terms',
+        'terms_url': '/terms/updated-terms',
       };
       final previous = session.onGet!;
       session.onGet = (path) => path == '/auth/google/native/registration'
@@ -341,6 +342,45 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Google registration blocks backend-invalid names locally', (
+    tester,
+  ) async {
+    var submissions = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GoogleRegistrationForm(
+              repository: auth.buyer,
+              contract: GoogleRegistrationContract.parse(
+                registrationData(),
+                session,
+              ),
+              errors: const {},
+              disabled: false,
+              canSubmit: true,
+              busy: false,
+              onSubmit: (_) async => submissions++,
+              onEdit: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(editable('google-first_name'), 'Native2');
+    await press(tester, find.text('Create buyer account'));
+
+    expect(submissions, 0);
+    expect(
+      find.text(
+        'Use Latin letters, spaces, apostrophes, hyphens or periods. Numbers and other symbols are not allowed.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'provider selection pauses lifecycle probes and queues incoming buyer links',

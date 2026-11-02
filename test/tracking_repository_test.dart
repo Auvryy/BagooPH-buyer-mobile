@@ -106,6 +106,34 @@ void main() {
       final badCheckpoint = publicTrackingPage();
       (badCheckpoint.props['parcel'] as Map)['checkpoints'] = ['invalid'];
       cases.add(badCheckpoint);
+      final nonTextCheckpoint = publicTrackingPage();
+      (nonTextCheckpoint.props['parcel'] as Map)['checkpoints'] = [
+        {
+          'checkpoint_type': 'delivered',
+          'location_name': 'Recipient handoff',
+          'created_at': '2026-10-27T08:00:00Z',
+          7: 'unexpected',
+        },
+      ];
+      cases.add(nonTextCheckpoint);
+      final nonTextParcel = publicTrackingPage();
+      nonTextParcel.props['parcel'] = {
+        ...(nonTextParcel.props['parcel'] as Map),
+        7: 'unexpected',
+      };
+      cases.add(nonTextParcel);
+      final nonTextStatusLabels = publicTrackingPage();
+      nonTextStatusLabels.props['statusLabels'] = {
+        ...(nonTextStatusLabels.props['statusLabels'] as Map),
+        7: 'unexpected',
+      };
+      cases.add(nonTextStatusLabels);
+      final nonTextCheckpointLabels = publicTrackingPage();
+      nonTextCheckpointLabels.props['checkpointLabels'] = {
+        ...(nonTextCheckpointLabels.props['checkpointLabels'] as Map),
+        7: 'unexpected',
+      };
+      cases.add(nonTextCheckpointLabels);
       for (final page in cases) {
         session.onPage = (_) async => page;
         await expectLater(
@@ -147,6 +175,31 @@ void main() {
     },
   );
 
+  test(
+    'impossible calendar timestamps are not normalized into other dates',
+    () async {
+      final page = publicTrackingPage(observedAt: '2026-02-30T10:00:00Z');
+      final parcel = page.props['parcel'] as Map;
+      parcel['estimated_delivery_at'] = '2026-02-30T10:00:00Z';
+      parcel['delivered_at'] = '2026-02-30T10:00:00Z';
+      final checkpoints = parcel['checkpoints'] as List;
+      (checkpoints.first as Map)['created_at'] = '2026-02-30T10:00:00Z';
+      session.onPage = (_) async => page;
+
+      final result = (await repository.lookup('BAGOO-1'));
+
+      expect(result.observedAt, isNull);
+      expect(result.parcel!.estimatedDeliveryAt, isNull);
+      expect(result.parcel!.deliveredAt, isNull);
+      expect(
+        result.parcel!.milestones
+            .singleWhere((item) => item.label == 'Collected from seller')
+            .recordedAt,
+        isNull,
+      );
+    },
+  );
+
   test('formats Philippine times independently of the device timezone', () {
     expect(
       trackingTime(DateTime.utc(2026, 10, 27, 20, 5)),
@@ -160,6 +213,19 @@ void main() {
       trackingTime(null, missing: 'Not yet scheduled'),
       'Not yet scheduled',
     );
+  });
+
+  test('accepts valid ISO offsets and rejects impossible offsets', () async {
+    var page = publicTrackingPage(observedAt: '2026-10-27T16:30:00+08:00');
+    session.onPage = (_) async => page;
+    expect(
+      (await repository.lookup('BAGOO-1')).observedAt,
+      DateTime.utc(2026, 10, 27, 8, 30),
+    );
+
+    page = publicTrackingPage(observedAt: '2026-10-27T16:30:00+15:00');
+    session.onPage = (_) async => page;
+    expect((await repository.lookup('BAGOO-1')).observedAt, isNull);
   });
 
   for (final inertia in [false, true]) {

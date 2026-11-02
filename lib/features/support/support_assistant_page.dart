@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/chat_page.dart';
@@ -42,6 +44,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   final _scroll = ScrollController();
   final _messages = <_SupportMessage>[_greeting];
   late SupportAssistantRepository _support;
+  late final RetryCooldown _sendCooldown;
   List<String> _suggestions = _initialSuggestions;
   Map<String, String> _fieldErrors = {};
   String? _error;
@@ -53,8 +56,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   bool _accessDenied = false;
 
   int? get _userId {
-    final id = widget.user['id'];
-    return id is num && id > 0 ? id.toInt() : null;
+    return positiveResourceId(widget.user['id']);
   }
 
   bool get _available =>
@@ -64,6 +66,9 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   void initState() {
     super.initState();
     _support = SupportAssistantRepository(widget.repository);
+    _sendCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -74,6 +79,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
         oldWidget.available != widget.available) {
       _generation++;
       _support = SupportAssistantRepository(widget.repository);
+      _sendCooldown.clear(notify: false);
       _messages
         ..clear()
         ..add(_greeting);
@@ -93,6 +99,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   @override
   void dispose() {
     _generation++;
+    _sendCooldown.dispose();
     _message.dispose();
     _orderNumber.dispose();
     _messageFocus.dispose();
@@ -128,7 +135,7 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
   }
 
   Future<void> _send() async {
-    if (_sending || !_available) return;
+    if (_sending || _sendCooldown.active || !_available) return;
     final text = _message.text.trim();
     if (text.isEmpty) return;
     final generation = ++_generation;
@@ -152,6 +159,13 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
       _scrollToBottom();
     } on BackendException catch (exception) {
       if (!mounted || generation != _generation) return;
+      if (exception.status == 429) {
+        _sendCooldown.start(
+          exception.data,
+          retryAt: exception.retryAt,
+          notify: false,
+        );
+      }
       setState(() {
         _messages.remove(submitted);
         if (exception.status == 401 ||
@@ -392,9 +406,13 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
             Notice(_error!, error: true),
             if (_fieldErrors.isEmpty)
               OutlinedButton.icon(
-                onPressed: _sending ? null : _send,
+                onPressed: _sending || _sendCooldown.active ? null : _send,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Try again'),
+                label: Text(
+                  _sendCooldown.active
+                      ? 'Try again in ${_sendCooldown.remainingSeconds}s'
+                      : 'Try again',
+                ),
               ),
           ],
         ),
@@ -476,7 +494,10 @@ class _SupportAssistantPageState extends State<SupportAssistantPage> {
                 valueListenable: _message,
                 builder: (context, value, _) => IconButton.filled(
                   tooltip: 'Send message',
-                  onPressed: _sending || value.text.trim().isEmpty
+                  onPressed:
+                      _sending ||
+                          _sendCooldown.active ||
+                          value.text.trim().isEmpty
                       ? null
                       : _send,
                   icon: _sending

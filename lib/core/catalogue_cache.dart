@@ -1,7 +1,12 @@
 import 'dart:convert';
 
+import 'pagination_metadata.dart';
+import 'resource_ids.dart';
 import 'session_vault.dart';
+import 'strict_datetime.dart';
 import 'web_session.dart';
+
+const _maxCatalogueProductsPerPage = 24;
 
 /// Only public catalogue projections belong here. Never persist an Inertia
 /// response or authenticated media. All cached pages are read-only.
@@ -77,7 +82,7 @@ class CatalogueCache {
   void _prune() {
     final now = _clock();
     _entries.removeWhere((key, row) {
-      final date = DateTime.tryParse(row['at']?.toString() ?? '');
+      final date = strictDateTime(row['at'], requireTimezone: true);
       return date == null || date.isAfter(now) || now.difference(date) > maxAge;
     });
     while (_entries.length > maxEntries) {
@@ -131,17 +136,17 @@ class CatalogueCache {
     _prune();
     if (_entries.length != count) await _persist();
     final row = _entries[key];
-    if (row == null || row['component'] is! String || row['props'] is! Map) {
+    final cachedAt = strictDateTime(row?['at'], requireTimezone: true);
+    if (row == null ||
+        cachedAt == null ||
+        row['component'] is! String ||
+        row['props'] is! Map) {
       return null;
     }
     // Apply the allowlist again on restore, including storage from older builds.
     final props = _publicProps(WebPage(row['component'], mapOf(row['props'])));
     if (props == null) return null;
-    return WebPage(
-      row['component'],
-      props,
-      cachedAt: DateTime.parse(row['at']),
-    );
+    return WebPage(row['component'], props, cachedAt: cachedAt);
   });
 
   Future<void> remove(String key) {
@@ -182,6 +187,29 @@ Map<String, dynamic> _category(dynamic row, [int depth = 0]) => {
         .map((child) => _category(child, depth + 1))
         .toList(),
 };
+
+List<Map<String, dynamic>>? _categoryRows(dynamic value) {
+  if (value is! List) return null;
+  final rows = mapsOf(value);
+  final ids = <int>{};
+  final slugs = <String>{};
+  if (rows.length != value.length ||
+      rows.any((row) {
+        final id = positiveResourceId(row['id']);
+        final name = row['name'];
+        final slug = row['slug'];
+        return id == null ||
+            name is! String ||
+            name.trim().isEmpty ||
+            slug is! String ||
+            slug.trim().isEmpty ||
+            !ids.add(id) ||
+            !slugs.add(slug);
+      })) {
+    return null;
+  }
+  return rows.take(100).map(_category).toList();
+}
 
 Map<String, dynamic> _product(dynamic row) {
   final p = mapOf(row);
@@ -225,38 +253,70 @@ Map<String, dynamic> _product(dynamic row) {
   };
 }
 
-List<Map<String, dynamic>> _products(dynamic value) => mapsOf(value)
-    .where((p) => p['id'] is num && p['slug'] is String && p['name'] is String)
-    .take(60)
-    .map(_product)
-    .toList();
+List<Map<String, dynamic>>? _products(dynamic value) {
+  if (value is! List || value.length > _maxCatalogueProductsPerPage) {
+    return null;
+  }
+  final rows = mapsOf(value);
+  if (rows.length != value.length ||
+      rows.any(
+        (product) =>
+            positiveResourceId(product['id']) == null ||
+            product['slug'] is! String ||
+            product['name'] is! String,
+      )) {
+    return null;
+  }
+  return rows.map(_product).toList();
+}
 
-Map<String, dynamic> _paginator(dynamic value) => {
-  ..._scalars(value, [
-    'current_page',
-    'last_page',
-    'per_page',
-    'total',
-    'from',
-    'to',
-  ]),
-  'data': _products(mapOf(value)['data']),
-};
+Map<String, dynamic>? _paginator(dynamic value, {required int pageSize}) {
+  if (value is! Map) return null;
+  final page = mapOf(value);
+  final rawProducts = page['data'];
+  final products = _products(rawProducts);
+  if (products == null) return null;
+  final currentPage = page['current_page'];
+  final pagination = parseContractPaginationMetadata(
+    page,
+    rowCount: (rawProducts as List).length,
+    requestedPage: currentPage is int ? currentPage : 0,
+    pageSize: pageSize,
+  );
+  if (pagination == null) return null;
+  return {
+    ..._scalars(page, [
+      'current_page',
+      'last_page',
+      'per_page',
+      'total',
+      'from',
+      'to',
+    ]),
+    'data': products,
+  };
+}
 
 Map<String, dynamic>? _publicProps(WebPage page) {
   final p = page.props;
   switch (page.component) {
     case 'Buyer/Home':
       if (p['feedProducts'] is! Map) return null;
+      final feed = _paginator(p['feedProducts'], pageSize: 18);
+      if (feed == null) return null;
       return {
-        'feedProducts': _paginator(p['feedProducts']),
-        'categories': mapsOf(p['categories']).take(100).map(_category).toList(),
+        'feedProducts': feed,
+        'categories':
+            _categoryRows(p['categories']) ?? <Map<String, dynamic>>[],
       };
     case 'Buyer/Search':
       if (p['products'] is! Map) return null;
+      final products = _paginator(p['products'], pageSize: 24);
+      if (products == null) return null;
       return {
-        'products': _paginator(p['products']),
-        'categories': mapsOf(p['categories']).take(100).map(_category).toList(),
+        'products': products,
+        'categories':
+            _categoryRows(p['categories']) ?? <Map<String, dynamic>>[],
         'locations': mapsOf(p['locations'])
             .take(100)
             .map(
@@ -276,7 +336,7 @@ Map<String, dynamic>? _publicProps(WebPage page) {
       };
     case 'Buyer/ProductDetail':
       final product = mapOf(p['product']);
-      if (product['id'] is! num ||
+      if (positiveResourceId(product['id']) == null ||
           product['slug'] is! String ||
           product['name'] is! String) {
         return null;

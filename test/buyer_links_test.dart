@@ -34,6 +34,84 @@ class LinkRepository extends FakeBuyerRepository {
   }
 }
 
+class PendingVerificationRepository extends LinkRepository {
+  final verification = Completer<WebPage>();
+  @override
+  Future<WebPage> document(String path) async {
+    documents.add(path);
+    return verification.future;
+  }
+}
+
+class MalformedVerificationRepository extends LinkRepository {
+  MalformedVerificationRepository(this.verifiedAt);
+
+  final Object? verifiedAt;
+
+  @override
+  Future<WebPage> document(String path) async {
+    documents.add(path);
+    return WebPage('Buyer/Home', {
+      ...homePage(signedIn: true).props,
+      'auth': {
+        'user': {...buyer, 'email_verified_at': verifiedAt},
+      },
+    });
+  }
+}
+
+class RateLimitedVerificationRepository extends LinkRepository {
+  @override
+  Future<WebPage> document(String path) async {
+    documents.add(path);
+    throw BackendException(
+      'Wait before using this verification link again.',
+      status: 429,
+      data: const {'cooldown': 10},
+      retryAt: DateTime.now().toUtc().add(const Duration(seconds: 45)),
+    );
+  }
+}
+
+class PendingGuestCheckRepository extends FakeBuyerRepository {
+  final guestCheck = Completer<WebPage?>();
+  int logoutCalls = 0;
+
+  @override
+  Future<WebPage?> currentSession() => guestCheck.future;
+
+  @override
+  Future<void> logout() async {
+    logoutCalls++;
+    signedIn = false;
+  }
+}
+
+class SwitchableGuestRepository extends FakeBuyerRepository {
+  int owner = 7;
+  int logoutCalls = 0;
+
+  @override
+  Future<WebPage?> currentSession() async {
+    if (!signedIn) return null;
+    final user = {
+      ...buyer,
+      'id': owner,
+      'email': owner == 7 ? 'buyer@example.test' : 'other@example.test',
+    };
+    final page = homePage(signedIn: true);
+    page.props['auth'] = {'user': user};
+    return page;
+  }
+
+  @override
+  Future<void> logout() async {
+    logoutCalls++;
+    signedIn = false;
+    session.clear();
+  }
+}
+
 Uri verification(int owner) => Uri.parse(
   'http://backend.test/verify-email/$owner/${List.filled(40, 'a').join()}?expires=1999999999&signature=${List.filled(64, 'b').join()}',
 );
@@ -194,6 +272,41 @@ void main() {
   );
 
   testWidgets(
+    'email verification honors Retry-After after buyer eligibility is checked again',
+    (tester) async {
+      final repo = RateLimitedVerificationRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      final uri = verification(7);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: EmailVerificationLinkPage(repository: repo, link: uri),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Verify my email'));
+      await tester.pumpAndSettle();
+      expect(repo.documents, [uri.toString()]);
+      expect(find.textContaining('Try again in '), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+
+      await tester.tap(find.text('Check signed-in buyer'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Try again in '), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+      expect(repo.documents, [uri.toString()]);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'an email verification link for another buyer cannot be confirmed',
     (tester) async {
       final repo = LinkRepository()..signedIn = true;
@@ -219,6 +332,113 @@ void main() {
       expect(repo.documents, isEmpty);
     },
   );
+
+  testWidgets(
+    'a signed-out session cannot use a previously confirmed verification link',
+    (tester) async {
+      final repo = LinkRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      final uri = verification(7);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: EmailVerificationLinkPage(repository: repo, link: uri),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Verify my email'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      repo.signedIn = false;
+      repo.session.clear();
+      await tester.tap(find.text('Verify my email'));
+      await tester.pumpAndSettle();
+
+      expect(repo.documents, isEmpty);
+      expect(find.text('Your email is verified.'), findsNothing);
+      expect(
+        find.text(
+          'Sign in to the buyer account named by this verification link.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'a verification acknowledgement is discarded after the account changes',
+    (tester) async {
+      final repo = PendingVerificationRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      final uri = verification(7);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: EmailVerificationLinkPage(repository: repo, link: uri),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Verify my email'));
+      await tester.pump();
+      expect(repo.documents, [uri.toString()]);
+
+      repo.signedIn = false;
+      repo.session.clear();
+      repo.verification.complete(
+        WebPage('Buyer/Home', {
+          ...homePage(signedIn: true).props,
+          'auth': {
+            'user': {...buyer, 'email_verified_at': '2026-10-28T00:00:00Z'},
+          },
+        }),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your email is verified.'), findsNothing);
+      expect(find.textContaining('account changed'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final malformed in [
+    42,
+    false,
+    '',
+    'not-a-timestamp',
+    '2026-02-30T10:00:00Z',
+  ]) {
+    testWidgets('malformed verification timestamp $malformed is not accepted', (
+      tester,
+    ) async {
+      final repo = MalformedVerificationRepository(malformed)..signedIn = true;
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: EmailVerificationLinkPage(
+            repository: repo,
+            link: verification(7),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Verify my email'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your email is verified.'), findsNothing);
+      expect(
+        find.textContaining('Email verification was not confirmed.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'incoming recovery requires explicit logout and clears the previous account',
@@ -249,6 +469,72 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(LoginPage), findsOneWidget);
       expect(find.byType(HomePage), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a late recovery session check cannot display the prior account after sign-out',
+    (tester) async {
+      final repo = PendingGuestCheckRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: PasswordLinkPage(
+            repository: repo,
+            initialLink: Uri.parse(
+              'http://backend.test/reset-password/reset-token-123456?email=buyer%40example.test&role=buyer',
+            ),
+            checkGuest: true,
+            onComplete: () {},
+          ),
+        ),
+      );
+      await tester.pump();
+
+      repo.signedIn = false;
+      repo.session.clear();
+      repo.guestCheck.complete(homePage(signedIn: true));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('buyer@example.test'), findsNothing);
+      expect(find.text('Sign out and continue'), findsNothing);
+      expect(find.textContaining('account changed'), findsOneWidget);
+      expect(repo.logoutCalls, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'sign-out confirmation rechecks instead of logging out a changed buyer',
+    (tester) async {
+      final repo = SwitchableGuestRepository()..signedIn = true;
+      addTearDown(repo.session.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: PasswordLinkPage(
+            repository: repo,
+            initialLink: Uri.parse(
+              'http://backend.test/reset-password/reset-token-123456?email=buyer%40example.test&role=buyer',
+            ),
+            checkGuest: true,
+            onComplete: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('buyer@example.test'), findsOneWidget);
+
+      repo.owner = 8;
+      repo.session.clear();
+      await tester.tap(find.text('Sign out and continue'));
+      await tester.pumpAndSettle();
+
+      expect(repo.logoutCalls, 0);
+      expect(find.textContaining('other@example.test'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'New password'), findsNothing);
+      expect(tester.takeException(), isNull);
     },
   );
 

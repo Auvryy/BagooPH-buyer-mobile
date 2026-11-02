@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/controlled_web_session.dart';
 import 'support/fake_buyer_repository.dart';
+import 'support/return_fixtures.dart';
 import 'support/tracking_fixtures.dart';
 
 WebPage _reviewPage(String path) => switch (Uri.parse(path).path) {
@@ -43,7 +44,11 @@ WebPage _reviewPage(String path) => switch (Uri.parse(path).path) {
         },
       ],
       'current_page': 1,
-      'last_page': 2,
+      'last_page': 1,
+      'per_page': 20,
+      'total': 1,
+      'from': 1,
+      'to': 1,
     },
     'readSnapshot': {'id': 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'count': 1},
     'notificationSummary': {'available': true, 'unread': 1},
@@ -83,31 +88,11 @@ WebPage _reviewPage(String path) => switch (Uri.parse(path).path) {
     'canUsePortal': false,
     'orderNotices': [],
   }),
-  '/buyer-returns/4' => WebPage('Returns/Show', {
-    'auth': {'user': buyer},
-    'returnCase': {
-      'id': 4,
-      'reference': 'RETURN-TEST-4',
-      'order': {'order_number': 'TEST-11'},
-      'status': 'requested',
-      'reason': 'Item damaged on arrival',
-      'description': 'The strap stitching is damaged. Photos have been provided for review.',
-      'items': [
-        {
-          'purchase': {
-            'name': 'Everyday Carry Canvas Tote',
-            'color': 'Natural',
-          },
-          'quantity': 1,
-        },
-      ],
-      'actions': [],
-      'evidence': [],
-    },
-  }),
+  '/buyer-returns/4' => returnDetail(),
   '/register' => const WebPage('Auth/Register', {
     'birthDateLimits': {'adult_maximum': '2008-10-28', 'today': '2026-10-28'},
     'policies': {
+      'required': true,
       'terms_version': '2026-10-12',
       'privacy_version': '2026-10-12',
       'terms_url': '/terms/2026-10-12',

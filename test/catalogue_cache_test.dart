@@ -12,6 +12,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/controlled_web_session.dart';
 import 'support/fake_buyer_repository.dart';
 
+Map<String, dynamic> _searchFeedFixture() =>
+    Map<String, dynamic>.from(homePage().props['feedProducts'] as Map)
+      ..['per_page'] = 24;
+
 class CatalogueVault implements SessionVault {
   final values = <String, String>{};
   bool fail = false;
@@ -102,6 +106,67 @@ void main() {
     },
   );
 
+  test('impossible cached calendar timestamps are pruned', () async {
+    final origin = Uri.parse('https://catalogue.test');
+    final vault = CatalogueVault();
+    final cache = CatalogueCache(
+      origin: origin,
+      vault: vault,
+      clock: () => DateTime.utc(2026, 3, 3),
+    );
+    await cache.save('home:', homePage());
+    final key = vault.values.keys.single;
+    final stored = jsonDecode(vault.values[key]!) as Map;
+    (stored['entries']['home:'] as Map)['at'] = '2026-02-30T10:00:00Z';
+    vault.values[key] = jsonEncode(stored);
+
+    final restored = await CatalogueCache(
+      origin: origin,
+      vault: vault,
+      clock: () => DateTime.utc(2026, 3, 3),
+    ).read('home:');
+
+    expect(restored, isNull);
+  });
+
+  test('catalogue cache refuses rows with malformed product IDs', () async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    final cache = CatalogueCache(origin: session.origin);
+    final home = homePage();
+    ((home.props['feedProducts'] as Map)['data'] as List).first['id'] = 1.5;
+    final search = WebPage('Buyer/Search', {'products': _searchFeedFixture()});
+    ((search.props['products'] as Map)['data'] as List).first['id'] = 1.5;
+    final detail = productPage(override: {'id': 1.5});
+
+    await cache.save('home:', home);
+    await cache.save('search:', search);
+    await cache.save('product:invalid', detail);
+
+    expect(await cache.read('home:'), isNull);
+    expect(await cache.read('search:'), isNull);
+    expect(await cache.read('product:invalid'), isNull);
+  });
+
+  for (final (field, value) in [
+    ('current_page', 1.5),
+    ('last_page', 0),
+    ('total', '2'),
+    ('from', -1),
+  ]) {
+    test('catalogue cache refuses malformed paginator $field=$value', () async {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      final cache = CatalogueCache(origin: session.origin);
+      final page = homePage();
+      (page.props['feedProducts'] as Map)[field] = value;
+
+      await cache.save('home:invalid:$field', page);
+
+      expect(await cache.read('home:invalid:$field'), isNull);
+    });
+  }
+
   test(
     'restored entries are sanitized again before any subsequent write',
     () async {
@@ -155,6 +220,22 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'oversized catalogue pages are not retained in the offline cache',
+    () async {
+      final origin = Uri.parse('https://catalogue.test');
+      final vault = CatalogueVault();
+      final cache = CatalogueCache(origin: origin, vault: vault);
+      await cache.save(
+        'home:',
+        homePage(products: [for (var id = 1; id <= 25; id++) product(id)]),
+      );
+
+      expect(await cache.read('home:'), isNull);
+      expect(vault.values, isEmpty);
+    },
+  );
 
   test(
     'unavailable native storage leaves online reads and memory fallback usable',
@@ -220,7 +301,7 @@ void main() {
     expect(current.isCached, isFalse);
     expect(current.props['product']['price'], '1500.00');
     session.onPage = (_) async =>
-        WebPage('Buyer/Search', {'products': homePage().props['feedProducts']});
+        WebPage('Buyer/Search', {'products': _searchFeedFixture()});
     await repo.search({'search': 'bags', 'sort': 'latest'}, page: 2);
     session.onPage = (_) async => throw offline;
     expect(
@@ -311,6 +392,43 @@ void main() {
       pending.complete(homePage());
       expect((await request).isCached, isFalse);
       expect(await repo.catalogueCache.read('home:'), isNull);
+    },
+  );
+
+  test(
+    'cached home does not turn partial categories into a complete list',
+    () async {
+      final vault = CatalogueVault();
+      final origin = Uri.parse('https://catalogue.test');
+      final cache = CatalogueCache(origin: origin, vault: vault);
+      final page = homePage();
+      page.props['categories'] = [
+        {'id': 2, 'name': 'Electronics', 'slug': 'electronics'},
+        'malformed category row',
+      ];
+
+      await cache.save('home:all', page);
+      final restored = await cache.read('home:all');
+
+      expect(restored, isNotNull);
+      expect(restored!.props['categories'], isEmpty);
+    },
+  );
+
+  test(
+    'cached home drops category metadata with duplicate identifiers',
+    () async {
+      final cache = CatalogueCache(origin: Uri.parse('https://catalogue.test'));
+      final page = homePage();
+      page.props['categories'] = [
+        {'id': 2, 'name': 'Electronics', 'slug': 'electronics'},
+        {'id': 3, 'name': 'Gadgets', 'slug': 'electronics'},
+      ];
+
+      await cache.save('home:duplicates', page);
+      final restored = await cache.read('home:duplicates');
+
+      expect(restored!.props['categories'], isEmpty);
     },
   );
 

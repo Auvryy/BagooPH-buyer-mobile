@@ -1,10 +1,111 @@
 import '../../core/buyer_repository.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
+import '../products/product_model.dart';
 
 class BuyerEngagementRepository {
   BuyerEngagementRepository(this.buyer);
 
+  static const _noticePreviewLimit = 6;
+  static const _noticePageSize = 20;
+  static const _collectionPageSize = 24;
+
   final BuyerRepository buyer;
+
+  int? _nonnegativeCount(Object? value) =>
+      value is int && value >= 0 ? value : null;
+
+  Map<String, dynamic>? confirmedNotificationReadSnapshot(Object? value) {
+    if (value == null ||
+        value is! Map ||
+        value.keys.any((key) => key is! String)) {
+      return null;
+    }
+    final snapshot = Map<String, dynamic>.from(value);
+    final id = snapshot['id'];
+    final count = snapshot['count'];
+    final expiresAt = strictDateTime(
+      snapshot['expires_at'],
+      requireTimezone: true,
+    );
+    if (id is! String ||
+        !_isUuid(id) ||
+        count is! int ||
+        count < 1 ||
+        expiresAt == null ||
+        !expiresAt.isAfter(DateTime.now())) {
+      return null;
+    }
+    return snapshot;
+  }
+
+  List<Map<String, dynamic>>? _completeNoticeRows(
+    Object? raw, {
+    required int maxRows,
+  }) {
+    if (raw is! List || raw.length > maxRows) return null;
+    final rows = <Map<String, dynamic>>[];
+    final ids = <String>{};
+    for (final row in raw) {
+      if (row is! Map || row.keys.any((key) => key is! String)) return null;
+      final notice = Map<String, dynamic>.from(row);
+      final id = notice['id'];
+      final type = notice['type'];
+      final data = notice['data'];
+      final createdAt = notice['created_at'];
+      final readAt = notice['read_at'];
+      final href = notice['href'];
+      if (id is! String ||
+          !_isUuid(id) ||
+          !ids.add(id.toLowerCase()) ||
+          type is! String ||
+          type.trim().isEmpty ||
+          !notice.containsKey('read_at') ||
+          !notice.containsKey('href') ||
+          data is! Map ||
+          data.keys.any((key) => key is! String) ||
+          createdAt is! String ||
+          strictDateTime(createdAt) == null ||
+          readAt != null &&
+              (readAt is! String || strictDateTime(readAt) == null) ||
+          href != null && href is! String) {
+        return null;
+      }
+      for (final field in [
+        'title',
+        'body',
+        'order_number',
+        'hub_name',
+        'hub_address',
+        'operating_hours',
+      ]) {
+        if (data[field] != null && data[field] is! String) return null;
+      }
+      final expiresAt = data['expires_at'];
+      if (expiresAt != null &&
+          (expiresAt is! String || strictDateTime(expiresAt) == null)) {
+        return null;
+      }
+      rows.add(notice);
+    }
+    return rows;
+  }
+
+  bool _validPagePagination(
+    Map<String, dynamic> page, {
+    required int requestedPage,
+    required int rowCount,
+    required int pageSize,
+  }) =>
+      parseContractPaginationMetadata(
+        page,
+        rowCount: rowCount,
+        requestedPage: requestedPage,
+        pageSize: pageSize,
+      ) !=
+      null;
 
   Future<WebPage> promotion(String slug, {String? publication}) async {
     final query = publication == null || publication.isEmpty
@@ -15,8 +116,12 @@ class BuyerEngagementRepository {
     );
     buyer.requireNoErrors(page);
     if (page.component != 'Buyer/Promotion' ||
-        page.props['promotion'] is! Map ||
-        page.props['products'] is! List) {
+        page.props['promotion'] is! Map) {
+      throw const BackendException(
+        'This promotion is no longer available. Browse current products instead.',
+      );
+    }
+    if (completeRelatedProducts(page.props['products']) == null) {
       throw const BackendException(
         'This promotion is no longer available. Browse current products instead.',
       );
@@ -24,39 +129,75 @@ class BuyerEngagementRepository {
     return page;
   }
 
-  Future<WebPage> savedProducts({int page = 1}) =>
-      _collection('/buyer/saved-products?page=$page', 'Buyer/SavedProducts');
+  Future<WebPage> savedProducts({int page = 1}) => _collection(
+    '/buyer/saved-products?page=$page',
+    'Buyer/SavedProducts',
+    requestedPage: page,
+  );
 
-  Future<WebPage> followedShops({int page = 1}) =>
-      _collection('/buyer/followed-shops?page=$page', 'Buyer/FollowedShops');
+  Future<WebPage> followedShops({int page = 1}) => _collection(
+    '/buyer/followed-shops?page=$page',
+    'Buyer/FollowedShops',
+    requestedPage: page,
+  );
 
-  Future<WebPage> _collection(String path, String component) async {
-    final page = await buyer.document(path);
-    buyer.requireNoErrors(page);
-    final entries = mapOf(page.props['entries']);
-    if (page.user?['role'] != 'buyer') {
+  Future<WebPage> _collection(
+    String path,
+    String component, {
+    required int requestedPage,
+  }) async {
+    if (!isValidBuyerPageRequest(requestedPage)) {
+      throw const BackendException('Choose a valid saved-list page.');
+    }
+    final result = await buyer.document(path);
+    buyer.requireNoErrors(result);
+    final entries = mapOf(result.props['entries']);
+    final idKey = component == 'Buyer/SavedProducts' ? 'product_id' : 'shop_id';
+    if (result.user?['role'] != 'buyer') {
       throw const BackendException(
         'Sign in to your buyer account to view this saved list.',
         status: 401,
       );
     }
-    if (page.component != component ||
-        entries['data'] is! List ||
-        entries['current_page'] is! num ||
-        entries['last_page'] is! num) {
+    if (result.component != component) {
       throw const BackendException(
         'This saved list is unavailable for your buyer account.',
       );
     }
-    return page;
+    final rawRows = entries['data'];
+    if (rawRows is! List || rawRows.length > _collectionPageSize) {
+      throw const BackendException(
+        'This saved list is unavailable for your buyer account.',
+      );
+    }
+    final rows = requireRowsWithIds(
+      rawRows,
+      idKey: idKey,
+      error: 'This saved list is unavailable for your buyer account.',
+    );
+    if (!_validPagePagination(
+      entries,
+      requestedPage: requestedPage,
+      rowCount: rows.length,
+      pageSize: _collectionPageSize,
+    )) {
+      throw const BackendException(
+        'This saved list is unavailable for your buyer account.',
+      );
+    }
+    return result;
   }
 
   Future<Map<String, dynamic>> notificationPreview() async {
     final data = await buyer.session.jsonGet('/notifications/preview');
     final summary = mapOf(data['summary']);
-    if (data['notices'] is! List ||
+    final notices = _completeNoticeRows(
+      data['notices'],
+      maxRows: _noticePreviewLimit,
+    );
+    if (notices == null ||
         summary['available'] != true ||
-        summary['unread'] is! num) {
+        _nonnegativeCount(summary['unread']) == null) {
       throw const BackendException(
         'Notifications are temporarily unavailable. Try again shortly.',
       );
@@ -65,7 +206,7 @@ class BuyerEngagementRepository {
   }
 
   Future<WebPage> notifications({String filter = 'all', int page = 1}) async {
-    if (!['all', 'unread'].contains(filter) || page < 1) {
+    if (!['all', 'unread'].contains(filter) || !isValidBuyerPageRequest(page)) {
       throw const BackendException('Choose a valid notification page.');
     }
     final result = await buyer.document(
@@ -73,14 +214,22 @@ class BuyerEngagementRepository {
     );
     buyer.requireNoErrors(result);
     final notices = mapOf(result.props['notices']);
+    final noticeRows = _completeNoticeRows(
+      notices['data'],
+      maxRows: _noticePageSize,
+    );
     if (result.component != 'Notifications/Index' ||
         result.user?['role'] != 'buyer' ||
         result.props['portal'] != 'buyer' ||
         result.props['filter'] != filter ||
         result.props['available'] != true ||
-        notices['data'] is! List ||
-        notices['current_page'] is! num ||
-        notices['last_page'] is! num) {
+        noticeRows == null ||
+        !_validPagePagination(
+          notices,
+          requestedPage: page,
+          rowCount: noticeRows.length,
+          pageSize: _noticePageSize,
+        )) {
       throw const BackendException(
         'Notifications are temporarily unavailable. Try again shortly.',
       );
@@ -97,7 +246,7 @@ class BuyerEngagementRepository {
       {},
       method: 'PATCH',
     );
-    if (result['read_at'] is! String) {
+    if (strictDateTime(result['read_at'], requireTimezone: true) == null) {
       throw const BackendException(
         'The read status was not confirmed. Refresh and try again.',
       );
@@ -119,12 +268,13 @@ class BuyerEngagementRepository {
       method: 'PATCH',
     );
     final summary = mapOf(result['summary']);
-    if (summary['available'] != true || summary['unread'] is! num) {
+    final unread = _nonnegativeCount(summary['unread']);
+    if (summary['available'] != true || unread == null) {
       throw const BackendException(
         'The read status was not confirmed. Refresh the preview.',
       );
     }
-    return (summary['unread'] as num).toInt();
+    return unread;
   }
 
   Future<WebPage> openNotification(String id, int ownerId) async {
@@ -154,14 +304,14 @@ class BuyerEngagementRepository {
       'snapshot': snapshot,
     }, method: 'PATCH');
     final summary = mapOf(result['summary']);
-    if (result['updated'] is! num ||
-        summary['available'] != true ||
-        summary['unread'] is! num) {
+    final updated = _nonnegativeCount(result['updated']);
+    final unread = _nonnegativeCount(summary['unread']);
+    if (updated == null || summary['available'] != true || unread == null) {
       throw const BackendException(
         'BagooPH did not confirm the notification update. Refresh and try again.',
       );
     }
-    return (summary['unread'] as num).toInt();
+    return unread;
   }
 
   Future<void> reportAdvertisementClick(Map<String, dynamic> measurement) =>

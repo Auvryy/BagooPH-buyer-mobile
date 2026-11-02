@@ -15,7 +15,10 @@ Map<String, dynamic> reviewOffer({Object? revision = 12, Object? saved}) => {
   'discount_type': 'fixed',
   'discount_value': 10,
   'min_spend': 0,
+  'product_scope': 'all',
+  'eligible_products': <Map<String, dynamic>>[],
   'eligible': true,
+  'uses': <Map<String, dynamic>>[],
 };
 
 class VoucherReviewSession extends FakeSession {
@@ -40,19 +43,45 @@ class VoucherReviewSession extends FakeSession {
 BuyerRepository voucherRepository(VoucherReviewSession session) =>
     session.repository;
 
-Map<String, dynamic> reviewChoices(int page, {int last = 3}) => {
-  'offers': {
-    'current_page': page,
-    'last_page': last,
-    'data': [
-      {
-        ...reviewOffer(revision: page + 10),
-        'name': 'Private voucher choice $page',
-        'saving': 10,
-      },
-    ],
-  },
-};
+Map<String, dynamic> reviewChoices(int page, {int last = 3}) {
+  final total = last == 1 ? 1 : (last - 1) * 12 + 1;
+  final inRange = page <= last && total > 0;
+  final from = inRange ? (page - 1) * 12 + 1 : null;
+  final rowCount = !inRange
+      ? 0
+      : page < last
+      ? 12
+      : total - (last - 1) * 12;
+  return {
+    'offers': {
+      'current_page': page,
+      'last_page': last,
+      'per_page': 12,
+      'total': total,
+      'from': from,
+      'to': rowCount == 0 ? null : from! + rowCount - 1,
+      'data': [
+        for (var index = 0; index < rowCount; index++)
+          if (index == 0)
+            {
+              ...reviewOffer(revision: page + 10),
+              'name': 'Private voucher choice $page',
+              'saving': 10,
+            }
+          else
+            {
+              ...reviewOffer(
+                revision: 10000 + page * 12 + index,
+                saved: 20000 + page * 12 + index,
+              ),
+              'name': 'Saved fixture offer $page-$index',
+              'eligible': false,
+              'saving': 0,
+            },
+      ],
+    },
+  };
+}
 
 class VoucherPickerReviewRepository extends BuyerRepository {
   VoucherPickerReviewRepository(super.session);

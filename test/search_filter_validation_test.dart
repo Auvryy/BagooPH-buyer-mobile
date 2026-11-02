@@ -5,6 +5,64 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'duplicate browse filter values invalidate the whole choice list',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: SearchFiltersForm(
+                value: const SearchFilters(
+                  category: 'bags',
+                  location: 'laguna',
+                ),
+                categories: const [
+                  {'slug': 'bags', 'name': 'Bags'},
+                  {'slug': 'bags', 'name': 'Bags duplicate'},
+                  {'slug': 'tech', 'name': 'Technology'},
+                ],
+                locations: const [
+                  {'value': 'laguna', 'label': 'Laguna'},
+                  {'value': 'laguna', 'label': 'Laguna duplicate'},
+                  {'value': 'rizal', 'label': 'Rizal'},
+                ],
+                onApply: (_) {},
+                onReset: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final filters = tester
+          .widgetList<DropdownButtonFormField<String>>(
+            find.byType(DropdownButtonFormField<String>),
+          )
+          .toList();
+      expect(filters, hasLength(2));
+      expect(filters.map((filter) => filter.initialValue), ['', '']);
+      final dropdowns = tester
+          .widgetList<DropdownButton<String>>(
+            find.byType(DropdownButton<String>),
+          )
+          .toList();
+      expect(
+        dropdowns.map(
+          (dropdown) => dropdown.items?.map((item) => item.value).toList(),
+        ),
+        [
+          <String?>[''],
+          <String?>[''],
+        ],
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('search price fields reject malformed typing and pastes', (
     tester,
   ) async {

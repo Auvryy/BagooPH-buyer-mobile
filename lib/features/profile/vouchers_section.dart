@@ -1,12 +1,43 @@
 import 'package:flutter/material.dart';
 
+import '../../core/count_metadata.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../checkout/bag_page.dart';
 import '../products/product_widgets.dart';
 import '../home/product_card.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
+
+List<Map<String, dynamic>>? _completeVoucherUseHistory(Object? value) {
+  if (value is! List ||
+      value.any(
+        (row) => row is! Map || row.keys.any((key) => key is! String),
+      )) {
+    return null;
+  }
+  final rows = mapsOf(value);
+  final ids = <int>{};
+  if (rows.length != value.length ||
+      rows.any((row) {
+        final id = positiveResourceId(row['id']);
+        final saving = amount(row['saving']);
+        return id == null ||
+            !ids.add(id) ||
+            strictDateTime(row['used_at']) == null ||
+            saving == null ||
+            saving < 0 ||
+            row['code'] is! String ||
+            (row['code'] as String).trim().isEmpty ||
+            row['name'] is! String ||
+            (row['name'] as String).trim().isEmpty;
+      })) {
+    return null;
+  }
+  return rows;
+}
 
 class VouchersSection extends StatelessWidget {
   const VouchersSection({
@@ -54,7 +85,9 @@ class VouchersSection extends StatelessWidget {
                     'expired': 'Expired',
                   }.entries)
                     ChoiceChip(
-                      label: Text('${tab.value} (${counts[tab.key] ?? 0})'),
+                      label: Text(
+                        '${tab.value} (${nonNegativeCount(counts[tab.key])?.toString() ?? (counts[tab.key] == null ? '0' : '—')})',
+                      ),
                       selected: current == tab.key,
                       onSelected: loading ? null : (_) => onQuery(tab.key, 1),
                     ),
@@ -89,60 +122,72 @@ class VouchersSection extends StatelessWidget {
                   ),
                 ),
               for (final offer in mapsOf(offers['data']))
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    OfferTile(
-                      key: ValueKey(
-                        '$current:${offer['revision_id']}:${offer['saved_id']}',
-                      ),
-                      offer: offer,
-                      repository: repository.buyer,
-                      account: account,
-                      canSave:
-                          page.props['canUsePortal'] == true &&
-                          (!loading) &&
-                          (offer['saved_id'] != null ||
-                              offer['eligible'] != false),
-                      onSaved: reload,
-                      onUse: offer['eligible'] == false || loading
-                          ? null
-                          : () async {
-                              if (!context.mounted ||
-                                  !account.isCurrent ||
-                                  loading ||
-                                  opening ||
-                                  ModalRoute.of(context)?.isCurrent != true) {
-                                return;
-                              }
-                              opening = true;
-                              try {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => BagPage(
-                                      repository: repository.buyer,
-                                      account: account,
-                                      voucherCode: offer['code']?.toString(),
-                                    ),
-                                  ),
-                                );
-                              } finally {
-                                opening = false;
-                              }
-                            },
-                    ),
-                    if (offer['unavailable_reason'] != null)
-                      Text(
-                        offer['unavailable_reason'].toString(),
-                        style: const TextStyle(fontSize: 12, height: 1.7),
-                      ),
-                    for (final use in mapsOf(offer['uses']))
-                      Text(
-                        'Used ${readableDateTime(use['used_at'])} · Saved ${pesos(use['saving'])}',
-                        style: const TextStyle(fontSize: 12, height: 1.7),
-                      ),
-                    const SizedBox(height: 16),
-                  ],
+                Builder(
+                  builder: (context) {
+                    final uses = _completeVoucherUseHistory(offer['uses']);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        OfferTile(
+                          key: ValueKey(
+                            '$current:${offer['revision_id']}:${offer['saved_id']}',
+                          ),
+                          offer: offer,
+                          repository: repository.buyer,
+                          account: account,
+                          canSave:
+                              page.props['canUsePortal'] == true &&
+                              (!loading) &&
+                              (offer['saved_id'] != null ||
+                                  offer['eligible'] != false),
+                          onSaved: reload,
+                          onUse: offer['eligible'] == false || loading
+                              ? null
+                              : () async {
+                                  if (!context.mounted ||
+                                      !account.isCurrent ||
+                                      loading ||
+                                      opening ||
+                                      ModalRoute.of(context)?.isCurrent !=
+                                          true) {
+                                    return;
+                                  }
+                                  opening = true;
+                                  try {
+                                    await Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => BagPage(
+                                          repository: repository.buyer,
+                                          account: account,
+                                          voucherCode: offer['code']
+                                              ?.toString(),
+                                        ),
+                                      ),
+                                    );
+                                  } finally {
+                                    opening = false;
+                                  }
+                                },
+                        ),
+                        if (offer['unavailable_reason'] != null)
+                          Text(
+                            offer['unavailable_reason'].toString(),
+                            style: const TextStyle(fontSize: 12, height: 1.7),
+                          ),
+                        if (uses == null)
+                          const Text(
+                            'Voucher use history could not be confirmed.',
+                          )
+                        else
+                          for (final use in uses)
+                            Text(
+                              'Used ${readableDateTime(use['used_at'])} · Saved ${pesos(use['saving'])}',
+                              style: const TextStyle(fontSize: 12, height: 1.7),
+                            ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
                 ),
               ProfilePagination(
                 offers,

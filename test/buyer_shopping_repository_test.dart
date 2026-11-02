@@ -8,6 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 String page(String component, Map<String, dynamic> props) =>
     '<meta name="csrf-token" content="test-csrf"><div data-page="${const HtmlEscape().convert(jsonEncode({'component': component, 'props': props, 'version': 'v1'}))}"></div>';
 
+Map<String, dynamic> _chatMessage(int id) => {
+  'id': id,
+  'sender_id': 7,
+  'receiver_id': 3,
+  'message': 'Test message $id',
+  'created_at': '2026-10-28T00:00:00Z',
+};
+
 void main() {
   late HttpServer server;
   late WebSession session;
@@ -266,4 +274,45 @@ void main() {
       );
     },
   );
+
+  test('chat responses reject malformed and duplicate message rows', () async {
+    dynamic payload = {
+      'messages': [_chatMessage(1), 'malformed message row'],
+    };
+    server.listen((request) async {
+      request.response.write(jsonEncode(payload));
+      await request.response.close();
+    });
+
+    await expectLater(repo.messages(3), throwsA(isA<BackendException>()));
+    payload = {
+      'messages': [_chatMessage(1), _chatMessage(1)],
+    };
+    await expectLater(repo.messages(3), throwsA(isA<BackendException>()));
+    payload = {
+      'messages': [_chatMessage(1), _chatMessage(2)],
+    };
+    expect((await repo.messages(3)).map((row) => row['id']), [1, 2]);
+  });
+
+  test('shop and product pages reject duplicate voucher offers', () async {
+    final offer = {'revision_id': 12, 'code': 'DUPLICATE'};
+    final duplicateOffers = [offer, Map<String, dynamic>.of(offer)];
+    server.listen((request) async {
+      final shopPage = request.uri.path.startsWith('/shop/');
+      request.response.write(
+        page(shopPage ? 'Marketplace/ShopDetail' : 'Buyer/ProductDetail', {
+          if (!shopPage) 'product': {'id': 1},
+          'shopOffers': duplicateOffers,
+        }),
+      );
+      await request.response.close();
+    });
+
+    await expectLater(repo.shop('test-shop'), throwsA(isA<BackendException>()));
+    await expectLater(
+      repo.product('test-product'),
+      throwsA(isA<BackendException>()),
+    );
+  });
 }

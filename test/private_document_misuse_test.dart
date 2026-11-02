@@ -68,6 +68,24 @@ void main() {
     expect(find.byType(Image), findsNothing);
   });
 
+  testWidgets('private evidence preview bounds decoded image dimensions', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 3;
+    tester.view.physicalSize = const Size(1200, 2400);
+    addTearDown(tester.view.reset);
+    session.onDocument = (_) async =>
+        RemoteDocument(returnPhotoBytes(), 'image/png');
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final preview = tester.widget<Image>(find.byType(Image));
+    expect(preview.image, isA<ResizeImage>());
+    final resized = preview.image as ResizeImage;
+    expect(resized.width, inInclusiveRange(1, 2048));
+    expect(resized.height, inInclusiveRange(1, 2048));
+  });
+
   testWidgets(
     'changing the evidence path starts a new read with no old image',
     (tester) async {

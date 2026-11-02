@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/buyer_actions.dart';
@@ -22,7 +23,8 @@ class PasswordLinkPage extends StatefulWidget {
   State<PasswordLinkPage> createState() => _PasswordLinkPageState();
 }
 
-class _PasswordLinkPageState extends State<PasswordLinkPage> {
+class _PasswordLinkPageState extends State<PasswordLinkPage>
+    with WidgetsBindingObserver {
   final _form = GlobalKey<FormState>();
   final _email = TextEditingController(),
       _link = TextEditingController(),
@@ -32,10 +34,21 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
   bool _busy = false, _paste = false;
   Map<String, String> _errors = {};
   bool _guestConfirmed = true, _checkingGuest = false;
+  late final RetryCooldown _sendLinkCooldown, _resetLinkCooldown;
   Map<String, dynamic>? _activeAccount;
+  int? _guestEpoch;
+  int _guestGeneration = 0;
+  WebSession? _guestSession;
+
   @override
   void initState() {
     super.initState();
+    void changed() {
+      if (mounted) setState(() {});
+    }
+
+    _sendLinkCooldown = RetryCooldown(changed);
+    _resetLinkCooldown = RetryCooldown(changed);
     _guestConfirmed = !widget.checkGuest;
     if (widget.initialLink != null) {
       try {
@@ -45,31 +58,81 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
         _paste = true;
       }
     }
-    if (widget.checkGuest) _checkGuest();
+    if (widget.checkGuest) {
+      WidgetsBinding.instance.addObserver(this);
+      _checkGuest();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        widget.checkGuest &&
+        !_checkingGuest &&
+        !_busy) {
+      _checkGuest();
+    }
   }
 
   Future<void> _checkGuest() async {
+    if (_checkingGuest) return;
+    final generation = ++_guestGeneration;
+    final session = widget.repository.session;
+    final epoch = session.identityEpoch;
     setState(() {
       _checkingGuest = true;
+      _activeAccount = null;
+      _guestConfirmed = false;
+      _guestEpoch = null;
+      _guestSession = null;
       _error = null;
     });
     try {
       final page = await widget.repository.currentSession();
-      if (mounted) {
+      if (!mounted || generation != _guestGeneration) return;
+      if (!identical(session, widget.repository.session) ||
+          epoch != session.identityEpoch) {
         setState(() {
-          _activeAccount = page?.user;
-          _guestConfirmed = page == null;
+          _error = 'Your account changed. Check the buyer session again before continuing.';
+        });
+        return;
+      }
+      setState(() {
+        _activeAccount = page?.user;
+        _guestConfirmed = page == null;
+        _guestEpoch = epoch;
+        _guestSession = session;
+      });
+    } on BackendException catch (e) {
+      if (mounted && generation == _guestGeneration) {
+        final changed =
+            !identical(session, widget.repository.session) ||
+            epoch != session.identityEpoch;
+        setState(() {
+          _activeAccount = null;
+          _guestConfirmed = false;
+          _guestEpoch = null;
+          _guestSession = null;
+          _error = changed
+              ? 'Your account changed. Check the buyer session again before continuing.'
+              : e.message;
         });
       }
-    } on BackendException catch (e) {
-      if (mounted) setState(() => _error = e.message);
     } finally {
-      if (mounted) setState(() => _checkingGuest = false);
+      if (mounted && generation == _guestGeneration) {
+        setState(() => _checkingGuest = false);
+      }
     }
   }
 
   Future<void> _signOutForRecovery() async {
     if (_busy || _activeAccount == null) return;
+    final session = widget.repository.session;
+    if (_guestEpoch != session.identityEpoch ||
+        !identical(_guestSession, session)) {
+      await _checkGuest();
+      return;
+    }
     setState(() => _busy = true);
     try {
       await widget.repository.logout();
@@ -78,6 +141,8 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
         setState(() {
           _activeAccount = null;
           _guestConfirmed = true;
+          _guestEpoch = widget.repository.session.identityEpoch;
+          _guestSession = widget.repository.session;
           _error = null;
         });
       }
@@ -109,7 +174,12 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
   }
 
   Future<void> _submit() async {
-    if (_busy || !_form.currentState!.validate()) return;
+    if (_busy ||
+        (!_paste && _token == null && _sendLinkCooldown.active) ||
+        (_token != null && _resetLinkCooldown.active) ||
+        !_form.currentState!.validate()) {
+      return;
+    }
     FocusScope.of(context).unfocus();
     setState(() {
       _busy = true;
@@ -124,6 +194,7 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
       } else if (_token == null) {
         await widget.repository.sendPasswordLink(_email.text);
         if (mounted) {
+          _sendLinkCooldown.start(const {'cooldown': 60});
           setState(
             () => _feedback = 'Bagoo confirmed that the reset email was sent. Open its buyer reset link or paste it here.',
           );
@@ -144,6 +215,13 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
       }
     } on BackendException catch (e) {
       if (mounted) {
+        if (e.status == 429) {
+          if (_token == null) {
+            _sendLinkCooldown.start(e.data, retryAt: e.retryAt);
+          } else {
+            _resetLinkCooldown.start(e.data, retryAt: e.retryAt);
+          }
+        }
         setState(() {
           _error = e.fields.isEmpty ? e.message : e.fields.values.join('\n');
           _errors = e.fields;
@@ -160,6 +238,10 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
 
   @override
   void dispose() {
+    _guestGeneration++;
+    _sendLinkCooldown.dispose();
+    _resetLinkCooldown.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     _token = null;
     for (final controller in [_email, _link, _password, _confirmation]) {
       controller.dispose();
@@ -191,7 +273,7 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
                 if (_error != null) Notice(_error!, error: true),
                 if (!_checkingGuest && _activeAccount == null)
                   TextButton(
-                    onPressed: _checkGuest,
+                    onPressed: _busy ? null : _checkGuest,
                     child: const Text('Retry session check'),
                   ),
               ],
@@ -246,10 +328,22 @@ class _PasswordLinkPageState extends State<PasswordLinkPage> {
                     label: _paste
                         ? 'Continue with link'
                         : _token == null
-                        ? 'Send password reset link'
+                        ? _sendLinkCooldown.active
+                              ? 'Try again in ${_sendLinkCooldown.remainingSeconds}s'
+                              : 'Send password reset link'
+                        : _resetLinkCooldown.active
+                        ? 'Try again in ${_resetLinkCooldown.remainingSeconds}s'
                         : 'Save new password',
                     busy: _busy,
-                    onPressed: _submit,
+                    onPressed: _paste
+                        ? _submit
+                        : _token == null
+                        ? _sendLinkCooldown.active
+                              ? null
+                              : _submit
+                        : _resetLinkCooldown.active
+                        ? null
+                        : _submit,
                   ),
                   if (_token == null)
                     TextButton(

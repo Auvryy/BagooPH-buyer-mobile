@@ -31,6 +31,39 @@ void main() {
     expect(noPlatform.shops, {'2': 22});
   });
   test(
+    'malformed applied revision IDs are not truncated into other vouchers',
+    () {
+      const current = VoucherSelection(code: 'PLATFORM');
+      final next = current.remove(null, [
+        {'issuer': 'platform', 'revision_id': 11.5},
+        {'issuer': 'shop', 'shop_id': 2, 'revision_id': '22'},
+      ]);
+      expect(next.platform, isNull);
+      expect(next.shops, isEmpty);
+    },
+  );
+  test(
+    'malformed voucher offers cannot become a different selected voucher',
+    () {
+      const current = VoucherSelection();
+      expect(
+        current.choose({
+          'issuer': 'platform',
+          'revision_id': 11.5,
+        }, const []).platform,
+        isNull,
+      );
+      expect(
+        current.choose({
+          'issuer': 'shop',
+          'shop_id': 2.5,
+          'revision_id': 22,
+        }, const []).shops,
+        isEmpty,
+      );
+    },
+  );
+  test(
     'server repair accepts empty PHP maps and rejects malformed slot IDs',
     () {
       final next = VoucherSelection.checked({
@@ -56,6 +89,28 @@ void main() {
         }),
         throwsA(isA<BackendException>()),
       );
+      for (final id in [11.0, '11', 2147483648]) {
+        expect(
+          () => VoucherSelection.checked({
+            'voucher_code': null,
+            'platform_voucher_revision_id': id,
+            'shop_voucher_revision_ids': {},
+          }),
+          throwsA(isA<BackendException>()),
+          reason: '$id',
+        );
+      }
+      for (final shopId in ['02', '+2', '2147483648']) {
+        expect(
+          () => VoucherSelection.checked({
+            'voucher_code': null,
+            'platform_voucher_revision_id': null,
+            'shop_voucher_revision_ids': {shopId: null},
+          }),
+          throwsA(isA<BackendException>()),
+          reason: shopId,
+        );
+      }
     },
   );
 }

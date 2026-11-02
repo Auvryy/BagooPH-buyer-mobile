@@ -13,8 +13,15 @@ import 'support/fake_buyer_repository.dart' show buyer;
 const _noticeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const _snapshotId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+String _noticeIdFor(int index) =>
+    'aaaaaaaa-aaaa-4aaa-8aaa-${index.toString().padLeft(12, '0')}';
+
 WebPage _inbox(String path, {int owner = 7, String title = 'Order update'}) {
   final query = Uri.parse(path).queryParameters;
+  final requestedPage = int.parse(query['page'] ?? '1');
+  final currentPage = requestedPage > 2 ? 2 : requestedPage;
+  final rowCount = currentPage == 1 ? 20 : 1;
+  final firstRow = (currentPage - 1) * 20;
   return WebPage('Notifications/Index', {
     'auth': {
       'user': {...buyer, 'id': owner},
@@ -25,19 +32,37 @@ WebPage _inbox(String path, {int owner = 7, String title = 'Order update'}) {
     'filter': query['filter'] ?? 'all',
     'notices': {
       'data': [
-        {
-          'id': _noticeId,
-          'type': 'order-event',
-          'created_at': '2026-10-26T08:00:00Z',
-          'read_at': null,
-          'href': null,
-          'data': {'title': title, 'body': 'Check the current order details.'},
-        },
+        for (var index = 0; index < rowCount; index++)
+          {
+            'id': currentPage == 1 && index == 0
+                ? _noticeId
+                : _noticeIdFor(firstRow + index + 1),
+            'type': 'order-event',
+            'created_at': '2026-10-26T08:00:00Z',
+            'read_at': currentPage == 1 && index == 0
+                ? null
+                : '2026-10-26T09:00:00Z',
+            'href': null,
+            'data': {
+              'title': currentPage == 1 && index == 0
+                  ? title
+                  : 'Earlier update ${firstRow + index + 1}',
+              'body': 'Check the current order details.',
+            },
+          },
       ],
-      'current_page': int.parse(query['page'] ?? '1'),
+      'current_page': currentPage,
       'last_page': 2,
+      'per_page': 20,
+      'total': 21,
+      'from': firstRow + 1,
+      'to': firstRow + rowCount,
     },
-    'readSnapshot': {'id': _snapshotId, 'count': 1},
+    'readSnapshot': {
+      'id': _snapshotId,
+      'count': 1,
+      'expires_at': '2099-10-26T08:15:00Z',
+    },
     'notificationSummary': {'available': true, 'unread': 1},
   });
 }
@@ -90,6 +115,138 @@ void main() {
   });
   tearDown(() => session.close());
 
+  for (final (field, value) in [
+    ('current_page', 1.5),
+    ('last_page', 0),
+    ('current_page', 2),
+    ('last_page', 10),
+    ('per_page', 10),
+    ('total', 1000),
+  ]) {
+    testWidgets('notification pagination rejects $field=$value', (
+      tester,
+    ) async {
+      session.onPage = (path) async {
+        final page = _inbox(path);
+        (page.props['notices'] as Map)[field] = value;
+        return page;
+      };
+      await tester.pumpWidget(_app(repository));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Order update'), findsNothing);
+      expect(
+        find.text(
+          'Notifications are temporarily unavailable. Try again shortly.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('notification inbox rejects more than twenty rows', (
+    tester,
+  ) async {
+    session.onPage = (path) async {
+      final page = _inbox(path);
+      final rows = (page.props['notices'] as Map)['data'] as List;
+      rows.add(Map<String, dynamic>.of(rows.first as Map<String, dynamic>));
+      return page;
+    };
+    await tester.pumpWidget(_app(repository));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Order update'), findsNothing);
+    expect(
+      find.text(
+        'Notifications are temporarily unavailable. Try again shortly.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final (name, snapshot) in [
+    (
+      'a string count',
+      {'id': _snapshotId, 'count': '1', 'expires_at': '2099-10-26T08:15:00Z'},
+    ),
+    (
+      'an impossible expiry',
+      {'id': _snapshotId, 'count': 1, 'expires_at': '2099-02-30T08:15:00Z'},
+    ),
+    (
+      'an expired deadline',
+      {'id': _snapshotId, 'count': 1, 'expires_at': '2000-10-26T08:15:00Z'},
+    ),
+  ]) {
+    testWidgets('notifications hide bulk-read action with $name', (
+      tester,
+    ) async {
+      session.onPage = (path) async {
+        final page = _inbox(path);
+        page.props['readSnapshot'] = snapshot;
+        return page;
+      };
+      await tester.pumpWidget(_app(repository));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Mark all as read'), findsNothing);
+      expect(find.text('Order update'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final malformed in [
+    (
+      name: 'a malformed identifier',
+      change: (List rows) => (rows.first as Map)['id'] = 'not-a-uuid',
+    ),
+    (
+      name: 'an impossible creation timestamp',
+      change: (List rows) =>
+          (rows.first as Map)['created_at'] = '2026-02-30T08:00:00Z',
+    ),
+    (
+      name: 'a malformed read timestamp',
+      change: (List rows) => (rows.first as Map)['read_at'] = 42,
+    ),
+    (
+      name: 'a non-text notice title',
+      change: (List rows) {
+        final notice = rows.first as Map;
+        notice['data'] = {...notice['data'] as Map, 'title': 42};
+      },
+    ),
+    (
+      name: 'duplicate identifiers',
+      change: (List rows) => (rows[1] as Map)['id'] = (rows[0] as Map)['id'],
+    ),
+  ]) {
+    testWidgets('notification inbox rejects ${malformed.name}', (tester) async {
+      session.onPage = (path) async {
+        final page = _inbox(path);
+        malformed.change((page.props['notices'] as Map)['data'] as List);
+        return page;
+      };
+      await tester.pumpWidget(_app(repository));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Order update'), findsNothing);
+      expect(
+        find.text(
+          'Notifications are temporarily unavailable. Try again shortly.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   testWidgets(
     'resuming refreshes the current filter and page without marking read',
     (tester) async {
@@ -122,6 +279,12 @@ void main() {
       final previous = find.byTooltip('Previous notifications page');
       final next = find.byTooltip('Next notifications page');
       final page = find.text('Page 1 of 2');
+      await tester.scrollUntilVisible(
+        next,
+        220,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
       expect(previous, findsOneWidget);
       expect(next, findsOneWidget);
       expect(page, findsOneWidget);
@@ -224,6 +387,39 @@ void main() {
       expect(session.pageRequests.length, reads);
       expect(session.getRequests, isEmpty);
       expect(summaries, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'a mark-all reply after session change cannot update the new badge',
+    (tester) async {
+      final pending = Completer<Map<String, dynamic>>();
+      var owner = 7;
+      session.onPage = (path) async => _inbox(path, owner: owner);
+      session.onPost = (_) => pending.future;
+      final summaries = <int>[];
+      await tester.pumpWidget(
+        _app(repository, onSummaryChanged: summaries.add),
+      );
+      await tester.pumpAndSettle();
+      await _tap(tester, find.text('Mark all as read (1)'));
+      expect(session.posts.single.path, '/notifications/read-all');
+
+      session.clear();
+      owner = 8;
+      pending.complete({
+        'updated': 1,
+        'summary': {'available': true, 'unread': 0},
+      });
+      await tester.pumpAndSettle();
+
+      expect(summaries, isEmpty);
+      expect(find.text('Order update'), findsNothing);
+      expect(
+        find.text('Your account changed. Sign in again to view notifications.'),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );

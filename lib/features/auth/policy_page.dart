@@ -4,6 +4,40 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 
+bool _validPolicySections(Object? rawSections) {
+  if (rawSections is! List || rawSections.isEmpty) return false;
+  final titles = <String>{};
+  for (final rawSection in rawSections) {
+    if (rawSection is! Map || rawSection.keys.any((key) => key is! String)) {
+      return false;
+    }
+    final section = Map<String, dynamic>.from(rawSection);
+    final title = section['title'];
+    final paragraphs = section['paragraphs'];
+    if (title is! String ||
+        title.trim().isEmpty ||
+        !titles.add(title) ||
+        paragraphs is! List ||
+        paragraphs.isEmpty ||
+        paragraphs.any(
+          (paragraph) => paragraph is! String || paragraph.trim().isEmpty,
+        )) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _validPolicyDocument(Object? value) {
+  if (value is! Map || value.keys.any((key) => key is! String)) return false;
+  final document = Map<String, dynamic>.from(value);
+  for (final key in ['title', 'version', 'introduction']) {
+    final content = document[key];
+    if (content is! String || content.trim().isEmpty) return false;
+  }
+  return _validPolicySections(document['sections']);
+}
+
 class PolicyPage extends StatefulWidget {
   const PolicyPage({super.key, required this.repository, required this.path});
   final BuyerRepository repository;
@@ -49,7 +83,30 @@ class _PolicyPageState extends State<PolicyPage> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final document = mapOf(snapshot.data!.props['document']);
+          final rawDocument = snapshot.data!.props['document'];
+          if (!_validPolicyDocument(rawDocument)) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Notice(
+                      'Policy text could not be fully confirmed. Try loading it again.',
+                      error: true,
+                    ),
+                    TextButton(
+                      onPressed: () => setState(
+                        () => _page = widget.repository.document(widget.path),
+                      ),
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          final document = Map<String, dynamic>.from(rawDocument as Map);
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
@@ -76,8 +133,7 @@ class _PolicyPageState extends State<PolicyPage> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    for (final paragraph
-                        in (section['paragraphs'] as List? ?? []))
+                    for (final paragraph in stringsOf(section['paragraphs']))
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: Text(

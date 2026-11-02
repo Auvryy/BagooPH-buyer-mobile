@@ -64,6 +64,34 @@ void main() {
     expect(repository.changes, isEmpty);
   });
 
+  for (final id in [0, -1, 1.5, '1', null]) {
+    test(
+      'malformed Bag item ID $id cannot become another selected line',
+      () async {
+        repository.rows = [
+          {...repository.rows.single, 'id': id},
+        ];
+        await bag.load();
+        privateStateCleared();
+        expect(repository.quotes, isEmpty);
+      },
+    );
+  }
+
+  test(
+    'a fractional saved Bag selection is not truncated into a line ID',
+    () async {
+      repository.read = () async {
+        final page = repository.bagDocument();
+        page.props['selectedBagItemIds'] = [1.5];
+        return page;
+      };
+      await bag.load();
+      expect(bag.selected, isEmpty);
+      expect(repository.quotes, isEmpty);
+    },
+  );
+
   for (final change in [
     (99, 2),
     (-1, null),

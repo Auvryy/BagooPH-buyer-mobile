@@ -116,6 +116,32 @@ void main() {
     },
   );
 
+  testWidgets('full recipient details are masked before public display', (
+    tester,
+  ) async {
+    final page = publicTrackingPage();
+    final parcel = page.props['parcel'] as Map;
+    parcel['delivery_recipient_name'] = 'Alexandra Buyer';
+    parcel['delivery_phone'] = '+63 917 123 4567';
+    parcel['delivery_address'] =
+        '123 Fake Street, Barangay Central, San Pablo City, Laguna';
+    session.onPage = (_) async => page;
+
+    await tester.pumpWidget(_app(repository, initialNumber: 'BAGOO-1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alexandra Buyer'), findsNothing);
+    expect(find.text('+63 917 123 4567'), findsNothing);
+    expect(find.textContaining('123 Fake Street'), findsNothing);
+    await _reveal(tester, find.text('A*** B***'));
+    expect(find.text('A*** B***'), findsOneWidget);
+    await _reveal(tester, find.text('*** *** 4567'));
+    expect(find.text('*** *** 4567'), findsOneWidget);
+    await _reveal(tester, find.text('San Pablo City, Laguna'));
+    expect(find.text('San Pablo City, Laguna'), findsOneWidget);
+    expect(session.posts, isEmpty);
+  });
+
   testWidgets(
     'new server milestone labels are shown without inventing completion',
     (tester) async {
@@ -201,6 +227,31 @@ void main() {
       expect(find.text('Buyer confirmed receipt'), findsOneWidget);
       expect(session.pageRequests, hasLength(4));
       expect(session.posts, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'tracking 429 shows a cooldown and disables a new number lookup',
+    (tester) async {
+      session.onPage = (_) async => throw BackendException(
+        'Too many tracking requests. Try again shortly.',
+        status: 429,
+        data: const {'cooldown': 10},
+        retryAt: DateTime.now().toUtc().add(const Duration(seconds: 45)),
+      );
+      await tester.pumpWidget(_app(repository, initialNumber: 'BAGOO-1'));
+      await tester.pumpAndSettle();
+
+      expect(session.pageRequests, hasLength(1));
+      await tester.enterText(_input(), 'BAGOO-2');
+      await tester.pump();
+      final trackButton = find.byType(FilledButton).first;
+      expect(find.textContaining('Try again in '), findsAtLeastNWidgets(1));
+      expect(tester.widget<FilledButton>(trackButton).onPressed, isNull);
+      await tester.tap(trackButton);
+      await tester.pumpAndSettle();
+      expect(session.pageRequests, hasLength(1));
+      expect(tester.takeException(), isNull);
     },
   );
 

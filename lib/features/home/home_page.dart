@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
@@ -149,6 +150,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final owner = positiveResourceId(_home.user?['id']);
     if (state == AppLifecycleState.resumed &&
         !_home.loading &&
         _tab == 0 &&
@@ -157,8 +159,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.resumed &&
         (ModalRoute.isCurrentOf(context) ?? true) &&
-        _home.user?['id'] is num) {
-      unawaited(_refreshNotificationSummary(_home.user!['id']));
+        owner != null) {
+      unawaited(_refreshNotificationSummary(owner));
     }
   }
 
@@ -175,8 +177,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           category: _home.category,
           sort: _home.sort,
         ),
-        categories: mapsOf(page.props['categories']),
-        locations: mapsOf(page.props['locations']),
+        categories: completeSearchFilterChoices(
+          page.props['categories'],
+          valueKey: 'slug',
+          labelKey: 'name',
+        ),
+        locations: completeSearchFilterChoices(
+          page.props['locations'],
+          valueKey: 'value',
+          labelKey: 'label',
+        ),
       );
       if (mounted && filters != null) _openSearchFilters(filters);
     } on BackendException catch (e) {
@@ -251,24 +261,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _homeChanged() {
-    final owner = _home.user?['id'];
+    final owner = positiveResourceId(_home.user?['id']);
     if (owner == _notificationOwner) return;
     _notificationOwner = owner;
     _notificationGeneration++;
-    if (owner is num) {
+    if (owner != null) {
       unawaited(_refreshNotificationSummary(owner));
     } else if (mounted) {
       setState(() => _notificationCount = null);
     }
   }
 
-  Future<void> _refreshNotificationSummary(Object owner) async {
+  Future<void> _refreshNotificationSummary(int owner) async {
     final generation = ++_notificationGeneration;
     try {
       final response = await BuyerEngagementRepository(widget.repository)
           .notificationPreview();
       final summary = mapOf(response['summary']);
-      final count = (summary['unread'] as num).toInt();
+      final count = summary['unread'] as int;
       if (mounted &&
           generation == _notificationGeneration &&
           owner == _home.user?['id']) {
@@ -297,7 +307,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _openNotifications() async {
     final user = _home.user;
-    if (user == null) {
+    final ownerId = positiveResourceId(user?['id']);
+    if (user == null || ownerId == null) {
       widget.onLogin();
       return;
     }
@@ -311,7 +322,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         height: MediaQuery.sizeOf(sheet).height * .82,
         child: NotificationPreview(
           repository: widget.repository,
-          ownerId: (user['id'] as num).toInt(),
+          ownerId: ownerId,
           isCurrentOwner: () => mounted && _home.user?['id'] == user['id'],
           onSummaryChanged: (count) {
             if (mounted && _home.user?['id'] == user['id']) {
@@ -328,7 +339,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           context,
           widget.repository,
           mapOf(selection!['notice'])['id'].toString(),
-          (user['id'] as num).toInt(),
+          ownerId,
           onSearch: _openSearchFilters,
           onProfileSection: _openProfileSection,
           isCurrent: () => mounted && _home.user?['id'] == user['id'],
@@ -345,7 +356,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         MaterialPageRoute<void>(
           builder: (_) => NotificationsPage(
             repository: widget.repository,
-            ownerId: (user['id'] as num).toInt(),
+            ownerId: ownerId,
             onSearch: _openSearchFilters,
             onProfileSection: _openProfileSection,
             onSummaryChanged: (count) {
@@ -357,8 +368,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
     }
-    if (mounted && _home.user?['id'] is num) {
-      await _refreshNotificationSummary(_home.user!['id']);
+    final refreshedOwner = positiveResourceId(_home.user?['id']);
+    if (mounted && refreshedOwner != null) {
+      await _refreshNotificationSummary(refreshedOwner);
     }
   }
 
@@ -1087,8 +1099,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   },
                 ),
               ),
-            if (_home.isMarketplace &&
-                mapsOf(_home.data?.props['relatedProducts']).isNotEmpty) ...[
+            if (_home.isMarketplace && _home.relatedProducts.isNotEmpty) ...[
               const SliverPadding(
                 padding: EdgeInsets.all(16),
                 sliver: SliverToBoxAdapter(
@@ -1099,8 +1110,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 padding: EdgeInsets.symmetric(horizontal: horizontal),
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) => SliverGrid.builder(
-                    itemCount: mapsOf(_home.data?.props['relatedProducts'])
-                        .length,
+                    itemCount: _home.relatedProducts.length,
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: count,
                       crossAxisSpacing: 14,
@@ -1110,9 +1120,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               count +
                           productCardBodyHeight * scaled,
                     ),
-                    itemBuilder: (_, index) => _card(
-                      mapsOf(_home.data?.props['relatedProducts'])[index],
-                    ),
+                    itemBuilder: (_, index) =>
+                        _card(_home.relatedProducts[index]),
                   ),
                 ),
               ),
@@ -1200,8 +1209,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _home.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(_home.user?['kyc_status']);
   Widget _card(Map<String, dynamic> product) {
-    final id = (product['id'] as num).toInt();
-    final saved = (_home.data?.props['savedProductIds'] as List? ?? [])
+    final id = product['id'] as int;
+    final saved = positiveResourceIds(_home.data?.props['savedProductIds'])
         .contains(id);
     return ProductCard(
       product: product,
@@ -1240,8 +1249,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 if (!mounted) {
                   return;
                 }
-                final ids = Set<dynamic>.from(
-                  _home.data?.props['savedProductIds'] as List? ?? [],
+                final ids = positiveResourceIds(
+                  _home.data?.props['savedProductIds'],
                 );
                 if (saved) {
                   ids.remove(id);

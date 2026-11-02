@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/application_text_validation.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/foreground_refresh.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/widgets.dart';
 import '../../core/uploads.dart';
 import '../home/product_card.dart';
@@ -17,6 +21,52 @@ import 'returns_page.dart';
 import 'order_journey.dart';
 import '../checkout/commerce_details.dart';
 import '../engagement/engagement_repository.dart';
+
+List<Map<String, dynamic>>? _completeBuyerReturns(Object? raw) {
+  if (raw is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return null;
+    final item = Map<String, dynamic>.from(row);
+    final id = positiveResourceId(item['id']);
+    final reference = item['reference'];
+    final status = item['status'];
+    if (id == null ||
+        !ids.add(id) ||
+        reference is! String ||
+        reference.trim().isEmpty ||
+        status is! String ||
+        status.trim().isEmpty) {
+      return null;
+    }
+    rows.add(item);
+  }
+  return rows;
+}
+
+bool _returnRequestIsConfirmed(Object? raw) {
+  if (raw is! Map || raw.keys.any((key) => key is! String)) return false;
+  final availability = Map<String, dynamic>.from(raw);
+  final until = strictDateTime(availability['until']);
+  return availability['can_request'] == true &&
+      availability['reason'] == null &&
+      until != null &&
+      until.isAfter(DateTime.now());
+}
+
+List<String>? _completeCancellationReasons(Object? raw) {
+  if (raw is! List || raw.isEmpty) return null;
+  final reasons = <String>[];
+  final seen = <String>{};
+  for (final reason in raw) {
+    if (reason is! String || reason.trim().isEmpty || !seen.add(reason)) {
+      return null;
+    }
+    reasons.add(reason);
+  }
+  return reasons;
+}
 
 class OrderDetailPage extends StatefulWidget {
   const OrderDetailPage({
@@ -36,10 +86,12 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   Timer? _claimTimer;
   late BuyerAccountScope _account;
   late ForegroundRead _updates;
+  late RetryCooldown _pickupCooldown;
   late int _identityEpoch;
   String? _updateError;
   bool _refreshing = true, _accessLost = false, _manualRefresh = false;
-  bool _confirmingReceipt = false;
+  bool _confirmingReceipt = false, _confirmingPickup = false;
+  bool _pickupWasRateLimited = false;
   Map<String, dynamic> get order => mapOf(_page?.props['order']);
   Map<String, dynamic> get claim => mapOf(_page?.props['pickupClaim']);
   bool get hasCurrentAccount =>
@@ -69,6 +121,17 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     _identityEpoch = widget.repository.session.identityEpoch;
     _account = BuyerAccountScope(widget.repository.session);
     _updates = ForegroundRead(read: _read);
+    _pickupCooldown = RetryCooldown(() {
+      if (mounted) {
+        setState(() {
+          if (!_pickupCooldown.active && _pickupWasRateLimited) {
+            _pickupWasRateLimited = false;
+            problem = null;
+            errors = {};
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -78,11 +141,13 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
         oldWidget.orderId != widget.orderId) {
       _updates.dispose();
       _account.invalidate();
+      _pickupCooldown.dispose();
       _claimTimer?.cancel();
       _page = null;
       _code = _updateError = problem = success = null;
       errors = {};
       _accessLost = _manualRefresh = false;
+      _pickupWasRateLimited = false;
       _refreshing = true;
       _configure();
     }
@@ -92,20 +157,31 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   void dispose() {
     _updates.dispose();
     _account.invalidate();
+    _pickupCooldown.dispose();
     _claimTimer?.cancel();
     _code = null;
     super.dispose();
   }
 
   bool get readyForPickup {
-    final expiry = DateTime.tryParse(claim['expires_at']?.toString() ?? '');
-    final locked = DateTime.tryParse(claim['locked_until']?.toString() ?? '');
+    final expiry = strictDateTime(claim['expires_at']);
+    final locked = strictDateTime(claim['locked_until']);
     return claim['status'] == 'ready' &&
         expiry != null &&
         expiry.isAfter(DateTime.now()) &&
         (claim['locked_until'] == null ||
             locked != null && !locked.isAfter(DateTime.now()));
   }
+
+  bool _pickupClaimCurrent(String reference, int epoch) =>
+      hasCurrentAccount &&
+      epoch == _identityEpoch &&
+      widget.repository.session.identityEpoch == epoch &&
+      _page?.props['pickupCodeAvailable'] == true &&
+      claim['reference'] == reference &&
+      readyForPickup &&
+      claim['code_issued_at'] == null &&
+      _code == null;
 
   void _accept(WebPage page) {
     widget.repository.buyer.requireNoErrors(page);
@@ -116,9 +192,20 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
       );
     }
     _account.check(page: page);
+    final rawOrder = page.props['order'];
+    if (rawOrder is! Map) {
+      throw const BackendException(
+        'Order details could not be confirmed. Refresh this order.',
+      );
+    }
+    requireRowsWithIds(
+      rawOrder['items'],
+      idKey: 'id',
+      error: 'Purchased items could not be confirmed. Refresh this order.',
+    );
     if (page.component != 'Buyer/OrderDetail' ||
-        mapOf(page.props['order'])['id'] != widget.orderId ||
-        page.user?['id'] is! num ||
+        mapOf(rawOrder)['id'] != widget.orderId ||
+        positiveResourceId(page.user?['id']) == null ||
         page.user?['role'] != 'buyer' ||
         _page != null && _page!.user?['id'] != page.user?['id']) {
       throw const BackendException(
@@ -139,7 +226,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     _claimTimer?.cancel();
     final boundaries =
         [claim['expires_at'], claim['locked_until']]
-            .map((v) => DateTime.tryParse(v?.toString() ?? ''))
+            .map(strictDateTime)
             .whereType<DateTime>()
             .where((v) => v.isAfter(DateTime.now()))
             .toList()
@@ -174,6 +261,10 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
 
   @override
   void onFailure(BackendException error) {
+    if (_confirmingPickup && error.status == 429) {
+      _pickupWasRateLimited = true;
+      _pickupCooldown.start(error.data, retryAt: error.retryAt, notify: false);
+    }
     if ([401, 403, 404, 419].contains(error.status) ||
         _identityEpoch != widget.repository.session.identityEpoch) {
       _clearPrivate();
@@ -221,6 +312,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
       setState(() {
         _updateError = null;
         if (clearActionError) {
+          _pickupWasRateLimited = false;
           problem = null;
           errors = {};
         }
@@ -257,7 +349,9 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
     final openingPage = _page;
     if (openingPage == null ||
         openingPage.props['canConfirmReceipt'] != true ||
-        mapOf(openingPage.props['order'])['id'] != widget.orderId) {
+        mapOf(openingPage.props['order'])['id'] != widget.orderId ||
+        completePurchaseItems(mapOf(openingPage.props['order'])['items']) ==
+            null) {
       return;
     }
     final openingEpoch = _identityEpoch;
@@ -282,8 +376,10 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
           currentPage.component != 'Buyer/OrderDetail' ||
           currentPage.props['canConfirmReceipt'] != true ||
           mapOf(currentPage.props['order'])['id'] != widget.orderId ||
+          completePurchaseItems(mapOf(currentPage.props['order'])['items']) ==
+              null ||
           currentPage.user?['role'] != 'buyer' ||
-          currentPage.user?['id'] is! num) {
+          positiveResourceId(currentPage.user?['id']) == null) {
         if (mounted &&
             openingEpoch != widget.repository.session.identityEpoch) {
           setState(() {
@@ -316,44 +412,86 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
   }
 
   Future<void> _pickup() async {
-    if (!mounted || !_ensureCurrentAccount()) return;
-    if (!readyForPickup || claim['code_issued_at'] != null || _code != null) {
+    if (!mounted ||
+        _confirmingPickup ||
+        _pickupCooldown.active ||
+        !_ensureCurrentAccount()) {
       return;
     }
-    if (!await confirmAction(
-      context,
-      'Show your private pickup code?',
-      'This code is shown once. Keep it private and save it when it appears; it cannot be revealed again.',
-      'Show my code once',
-    )) {
+    final reference = claim['reference'];
+    final epoch = _identityEpoch;
+    if (reference is! String ||
+        reference.isEmpty ||
+        !_pickupClaimCurrent(reference, epoch)) {
       return;
     }
-    await perform(() async {
-      final data = await widget.repository.json(
-        '/buyer/orders/${widget.orderId}/pickup-code',
-        {},
-      );
-      if (data['code'] is! String || data['code'].toString().isEmpty) {
-        throw const BackendException(
-          'The pickup code was not returned. Refresh tracking before trying again.',
+    _confirmingPickup = true;
+    setState(() {});
+    try {
+      if (!await confirmAction(
+            context,
+            'Show your private pickup code?',
+            'This code is shown once. Keep it private and save it when it appears; it cannot be revealed again.',
+            'Show my code once',
+          ) ||
+          !mounted) {
+        return;
+      }
+      if (!_ensureCurrentAccount()) return;
+      if (!_pickupClaimCurrent(reference, epoch)) {
+        setState(
+          () => problem = 'Pickup status changed. Refresh tracking before requesting a code.',
         );
+        return;
       }
-      if (mounted &&
-          readyForPickup &&
-          _identityEpoch == widget.repository.session.identityEpoch) {
-        setState(() => _code = data['code']);
+      await perform(() async {
+        if (!_pickupClaimCurrent(reference, epoch)) {
+          throw const BackendException(
+            'Pickup status changed. Refresh tracking before requesting a code.',
+          );
+        }
+        final data = await widget.repository.json(
+          '/buyer/orders/${widget.orderId}/pickup-code',
+          {},
+        );
+        final code = data['code'];
+        if (code is! String || !RegExp(r'^[A-F0-9]{12}$').hasMatch(code)) {
+          throw const BackendException(
+            'The pickup code was not returned in a usable format. Refresh tracking before trying again.',
+          );
+        }
+        if (mounted &&
+            hasCurrentAccount &&
+            epoch == widget.repository.session.identityEpoch &&
+            claim['reference'] == reference) {
+          setState(() => _code = code);
+        }
+        return 'Keep your code private. Present it with your valid photo ID at the assigned hub.';
+      }, validate: false);
+    } finally {
+      if (mounted) {
+        _confirmingPickup = false;
+        setState(() {});
       }
-      return 'Keep your code private. Present it with your valid photo ID at the assigned hub.';
-    }, validate: false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final tracking = mapOf(order['tracking']);
+    final orderItems = completePurchaseItems(order['items']);
+    final buyerReturns = _completeBuyerReturns(_page?.props['buyerReturns']);
+    final canRequestReturn = _returnRequestIsConfirmed(
+      _page?.props['returnAvailability'],
+    );
+    final orderNotices = completeBuyerOrderNotices(
+      _page?.props['orderNotices'],
+    );
     final userCan = _page?.props['canUsePortal'] == true;
     final canAct =
         !busy &&
         !_confirmingReceipt &&
+        !_confirmingPickup &&
         hasCurrentAccount &&
         problem == null &&
         _updateError == null;
@@ -466,7 +604,9 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                               children: [
                                 if (_page!.props['canConfirmReceipt'] == true)
                                   FilledButton(
-                                    onPressed: canAct ? _confirm : null,
+                                    onPressed: canAct && orderItems != null
+                                        ? _confirm
+                                        : null,
                                     child: const Text('Confirm Received'),
                                   ),
                                 if (userCan &&
@@ -502,10 +642,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                         : null,
                                     child: const Text('Cancel order'),
                                   ),
-                                if (mapOf(
-                                      _page!.props['returnAvailability'],
-                                    )['can_request'] ==
-                                    true)
+                                if (canRequestReturn)
                                   OutlinedButton(
                                     onPressed: canAct
                                         ? () => Navigator.of(context).push(
@@ -520,18 +657,17 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                         : null,
                                     child: const Text('Request return/refund'),
                                   ),
-                                if (order['wallet_payment'] is Map)
+                                if (positiveResourceId(
+                                      mapOf(order['wallet_payment'])['id'],
+                                    )
+                                    case final paymentId?)
                                   TextButton(
                                     onPressed: canAct
                                         ? () => perform(() async {
                                             await openWalletPayment(
                                               context,
                                               widget.repository,
-                                              (mapOf(
-                                                        order['wallet_payment'],
-                                                      )['id']
-                                                      as num)
-                                                  .toInt(),
+                                              paymentId,
                                               parentAccount: _account,
                                             );
                                             _accept(
@@ -591,8 +727,14 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                   claim['code_issued_at'] == null &&
                                   _code == null)
                                 FilledButton(
-                                  onPressed: canAct ? _pickup : null,
-                                  child: const Text('Show my code once'),
+                                  onPressed: canAct && !_pickupCooldown.active
+                                      ? _pickup
+                                      : null,
+                                  child: Text(
+                                    _pickupCooldown.active
+                                        ? 'Try again in ${_pickupCooldown.remainingSeconds}s'
+                                        : 'Show my code once',
+                                  ),
                                 ),
                               if (!readyForPickup)
                                 Text(
@@ -611,51 +753,57 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                               'Original item options, quantities, and recorded prices.',
                               Icons.shopping_bag_outlined,
                             ),
-                            for (final item in mapsOf(order['items'])) ...[
-                              OrderItemSummary(
-                                item: item,
-                                session: widget.repository.session,
-                                repository: widget.repository.buyer,
-                              ),
-                              if (item['review'] is Map)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: Text(
-                                    'Your rating: ${mapOf(item['review'])['rating']} / 5\n${mapOf(item['review'])['comment'] ?? ''}',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      height: 1.7,
+                            if (orderItems == null)
+                              const Notice(
+                                'Purchased item details could not be confirmed. Refresh this order before confirming receipt.',
+                                error: true,
+                              )
+                            else
+                              for (final item in orderItems) ...[
+                                OrderItemSummary(
+                                  item: item,
+                                  session: widget.repository.session,
+                                  repository: widget.repository.buyer,
+                                ),
+                                if (item['review'] is Map)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: Text(
+                                      'Your rating: ${mapOf(item['review'])['rating']} / 5\n${mapOf(item['review'])['comment'] ?? ''}',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        height: 1.7,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              if (userCan &&
-                                  order['status'] == 'completed' &&
-                                  (item['review'] == null ||
-                                      mapOf(item['review'])['edit_url']
-                                          is String))
-                                TextButton.icon(
-                                  onPressed: canAct
-                                      ? () => Navigator.of(context).push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) => _ReviewPage(
-                                              repository: widget.repository,
-                                              item: item,
-                                              orderId: widget.orderId,
-                                              account: _account,
-                                              onSaved: _accept,
+                                if (userCan &&
+                                    order['status'] == 'completed' &&
+                                    (item['review'] == null ||
+                                        mapOf(item['review'])['edit_url']
+                                            is String))
+                                  TextButton.icon(
+                                    onPressed: canAct
+                                        ? () => Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => _ReviewPage(
+                                                repository: widget.repository,
+                                                item: item,
+                                                orderId: widget.orderId,
+                                                account: _account,
+                                                onSaved: _accept,
+                                              ),
                                             ),
-                                          ),
-                                        )
-                                      : null,
-                                  icon: const Icon(Icons.star_outline),
-                                  label: Text(
-                                    item['review'] == null
-                                        ? 'Rate & review purchased item'
-                                        : 'Edit your review',
+                                          )
+                                        : null,
+                                    icon: const Icon(Icons.star_outline),
+                                    label: Text(
+                                      item['review'] == null
+                                          ? 'Rate & review purchased item'
+                                          : 'Edit your review',
+                                    ),
                                   ),
-                                ),
-                              const Divider(height: 24),
-                            ],
+                                const Divider(height: 24),
+                              ],
                             Text(
                               'Subtotal: ${pesos(order['subtotal'])}\nDelivery: ${pesos(order['shipping_fee'])}\nDiscount: ${pesos(order['voucher_discount'])}\nTotal: ${pesos(order['total_amount'])}\nPayment: ${order['payment_method']} · ${order['payment_status']}',
                               style: const TextStyle(
@@ -728,7 +876,24 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                           ],
                         ),
                       ),
-                      if (mapsOf(_page!.props['buyerReturns']).isNotEmpty)
+                      if (buyerReturns == null)
+                        const ProfilePanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              ProfileHeading(
+                                'Returns & Refunds',
+                                '',
+                                Icons.assignment_return_outlined,
+                              ),
+                              Notice(
+                                'Return details could not be confirmed. Refresh this order to check again.',
+                                error: true,
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (buyerReturns.isNotEmpty)
                         ProfilePanel(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -738,22 +903,24 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                 '',
                                 Icons.assignment_return_outlined,
                               ),
-                              for (final item in mapsOf(
-                                _page!.props['buyerReturns'],
-                              ))
+                              for (final item in buyerReturns)
                                 ListTile(
                                   title: Text(item['reference'].toString()),
                                   subtitle: Text(item['status'].toString()),
                                   trailing: const Icon(Icons.chevron_right),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => ReturnsPage(
-                                        repository: widget.repository,
-                                        caseId: (item['id'] as num).toInt(),
-                                        account: _account,
-                                      ),
-                                    ),
-                                  ),
+                                  onTap: positiveResourceId(item['id']) == null
+                                      ? null
+                                      : () => Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) => ReturnsPage(
+                                              repository: widget.repository,
+                                              caseId: positiveResourceId(
+                                                item['id'],
+                                              )!,
+                                              account: _account,
+                                            ),
+                                          ),
+                                        ),
                                 ),
                             ],
                           ),
@@ -761,7 +928,8 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                       ProfilePanel(
                         child: OrderJourney(
                           order: order,
-                          notices: mapsOf(_page!.props['orderNotices']),
+                          notices: orderNotices ?? const [],
+                          noticesAvailable: orderNotices != null,
                           busy: busy,
                           onRead: (id) => perform(() async {
                             await BuyerEngagementRepository(
@@ -888,6 +1056,9 @@ class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
   String? _reason;
   final _notes = TextEditingController();
 
+  List<String>? get _cancellationReasons =>
+      _completeCancellationReasons(widget.page.props['cancellationReasons']);
+
   @override
   ProfileRepository get repository => widget.repository;
   @override
@@ -905,81 +1076,97 @@ class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy,
-    child: Scaffold(
-      appBar: AppBar(title: const Text('Cancel this order?')),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: orderContent([
-              const ProfileHeading(
-                'Cancel order',
-                'You can cancel before the seller marks it ready for pickup. Your other orders will continue.',
-                Icons.cancel_outlined,
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: _reason,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Reason'),
-                items: [
-                  for (final reason
-                      in widget.page.props['cancellationReasons'] as List? ??
-                          [])
-                    DropdownMenuItem(
-                      value: reason.toString(),
-                      child: Text(
-                        reason.toString(),
-                        overflow: TextOverflow.ellipsis,
+  Widget build(BuildContext context) {
+    final cancellationReasons = _cancellationReasons;
+    return PopScope(
+      canPop: !busy,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Cancel this order?')),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: orderContent([
+                const ProfileHeading(
+                  'Cancel order',
+                  'You can cancel before the seller marks it ready for pickup. Your other orders will continue.',
+                  Icons.cancel_outlined,
+                ),
+                if (cancellationReasons == null)
+                  const Notice(
+                    'Cancellation reasons could not be confirmed. Refresh this order before trying again.',
+                    error: true,
+                  ),
+                DropdownButtonFormField<String>(
+                  initialValue: _reason,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Reason'),
+                  items: [
+                    for (final reason in cancellationReasons ?? const [])
+                      DropdownMenuItem(
+                        value: reason,
+                        child: Text(reason, overflow: TextOverflow.ellipsis),
                       ),
-                    ),
-                ],
-                onChanged: busy
-                    ? null
-                    : (value) => setState(() => _reason = value),
-                validator: (value) => value == null ? 'Choose a reason.' : null,
-              ),
-              const SizedBox(height: 20),
-              field(
-                'notes',
-                _reason == 'Other reason' ? 'Details' : 'Details (optional)',
-                _notes,
-                required: _reason == 'Other reason',
-                max: 500,
-                lines: 3,
-              ),
-              SubmitButton(
-                label: 'Cancel order',
-                busy: busy,
-                onPressed: () => perform(() async {
-                  final id = mapOf(widget.page.props['order'])['id'];
-                  final page = await widget.repository.session.submit(
-                    '/buyer/orders/$id/cancel',
-                    {'reason': _reason, 'notes': _notes.text.trim()},
-                    referer: '/buyer/orders/$id',
-                  );
-                  widget.repository.buyer.requireNoErrors(page);
-                  accountScope.check(page: page);
-                  if (mapOf(page.props['order'])['id'] != id ||
-                      mapOf(page.props['order'])['status'] != 'cancelled') {
-                    throw const BackendException(
-                      'Cancellation was not confirmed. Refresh the order before retrying.',
+                  ],
+                  onChanged: busy || cancellationReasons == null
+                      ? null
+                      : (value) => setState(() => _reason = value),
+                  validator: (value) => cancellationReasons == null
+                      ? 'Cancellation reasons could not be confirmed.'
+                      : value == null
+                      ? 'Choose a reason.'
+                      : null,
+                ),
+                const SizedBox(height: 20),
+                field(
+                  'notes',
+                  _reason == 'Other reason' ? 'Details' : 'Details (optional)',
+                  _notes,
+                  required: _reason == 'Other reason',
+                  max: 500,
+                  lines: 3,
+                  check: buyerNotesTextError,
+                ),
+                SubmitButton(
+                  label: 'Cancel order',
+                  busy: busy,
+                  onPressed: () => perform(() async {
+                    final reasons = _cancellationReasons;
+                    if (reasons == null ||
+                        _reason == null ||
+                        !reasons.contains(_reason)) {
+                      throw const BackendException(
+                        'Cancellation reasons could not be confirmed. Refresh this order before trying again.',
+                      );
+                    }
+                    final id = mapOf(widget.page.props['order'])['id'];
+                    final page = await widget.repository.session.submit(
+                      '/buyer/orders/$id/cancel',
+                      {'reason': _reason, 'notes': _notes.text.trim()},
+                      referer: '/buyer/orders/$id',
                     );
-                  }
-                  if (context.mounted) {
-                    widget.onSaved(page);
-                    Navigator.pop(context);
-                  }
-                  return null;
-                }),
-              ),
-            ]),
+                    widget.repository.buyer.requireNoErrors(page);
+                    accountScope.check(page: page);
+                    if (mapOf(page.props['order'])['id'] != id ||
+                        mapOf(page.props['order'])['status'] != 'cancelled') {
+                      throw const BackendException(
+                        'Cancellation was not confirmed. Refresh the order before retrying.',
+                      );
+                    }
+                    if (context.mounted) {
+                      widget.onSaved(page);
+                      Navigator.pop(context);
+                    }
+                    return null;
+                  }),
+                ),
+              ]),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ReviewPage extends StatefulWidget {
@@ -1001,6 +1188,7 @@ class _ReviewPage extends StatefulWidget {
 
 class _ReviewPageState extends _OrderAccountFormState<_ReviewPage> {
   late final TextEditingController _comment;
+  late final RetryCooldown _reviewCooldown;
   late int _rating;
   final _photos = <UploadPart>[];
   bool get editing => widget.item['review'] != null;
@@ -1018,15 +1206,30 @@ class _ReviewPageState extends _OrderAccountFormState<_ReviewPage> {
   @override
   void initState() {
     super.initState();
+    _reviewCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     _comment = TextEditingController(
       text: mapOf(widget.item['review'])['comment']?.toString() ?? '',
     );
-    _rating = (mapOf(widget.item['review'])['rating'] as num?)?.toInt() ?? 0;
+    final savedRating = mapOf(widget.item['review'])['rating'];
+    _rating = savedRating is int && savedRating >= 1 && savedRating <= 5
+        ? savedRating
+        : 0;
     if (!hasOrderAccount) _discardOrderAccount();
   }
 
   @override
+  void onFailure(BackendException error) {
+    super.onFailure(error);
+    if (error.status == 429) {
+      _reviewCooldown.start(error.data, retryAt: error.retryAt, notify: false);
+    }
+  }
+
+  @override
   void dispose() {
+    _reviewCooldown.dispose();
     _comment.dispose();
     super.dispose();
   }
@@ -1086,6 +1289,7 @@ class _ReviewPageState extends _OrderAccountFormState<_ReviewPage> {
                 required: false,
                 max: 1000,
                 lines: 4,
+                check: buyerNotesTextError,
               ),
               if (!editing) ...[
                 OutlinedButton.icon(
@@ -1131,49 +1335,60 @@ class _ReviewPageState extends _OrderAccountFormState<_ReviewPage> {
               ],
               const SizedBox(height: 24),
               SubmitButton(
-                label: editing ? 'Save review edit' : 'Submit review',
+                label: _reviewCooldown.active
+                    ? 'Retry review in ${_reviewCooldown.remainingSeconds}s'
+                    : editing
+                    ? 'Save review edit'
+                    : 'Submit review',
                 busy: busy,
-                onPressed: () => perform(() async {
-                  if (_rating < 1 || _rating > 5) {
-                    throw const BackendException(
-                      'Choose a rating from 1 to 5 stars.',
-                    );
-                  }
-                  final page = await widget.repository.session.submit(
-                    editing
-                        ? '/buyer/reviews/${mapOf(widget.item['review'])['id']}'
-                        : '/buyer/reviews',
-                    {
-                      'rating': _rating,
-                      'comment': _comment.text.trim(),
-                      if (!editing) 'order_item_id': widget.item['id'],
-                    },
-                    method: editing ? 'PATCH' : 'POST',
-                    referer: '/buyer/orders/${widget.orderId}',
-                    files: [
-                      for (var i = 0; i < _photos.length; i++)
-                        UploadPart(
-                          'images[$i]',
-                          _photos[i].name,
-                          _photos[i].bytes,
-                          _photos[i].mime,
-                        ),
-                    ],
-                  );
-                  widget.repository.buyer.requireNoErrors(page);
-                  accountScope.check(page: page);
-                  if (mapOf(page.props['order'])['id'] != widget.orderId ||
-                      mapOf(page.props['flash'])['success'] is! String) {
-                    throw const BackendException(
-                      'The review was not confirmed. Refresh the purchase before trying again.',
-                    );
-                  }
-                  if (context.mounted) {
-                    widget.onSaved(page);
-                    Navigator.pop(context);
-                  }
-                  return null;
-                }),
+                onPressed: _reviewCooldown.active
+                    ? null
+                    : () {
+                        if (_reviewCooldown.active) return;
+                        perform(() async {
+                          if (_rating < 1 || _rating > 5) {
+                            throw const BackendException(
+                              'Choose a rating from 1 to 5 stars.',
+                            );
+                          }
+                          final page = await widget.repository.session.submit(
+                            editing
+                                ? '/buyer/reviews/${mapOf(widget.item['review'])['id']}'
+                                : '/buyer/reviews',
+                            {
+                              'rating': _rating,
+                              'comment': _comment.text.trim(),
+                              if (!editing) 'order_item_id': widget.item['id'],
+                            },
+                            method: editing ? 'PATCH' : 'POST',
+                            referer: '/buyer/orders/${widget.orderId}',
+                            files: [
+                              for (var i = 0; i < _photos.length; i++)
+                                UploadPart(
+                                  'images[$i]',
+                                  _photos[i].name,
+                                  _photos[i].bytes,
+                                  _photos[i].mime,
+                                ),
+                            ],
+                          );
+                          widget.repository.buyer.requireNoErrors(page);
+                          accountScope.check(page: page);
+                          if (mapOf(page.props['order'])['id'] !=
+                                  widget.orderId ||
+                              mapOf(page.props['flash'])['success']
+                                  is! String) {
+                            throw const BackendException(
+                              'The review was not confirmed. Refresh the purchase before trying again.',
+                            );
+                          }
+                          if (context.mounted) {
+                            widget.onSaved(page);
+                            Navigator.pop(context);
+                          }
+                          return null;
+                        });
+                      },
               ),
             ]),
           ),

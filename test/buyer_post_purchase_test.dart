@@ -116,6 +116,42 @@ void main() {
     expect(milestones[3].recorded, isFalse);
   });
 
+  test('malformed checkpoint timestamps cannot fabricate order milestones', () {
+    final tracking = {
+      'commercial_status': 'preparing',
+      'parcel_status': 'preparing',
+      'history': [
+        {'id': 1, 'type': 'preparing', 'created_at': '2026-10-27T00:00:00Z'},
+        {
+          'id': 2,
+          'type': 'out_for_delivery',
+          'created_at': '2026-02-30T10:00:00Z',
+        },
+      ],
+    };
+    final milestones = buyerMilestones(tracking, {'items': []});
+
+    expect(milestones[1].recorded, isFalse);
+    expect(milestones[2].recorded, isFalse);
+    expect(buyerJourneyEntries(tracking, []), isEmpty);
+  });
+
+  test('non-text checkpoint metadata cannot crash the order journey', () {
+    final tracking = {
+      'history': [
+        {
+          'id': 1,
+          'type': 'delivered',
+          'created_at': '2026-10-27T08:00:00Z',
+          7: 'unexpected',
+        },
+      ],
+    };
+
+    expect(() => buyerJourneyEntries(tracking, []), returnsNormally);
+    expect(buyerJourneyEntries(tracking, []), isEmpty);
+  });
+
   testWidgets('both return symbols encode only the separate return barcode', (
     tester,
   ) async {
@@ -180,6 +216,48 @@ void main() {
     },
   );
 
+  testWidgets('an impossible payment deadline cannot enable confirmation', (
+    tester,
+  ) async {
+    final session = ControlledWebSession();
+    addTearDown(session.close);
+    final now = DateTime.now().toUtc();
+    final lastDay = DateTime.utc(now.year, now.month + 1, 0).day;
+    final impossibleExpiry =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${(lastDay + 1).toString().padLeft(2, '0')}T23:59:59Z';
+    final page = WebPage('Wallet/Payment', {
+      'auth': {'user': buyer},
+      'payment': {
+        'id': 41,
+        'order_number': 'TEST-PAYMENT-41',
+        'status': 'pending',
+        'can_pay': true,
+        'amount_cents': 125000,
+        'expires_at': impossibleExpiry,
+      },
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderResultPage(
+          repository: BuyerRepository(session),
+          initial: page,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm payment'), findsNothing);
+    expect(
+      find.textContaining('Payment deadline: Not provided'),
+      findsOneWidget,
+    );
+    expect(session.posts, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'chat questions remain editable and retries keep their original request key',
     (tester) async {
@@ -243,6 +321,39 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('chat accepts valid supplementary Unicode within the limit', (
+    tester,
+  ) async {
+    final repo = ChatRepository()..fail = false;
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ChatPage(repository: repo, userId: 7, receiverId: 3),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'Message'),
+    );
+    final message = List.filled(600, '🧡').join();
+    field.controller!.text = message;
+    field.onChanged?.call(message);
+    await tester.pump();
+    tester
+        .widget<IconButton>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is IconButton && widget.tooltip == 'Send message',
+          ),
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(repo.sent.single['message'], message);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'chat composer remains scrollable with keyboard and 200 percent text',

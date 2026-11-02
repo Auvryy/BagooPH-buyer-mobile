@@ -139,7 +139,15 @@ void main() {
     session.profileResponse = WebPage('Buyer/Profile', {
       'auth': {'user': unverifiedBuyer},
       'user': unverifiedBuyer,
-      'orders': {'data': []},
+      'orders': {
+        'data': [],
+        'current_page': 1,
+        'last_page': 1,
+        'per_page': 12,
+        'total': 0,
+        'from': null,
+        'to': null,
+      },
       'orderCounts': {},
     });
     addTearDown(session.close);

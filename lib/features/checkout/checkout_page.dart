@@ -8,7 +8,10 @@ import '../../core/application_text_validation.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/contact_input.dart';
+import '../../core/form_metadata.dart';
 import '../../core/numeric_input.dart';
+import '../../core/resource_ids.dart';
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -21,6 +24,69 @@ import 'purchase_quote.dart';
 import 'voucher_selection.dart';
 import 'voucher_picker.dart';
 import 'commerce_details.dart';
+
+bool _validCheckoutItems(dynamic value) {
+  if (value is! List || value.isEmpty) return false;
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final id = row['id'], quantity = row['quantity'];
+    if (id is! int ||
+        id < 1 ||
+        !ids.add(id) ||
+        quantity is! int ||
+        quantity < 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int? _availableVoucherCount(Object? value) {
+  if (value is! List) return null;
+  if (value.any(
+    (row) => row is! Map || row.keys.any((key) => key is! String),
+  )) {
+    return null;
+  }
+  final rows = mapsOf(value);
+  if (rows.length != value.length) return null;
+  final voucherIds = <int>{};
+  final revisionIds = <int>{};
+  for (final row in rows) {
+    final id = positiveResourceId(row['id']);
+    final revisionId = positiveResourceId(row['revision_id']);
+    final issuer = row['issuer'];
+    final shopId = row['shop_id'];
+    final discountType = row['discount_type'];
+    final discountTypes = issuer == 'platform'
+        ? const {'fixed', 'percent', 'free_shipping'}
+        : const {'fixed', 'percent'};
+    final saving = amount(row['saving']);
+    if (id == null ||
+        !voucherIds.add(id) ||
+        revisionId == null ||
+        !revisionIds.add(revisionId) ||
+        row['code'] is! String ||
+        (row['code'] as String).trim().isEmpty ||
+        row['name'] is! String ||
+        (row['name'] as String).trim().isEmpty ||
+        !const {'platform', 'shop'}.contains(issuer) ||
+        !discountTypes.contains(discountType) ||
+        !(issuer == 'platform'
+            ? shopId == null
+            : positiveResourceId(shopId) != null) ||
+        !const {'all', 'selected'}.contains(row['product_scope']) ||
+        row['eligible'] is! bool ||
+        row['unavailable_reason'] != null &&
+            row['unavailable_reason'] is! String ||
+        saving == null ||
+        saving < 0) {
+      return null;
+    }
+  }
+  return rows.length;
+}
 
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({
@@ -43,6 +109,7 @@ class CheckoutPage extends StatefulWidget {
 class _CheckoutPageState extends State<CheckoutPage>
     with WidgetsBindingObserver {
   late final BuyerAccountScope _account;
+  late final RetryCooldown _bestVoucherCooldown;
   String _unavailable =
       'Your buyer account changed or access ended. Close checkout and reopen it from your Bag.';
   bool _reviewOpen = false, _pickingVoucher = false;
@@ -66,6 +133,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     widget.repository.requireNoErrors(page);
     final token = page.props['checkoutToken'];
     if (page.component != 'Checkout/Index' ||
+        !_validCheckoutItems(page.props['items']) ||
         mapOf(page.props['user'])['id'] != page.user?['id'] ||
         token is! String ||
         token.length != 132 ||
@@ -74,10 +142,18 @@ class _CheckoutPageState extends State<CheckoutPage>
         'These checkout details could not be confirmed. Close checkout and reopen it from your Bag.',
       );
     }
+    if (page.props['addresses'] != null) {
+      requireRowsWithIds(
+        page.props['addresses'],
+        idKey: 'id',
+        error: 'These checkout details could not be confirmed. Close checkout and reopen it from your Bag.',
+      );
+    }
   }
 
   void _discardPrivate([String? message]) {
     _account.invalidate();
+    _bestVoucherCooldown.clear(notify: false);
     if (message != null) _unavailable = message;
     _generation++;
     _debounce?.cancel();
@@ -86,7 +162,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     }
     _page = const WebPage('Checkout/Unavailable', {});
     _quote = {};
-    _offers = [];
+    _offerCount = null;
     _companies = [];
     _location = {};
     _fieldErrors = {};
@@ -176,7 +252,7 @@ class _CheckoutPageState extends State<CheckoutPage>
   };
   late WebPage _page;
   Map<String, dynamic> _quote = {};
-  List<Map<String, dynamic>> _offers = [];
+  int? _offerCount;
   Map<String, String> _location = {
     'region': '',
     'province': '',
@@ -206,7 +282,48 @@ class _CheckoutPageState extends State<CheckoutPage>
   Timer? _debounce;
   List<Map<String, dynamic>> get _items => mapsOf(_page.props['items']);
   List<Map<String, dynamic>> get _addresses => mapsOf(_page.props['addresses']);
-  List<int> get _ids => _items.map((i) => (i['id'] as num).toInt()).toList();
+  bool get _pickupHubsValid {
+    final raw = _page.props['pickupHubs'];
+    if (raw == null) return true;
+    if (raw is! List ||
+        raw.any(
+          (row) => row is! Map || row.keys.any((key) => key is! String),
+        )) {
+      return false;
+    }
+    final rows = mapsOf(raw);
+    final ids = <int>{};
+    return rows.length == raw.length &&
+        rows.every((hub) {
+          final id = positiveResourceId(hub['id']);
+          return id != null &&
+              ids.add(id) &&
+              hub['name'] is String &&
+              (hub['name'] as String).trim().isNotEmpty &&
+              hub['city_municipality'] is String &&
+              (hub['city_municipality'] as String).trim().isNotEmpty;
+        });
+  }
+
+  List<Map<String, dynamic>> get _pickupHubs =>
+      _pickupHubsValid ? mapsOf(_page.props['pickupHubs']) : const [];
+  List<Map<String, dynamic>> get _availablePickupHubs => _pickupHubs
+      .where(
+        (hub) =>
+            !_hasCompanyContract || hub['logistics_company_id'] == _company,
+      )
+      .toList();
+  int? get _addressBookLimit {
+    final value = _page.props['addressBookLimit'];
+    return value == null ? 10 : strictNonNegativeInteger(value);
+  }
+
+  bool get _canSaveAddress {
+    final limit = _addressBookLimit;
+    return limit != null && _addresses.length < limit;
+  }
+
+  List<int> get _ids => _items.map((i) => i['id'] as int).toList();
   bool get _frozen => _submittedPayload != null;
   @override
   void initState() {
@@ -214,6 +331,9 @@ class _CheckoutPageState extends State<CheckoutPage>
     _page = widget.initial;
     _account =
         widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
+    _bestVoucherCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     try {
       _validatePage(_page);
@@ -223,7 +343,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     }
     _hasCompanyContract = _page.props.containsKey('logisticsCompanies');
     _quote = mapOf(_page.props['quote']);
-    _offers = mapsOf(_page.props['availableVouchers']);
+    _offerCount = _availableVoucherCount(_page.props['availableVouchers']);
     _fields['voucher_code']!.text = widget.voucherCode ?? '';
     final address =
         _addresses
@@ -257,7 +377,7 @@ class _CheckoutPageState extends State<CheckoutPage>
         ? int.tryParse(_hub ?? '')
         : null,
     'payment_method': _payment,
-    'save_address': _saveAddress,
+    'save_address': _saveAddress && _canSaveAddress,
     'platform_voucher_revision_id': _platformVoucher,
     'shop_voucher_revision_ids': Map.of(_shopVouchers),
   };
@@ -325,19 +445,23 @@ class _CheckoutPageState extends State<CheckoutPage>
   void _readCompanies(Map<String, dynamic> data) {
     final raw = data['logisticsCompanies'];
     if (raw == null) return;
-    final rows = mapsOf(raw);
     if (raw is! List ||
-        rows.length != raw.length ||
-        rows.any(
-          (row) =>
-              row['id'] is! num ||
-              !(row['id'] as num).isFinite ||
-              row['id'] <= 0 ||
-              row['id'] != (row['id'] as num).toInt() ||
-              row['name'] is! String ||
-              (row['name'] as String).trim().isEmpty,
-        ) ||
-        rows.map((row) => row['id']).toSet().length != rows.length) {
+        raw.any(
+          (row) => row is! Map || row.keys.any((key) => key is! String),
+        )) {
+      throw const BackendException(
+        'Delivery choices could not be confirmed. Refresh checkout.',
+      );
+    }
+    final rows = mapsOf(raw);
+    final ids = <int>{};
+    if (rows.any((row) {
+      final id = positiveResourceId(row['id']);
+      return id == null ||
+          !ids.add(id) ||
+          row['name'] is! String ||
+          (row['name'] as String).trim().isEmpty;
+    })) {
       throw const BackendException(
         'Delivery choices could not be confirmed. Refresh checkout.',
       );
@@ -350,7 +474,7 @@ class _CheckoutPageState extends State<CheckoutPage>
       _hub = null;
     }
     if (_company == null && _companies.length == 1) {
-      _company = (_companies.single['id'] as num).toInt();
+      _company = _companies.single['id'] as int;
     }
   }
 
@@ -500,7 +624,7 @@ class _CheckoutPageState extends State<CheckoutPage>
       }
       setState(() {
         _quote = quote;
-        _offers = mapsOf(data['availableVouchers']);
+        _offerCount = _availableVoucherCount(data['availableVouchers']);
         _ready = !_hasCompanyContract || _company != null;
         if (!_ready) {
           _error =
@@ -576,6 +700,7 @@ class _CheckoutPageState extends State<CheckoutPage>
   Future<void> _bestVouchers() async {
     if (!_ensureAccount()) return;
     if (_choosingBest ||
+        _bestVoucherCooldown.active ||
         _pickingVoucher ||
         _reviewOpen ||
         !_ready ||
@@ -608,6 +733,9 @@ class _CheckoutPageState extends State<CheckoutPage>
       _edit();
     } on BackendException catch (e) {
       if (mounted && _lostAccess(e)) return;
+      if (mounted && e.status == 429) {
+        _bestVoucherCooldown.start(e.data, retryAt: e.retryAt, notify: false);
+      }
       if (mounted && requested == jsonEncode(_quoteInput)) {
         setState(() {
           _voucherProblem = true;
@@ -789,7 +917,7 @@ class _CheckoutPageState extends State<CheckoutPage>
                       const SizedBox(height: 12),
                       Text(
                         payload['delivery_type'] == 'hub_self_pickup'
-                            ? 'Self-pickup: ${mapsOf(_page.props['pickupHubs']).where((h) => h['id'] == payload['pickup_hub_id']).firstOrNull?['name'] ?? 'Selected Bayan Hub'}'
+                            ? 'Self-pickup: ${_pickupHubs.where((h) => h['id'] == payload['pickup_hub_id']).firstOrNull?['name'] ?? 'Selected Bayan Hub'}'
                             : 'Doorstep delivery',
                       ),
                       const SizedBox(height: 12),
@@ -1002,6 +1130,7 @@ class _CheckoutPageState extends State<CheckoutPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _bestVoucherCooldown.dispose();
     _account.invalidate();
     _reviewUpdate = null;
     _generation++;
@@ -1161,10 +1290,16 @@ class _CheckoutPageState extends State<CheckoutPage>
           ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: !_ready || _choosingBest ? null : _bestVouchers,
+          onPressed: !_ready || _choosingBest || _bestVoucherCooldown.active
+              ? null
+              : _bestVouchers,
           icon: const Icon(Icons.auto_awesome_outlined, size: 20),
           label: Text(
-            _choosingBest ? 'Comparing vouchers…' : 'Use best vouchers',
+            _choosingBest
+                ? 'Comparing vouchers…'
+                : _bestVoucherCooldown.active
+                ? 'Try again in ${_bestVoucherCooldown.remainingSeconds}s'
+                : 'Use best vouchers',
           ),
         ),
         const SizedBox(height: 8),
@@ -1202,13 +1337,15 @@ class _CheckoutPageState extends State<CheckoutPage>
             trailing: const Icon(Icons.chevron_right),
             enabled: _canPickVoucher,
             onTap: () => _pickVoucher(
-              shopId: (shop['shop_id'] as num).toInt(),
+              shopId: shop['shop_id'] as int,
               title: '${shop['shop_name']} vouchers',
             ),
           ),
         const SizedBox(height: 8),
         Text(
-          '${_offers.length} offers in the current quote. Each shop and Bagoo can have their own voucher slot. Availability is checked again before ordering.',
+          _offerCount == null
+              ? 'Voucher availability could not be confirmed. Open a voucher slot to refresh it.'
+              : '$_offerCount offers in the current quote. Each shop and Bagoo can have their own voucher slot. Availability is checked again before ordering.',
           style: const TextStyle(
             fontSize: 12,
             height: 1.7,
@@ -1450,7 +1587,7 @@ class _CheckoutPageState extends State<CheckoutPage>
             items: [
               for (final company in _companies)
                 DropdownMenuItem(
-                  value: (company['id'] as num).toInt(),
+                  value: company['id'] as int,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(company['name'].toString()),
@@ -1498,14 +1635,25 @@ class _CheckoutPageState extends State<CheckoutPage>
         ),
         CheckoutChoice(
           title: 'Bayan Hub self-pickup',
-          description: 'Collect from an eligible municipal hub when your parcel is ready.',
+          description: !_pickupHubsValid
+              ? 'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.'
+              : _availablePickupHubs.isEmpty
+              ? 'No pickup Bayan Hubs are available. Choose doorstep delivery.'
+              : 'Collect from an eligible municipal hub when your parcel is ready.',
           icon: Icons.storefront_outlined,
           selected: _delivery == 'hub_self_pickup',
-          onTap: () {
-            setState(() => _delivery = 'hub_self_pickup');
-            _edit();
-          },
+          onTap: _availablePickupHubs.isEmpty
+              ? null
+              : () {
+                  setState(() => _delivery = 'hub_self_pickup');
+                  _edit();
+                },
         ),
+        if (!_pickupHubsValid)
+          const Notice(
+            'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.',
+            error: true,
+          ),
         if (_delivery == 'hub_self_pickup') ...[
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
@@ -1514,12 +1662,7 @@ class _CheckoutPageState extends State<CheckoutPage>
             isExpanded: true,
             itemHeight: null,
             decoration: const InputDecoration(labelText: 'Pickup Bayan Hub'),
-            items: mapsOf(_page.props['pickupHubs'])
-                .where(
-                  (hub) =>
-                      !_hasCompanyContract ||
-                      hub['logistics_company_id'] == _company,
-                )
+            items: _availablePickupHubs
                 .map(
                   (h) => DropdownMenuItem(
                     value: h['id'].toString(),
@@ -1673,14 +1816,17 @@ class _CheckoutPageState extends State<CheckoutPage>
             value: _saveAddress,
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
-            onChanged:
-                _addresses.length >=
-                    ((_page.props['addressBookLimit'] as num?)?.toInt() ?? 10)
+            onChanged: !_canSaveAddress
                 ? null
                 : (v) {
                     setState(() => _saveAddress = v ?? false);
                     _edit();
                   },
+            subtitle: _addressBookLimit == null
+                ? const Text(
+                    'The address book limit could not be confirmed. This order will not save a new address.',
+                  )
+                : null,
             title: const Text(
               'Save this address for future orders',
               style: TextStyle(fontSize: 13),

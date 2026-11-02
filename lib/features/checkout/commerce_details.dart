@@ -1,9 +1,70 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/count_metadata.dart';
 import '../../core/web_session.dart';
-import '../home/product_card.dart';
 import '../products/product_model.dart';
+
+List<Map<String, dynamic>>? _stringKeyedRows(Object? value) {
+  if (value is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return null;
+    rows.add(Map<String, dynamic>.from(row));
+  }
+  return rows;
+}
+
+bool _completeVoucherReceipt(Map<String, dynamic> receipt) {
+  final values = <String, int>{};
+  for (final field in [
+    'merchandise',
+    'shipping_before',
+    'shipping_after',
+    'total_savings',
+    'total',
+  ]) {
+    final value = amount(receipt[field]);
+    if (value == null || value < 0) return false;
+    values[field] = cents(value);
+  }
+  if (receipt['legacy_discount'] is! bool) return false;
+  if (values['shipping_after']! > values['shipping_before']! ||
+      values['merchandise']! +
+              values['shipping_before']! -
+              values['total_savings']! !=
+          values['total']!) {
+    return false;
+  }
+  final discounts = receipt['discounts'];
+  if (discounts is! List) return false;
+  var productSavings = 0;
+  var shippingSavings = 0;
+  for (final row in discounts) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final offer = Map<String, dynamic>.from(row);
+    final issuer = offer['issuer'];
+    final productDiscount = amount(offer['product_discount']);
+    final shippingDiscount = amount(offer['shipping_discount']);
+    if (offer['code'] is! String ||
+        (offer['code'] as String).trim().isEmpty ||
+        offer['name'] is! String ||
+        (offer['name'] as String).trim().isEmpty ||
+        !const {'shop', 'platform', 'legacy_unknown'}.contains(issuer) ||
+        productDiscount == null ||
+        productDiscount < 0 ||
+        shippingDiscount == null ||
+        shippingDiscount < 0) {
+      return false;
+    }
+    productSavings += cents(productDiscount);
+    shippingSavings += cents(shippingDiscount);
+  }
+  return values['shipping_before']! - values['shipping_after']! ==
+          shippingSavings &&
+      (receipt['legacy_discount'] == true ||
+          productSavings + shippingSavings == values['total_savings']);
+}
 
 class PriceSegments extends StatelessWidget {
   const PriceSegments({super.key, required this.segments});
@@ -35,17 +96,38 @@ class ShippingCalculation extends StatelessWidget {
   final Map<String, dynamic> calculation;
   final bool selfPickup;
 
-  String _kg(dynamic grams) =>
-      '${((amount(grams) ?? 0) / 1000).toStringAsFixed(3)} kg';
-  String _money(dynamic cents) => pesos((amount(cents) ?? 0) / 100);
+  String _kg(dynamic grams) {
+    final value = nonNegativeCount(grams);
+    return value == null
+        ? 'Unavailable'
+        : '${(value / 1000).toStringAsFixed(3)} kg';
+  }
+
+  String _money(dynamic cents) {
+    final value = nonNegativeCount(cents);
+    return value == null ? 'Unavailable' : pesos(value / 100);
+  }
 
   @override
   Widget build(BuildContext context) {
     if (calculation.isEmpty) return const SizedBox.shrink();
-    final missing =
-        (calculation['missing_measurement_product_ids'] as List? ?? [])
-            .isNotEmpty;
-    final route = mapsOf(calculation['route']);
+    final missingMeasurements = calculation['missing_measurement_product_ids'];
+    final missing = missingMeasurements is List
+        ? missingMeasurements.isNotEmpty
+        : missingMeasurements != null;
+    final rawRoute = calculation['route'];
+    final route = _stringKeyedRows(rawRoute);
+    final routeIsValid =
+        route != null &&
+        route.every(
+          (hub) =>
+              hub['code'] is String &&
+              (hub['code'] as String).trim().isNotEmpty &&
+              !RegExp(r'[\x00-\x1f\x7f]').hasMatch(hub['code'] as String),
+        );
+    final additionalKilograms = nonNegativeCount(
+      calculation['additional_kilograms'],
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -80,12 +162,17 @@ class ShippingCalculation extends StatelessWidget {
           Text(
             selfPickup
                 ? 'Hub collection: no doorstep shipping charge.'
-                : 'Base ${_money(calculation['base_fee_cents'])} + ${calculation['additional_kilograms'] ?? 0} additional kg × ${_money(calculation['additional_kg_cents'])}. Included: ${_kg(calculation['included_weight_grams'])}.',
+                : 'Base ${_money(calculation['base_fee_cents'])} + ${additionalKilograms ?? 'Unavailable'} additional kg × ${_money(calculation['additional_kg_cents'])}. Included: ${_kg(calculation['included_weight_grams'])}.',
             style: const TextStyle(fontSize: 12, height: 1.7),
           ),
-          if (route.isNotEmpty)
+          if (rawRoute != null && !routeIsValid)
+            const Text(
+              'Route details unavailable.',
+              style: TextStyle(fontSize: 12, height: 1.7),
+            )
+          else if (route?.isNotEmpty == true)
             Text(
-              'Route: ${route.map((hub) => hub['code']).join(' → ')}${calculation['same_hub_bypass'] == true ? ' · Local child-hub delivery' : ''}',
+              'Route: ${route!.map((hub) => hub['code']).join(' → ')}${calculation['same_hub_bypass'] == true ? ' · Local child-hub delivery' : ''}',
               style: const TextStyle(fontSize: 12, height: 1.7),
             ),
         ],
@@ -106,6 +193,9 @@ class VoucherReceipt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (receipt.isEmpty) return const SizedBox.shrink();
+    if (!_completeVoucherReceipt(receipt)) {
+      return const Text('Voucher receipt details could not be confirmed.');
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -114,6 +204,8 @@ class VoucherReceipt extends StatelessWidget {
           _MoneyRow(
             '${offer['issuer'] == 'shop'
                 ? 'Shop voucher'
+                : offer['issuer'] == 'legacy_unknown'
+                ? 'Voucher discount'
                 : (amount(offer['shipping_discount']) ?? 0) > 0
                 ? 'Bagoo shipping discount'
                 : 'Bagoo product discount'} · ${offer['code']}',

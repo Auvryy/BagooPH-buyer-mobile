@@ -5,6 +5,7 @@ import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/core/catalogue_pages.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
+import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,23 +15,51 @@ import 'support/widget_helpers.dart';
 WebPage results({
   List<Map<String, dynamic>> products = const [],
   int page = 1,
-  int last = 1,
-}) => WebPage('Buyer/Search', {
-  'products': {
-    'data': products,
-    'current_page': page,
-    'last_page': last,
-    'total': products.length,
-  },
-  'categories': [
-    {'slug': 'tech', 'name': 'Technology'},
-  ],
-  'locations': [
-    {'value': 'test-area', 'label': 'Test province'},
-  ],
-  'suggestions': ['sneakers'],
-  'relatedProducts': [],
-});
+  int? last,
+  int? total,
+}) {
+  const pageSize = 24;
+  final rows = List<Map<String, dynamic>>.of(products);
+  final totalCount =
+      total ?? (last == null ? rows.length : (last - 1) * pageSize + 1);
+  final lastCount =
+      last ?? (totalCount == 0 ? 1 : (totalCount + pageSize - 1) ~/ pageSize);
+  final current = page < 1
+      ? 1
+      : page > lastCount
+      ? lastCount
+      : page;
+  final remaining = totalCount - (current - 1) * pageSize;
+  final expectedRows = remaining <= 0
+      ? 0
+      : remaining < pageSize
+      ? remaining
+      : pageSize;
+  while (rows.length < expectedRows) {
+    rows.add(product(200000 + current * pageSize + rows.length));
+  }
+  final from = rows.isEmpty ? null : (current - 1) * pageSize + 1;
+  final to = rows.isEmpty ? null : from! + rows.length - 1;
+  return WebPage('Buyer/Search', {
+    'products': {
+      'data': rows,
+      'current_page': current,
+      'last_page': lastCount,
+      'per_page': pageSize,
+      'total': totalCount,
+      'from': from,
+      'to': to,
+    },
+    'categories': [
+      {'slug': 'tech', 'name': 'Technology'},
+    ],
+    'locations': [
+      {'value': 'test-area', 'label': 'Test province'},
+    ],
+    'suggestions': ['sneakers'],
+    'relatedProducts': [],
+  });
+}
 
 class SearchRepository extends FakeBuyerRepository {
   Future<WebPage> Function(Map<String, String>, int)? searchHandler;
@@ -40,6 +69,267 @@ class SearchRepository extends FakeBuyerRepository {
 }
 
 void main() {
+  test(
+    'linked search rejects an overlong query before requesting the server',
+    () async {
+      final repository = SearchRepository();
+      final controller = CatalogueSearchController(repository);
+
+      await controller.apply(
+        SearchFilters(query: List.filled(101, 'x').join()),
+      );
+
+      expect(repository.searchRequests, isEmpty);
+      expect(
+        controller.error,
+        'Use no more than 100 characters for your search.',
+      );
+      controller.dispose();
+      repository.session.close();
+    },
+  );
+
+  test(
+    'search rejects fractional product IDs before exposing save targets',
+    () async {
+      final repository = SearchRepository();
+      repository.searchHandler = (_, _) async => results(
+        products: [
+          {...product(1), 'id': 1.5},
+        ],
+      );
+      final controller = CatalogueSearchController(repository);
+      await controller.apply(const SearchFilters());
+      expect(controller.products, isEmpty);
+      expect(
+        controller.error,
+        contains('Search results could not be confirmed'),
+      );
+      controller.dispose();
+      repository.session.close();
+    },
+  );
+
+  test(
+    'search rejects product rows without a confirmed detail route',
+    () async {
+      final repository = SearchRepository();
+      final malformedProduct = product(1)..remove('slug');
+      repository.searchHandler = (_, _) async =>
+          results(products: [malformedProduct]);
+      final controller = CatalogueSearchController(repository);
+
+      await controller.load();
+
+      expect(controller.products, isEmpty);
+      expect(
+        controller.error,
+        contains('Search results could not be confirmed'),
+      );
+      controller.dispose();
+      repository.session.close();
+    },
+  );
+
+  test('search ignores malformed suggestion metadata', () async {
+    final repository = SearchRepository();
+    addTearDown(repository.session.close);
+    final page = results();
+    page.props['suggestions'] = 'not-a-list';
+    repository.searchHandler = (_, _) async => page;
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load();
+
+    expect(controller.suggestions, isEmpty);
+    controller.dispose();
+  });
+
+  test('search hides partial suggestion metadata', () async {
+    final repository = SearchRepository();
+    addTearDown(repository.session.close);
+    final page = results();
+    page.props['suggestions'] = ['sneakers', 17];
+    repository.searchHandler = (_, _) async => page;
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load();
+
+    expect(controller.suggestions, isEmpty);
+    controller.dispose();
+  });
+
+  test('search hides incomplete category and location filter lists', () async {
+    final repository = SearchRepository();
+    addTearDown(repository.session.close);
+    final page = results();
+    page.props['categories'] = [
+      {'slug': 'tech', 'name': 'Technology'},
+      'malformed category',
+    ];
+    page.props['locations'] = [
+      {'value': 'test-area', 'label': 'Test province'},
+      {'value': 'other-area'},
+    ];
+    repository.searchHandler = (_, _) async => page;
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load();
+
+    expect(controller.categories, isEmpty);
+    expect(controller.locations, isEmpty);
+    expect(controller.products, isEmpty);
+    expect(controller.error, isNull);
+    controller.dispose();
+  });
+
+  test('search hides a partial related-product list', () async {
+    final repository = SearchRepository();
+    addTearDown(repository.session.close);
+    final page = results();
+    page.props['relatedProducts'] = [product(3), 'malformed related row'];
+    repository.searchHandler = (_, _) async => page;
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load();
+
+    expect(controller.related, isEmpty);
+    controller.dispose();
+  });
+
+  test('standalone filters reject partial choice metadata', () {
+    expect(
+      completeSearchFilterChoices(
+        [
+          {'slug': 'tech', 'name': 'Technology'},
+          'broken row',
+        ],
+        valueKey: 'slug',
+        labelKey: 'name',
+      ),
+      isEmpty,
+    );
+    expect(
+      completeSearchFilterChoices(
+        [
+          {'value': 'one', 'label': 'One'},
+          {'value': 'one', 'label': 'Duplicate'},
+        ],
+        valueKey: 'value',
+        labelKey: 'label',
+      ),
+      isEmpty,
+    );
+  });
+
+  testWidgets('malformed saved-product IDs do not crash Search results', (
+    tester,
+  ) async {
+    final repository = SearchRepository();
+    addTearDown(repository.session.close);
+    final page = results(products: [product(1)]);
+    page.props['savedProductIds'] = 'not-a-list';
+    repository.searchHandler = (_, _) async => page;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(body: SearchPage(repository: repository)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProductCard), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final (field, value) in [
+    ('current_page', 1.5),
+    ('current_page', 2),
+    ('last_page', -1),
+    ('last_page', 99),
+    ('total', '1'),
+    ('total', 9223372036854775807),
+    ('per_page', 18),
+    ('from', 2),
+    ('to', 0),
+  ]) {
+    test('search rejects malformed paginator $field=$value', () async {
+      final repository = SearchRepository();
+      repository.searchHandler = (_, _) async {
+        final page = results(products: [product(1)]);
+        final props = Map<String, dynamic>.from(page.props);
+        final feed = Map<String, dynamic>.from(props['products'] as Map)
+          ..[field] = value;
+        props['products'] = feed;
+        return WebPage('Buyer/Search', props);
+      };
+      final controller = CatalogueSearchController(repository);
+
+      await controller.apply(const SearchFilters());
+
+      expect(controller.products, isEmpty);
+      expect(controller.data, isNull);
+      expect(controller.error, contains('pagination'));
+      controller.dispose();
+      repository.session.close();
+    });
+  }
+
+  test('search rejects invalid page requests before networking', () async {
+    final repository = SearchRepository();
+    var calls = 0;
+    repository.searchHandler = (_, _) async {
+      calls++;
+      return results();
+    };
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load(pageNumber: 0);
+    expect(calls, 0);
+    expect(controller.error, 'Choose a valid product page.');
+    await controller.load(pageNumber: 1000001);
+    expect(calls, 0);
+
+    controller.dispose();
+    repository.session.close();
+  });
+
+  test(
+    'search accepts the backend correction to a reduced last page',
+    () async {
+      final repository = SearchRepository();
+      repository.searchHandler = (_, page) async =>
+          results(products: [product(25)], page: page, last: 2, total: 25);
+      final controller = CatalogueSearchController(repository);
+
+      await controller.load(pageNumber: 100);
+
+      expect(controller.currentPage, 2);
+      expect(controller.lastPage, 2);
+      expect(controller.products.single['id'], 25);
+      controller.dispose();
+      repository.session.close();
+    },
+  );
+
+  test('search rejects more rows than the backend page size', () async {
+    final repository = SearchRepository();
+    repository.searchHandler = (_, _) async => results(
+      products: [for (var id = 1; id <= 25; id++) product(id)],
+      total: 25,
+    );
+    final controller = CatalogueSearchController(repository);
+
+    await controller.load();
+
+    expect(controller.products, isEmpty);
+    expect(controller.error, contains('results'));
+    controller.dispose();
+    repository.session.close();
+  });
+
   testWidgets(
     'pagination hides inactive controls for one page and accepts a valid page on longer lists',
     (tester) async {
@@ -77,6 +367,7 @@ void main() {
           products: page == 1 ? [product(10)] : [product(10), product(11)],
           page: page,
           last: 2,
+          total: 26,
         );
       };
       final controller = CatalogueSearchController(repo);
@@ -95,9 +386,11 @@ void main() {
       );
       old.complete(results(products: [product(1)]));
       await pending;
-      expect(controller.products.single['id'], 10);
+      expect(controller.products, hasLength(24));
+      expect(controller.products.first['id'], 10);
       await controller.load(more: true);
-      expect(controller.products.map((p) => p['id']), [10, 11]);
+      expect(controller.products, hasLength(25));
+      expect(controller.products.map((p) => p['id']), containsAll([10, 11]));
       expect(requests.last, {
         'search': 'new',
         'category': 'tech',
@@ -123,11 +416,12 @@ void main() {
     final controller = CatalogueSearchController(repo);
     await controller.load();
     await controller.load(more: true);
-    expect(controller.products.single['id'], 1);
+    expect(controller.products, hasLength(24));
+    expect(controller.products.first['id'], 1);
     expect(controller.moreError, 'Offline');
     fail = false;
     await controller.load(more: true);
-    expect(controller.products.length, 2);
+    expect(controller.products.length, 25);
     controller.dispose();
     repo.session.close();
   });

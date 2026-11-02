@@ -14,27 +14,38 @@ class PickerRepository extends FakeBuyerRepository {
   ) async {
     selections.add(Map.of(values));
     final number = values['voucher_page'] as int;
+    final rowCount = number == 1 ? 12 : 1;
+    final from = (number - 1) * 12 + 1;
     return {
       'offers': {
         'current_page': number,
         'last_page': 2,
+        'per_page': 12,
+        'total': 13,
+        'from': from,
+        'to': from + rowCount - 1,
         'data': [
-          {
-            'revision_id': number,
-            'code': 'TEST-$number',
-            'issuer': 'shop',
-            'shop_id': 2,
-            'shop_name': 'Test shop',
-            'name': 'Selected product offer',
-            'discount_type': 'percent',
-            'discount_value': 10,
-            'min_spend': 0,
-            'eligible': number == 2,
-            'saving': number == 2 ? 15 : 0,
-            'unavailable_reason': number == 1
-                ? 'This offer has expired.'
-                : null,
-          },
+          for (var index = 0; index < rowCount; index++)
+            {
+              'revision_id': number == 1 ? (index == 0 ? 1 : 100 + index) : 2,
+              'code': 'TEST-$number-$index',
+              'issuer': 'shop',
+              'shop_id': 2,
+              'shop_name': 'Test shop',
+              'name': 'Selected product offer',
+              'discount_type': 'percent',
+              'discount_value': 10,
+              'product_scope': 'all',
+              'eligible_products': <Map<String, dynamic>>[],
+              'min_spend': 0,
+              'eligible': number == 2,
+              'saving': number == 2 ? 15 : 0,
+              'unavailable_reason': number == 1
+                  ? index == 0
+                        ? 'This offer has expired.'
+                        : 'This offer is unavailable.'
+                  : null,
+            },
         ],
       },
     };
@@ -87,6 +98,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Use voucher'), findsNothing);
       expect(find.text('This offer has expired.'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Next'),
+        600,
+        scrollable: find.byType(Scrollable).first,
+        maxScrolls: 25,
+      );
+      expect(find.text('Page 1 of 2'), findsOneWidget);
+      expect(find.text('Next'), findsOneWidget);
       await press(tester, find.text('Next'));
       await press(tester, find.text('Use voucher'));
       expect(selected?['revision_id'], 2);
