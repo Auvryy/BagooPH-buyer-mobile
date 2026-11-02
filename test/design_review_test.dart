@@ -230,6 +230,34 @@ void main() {
     'BAGOO_REVIEW_PHASE',
     defaultValue: 'current',
   );
+  testWidgets('checkboxes use Bagoo colors and a rounded control shape', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: Scaffold(
+          body: Column(
+            children: [
+              Checkbox(value: false, onChanged: (_) {}),
+              Checkbox(value: true, onChanged: (_) {}),
+            ],
+          ),
+        ),
+      ),
+    );
+    final theme = Theme.of(tester.element(find.byType(Checkbox).first))
+        .checkboxTheme;
+    expect(theme.fillColor?.resolve({}), Colors.white);
+    expect(
+      theme.fillColor?.resolve({WidgetState.selected}),
+      BagooTheme.crimson,
+    );
+    expect(theme.fillColor?.resolve({WidgetState.disabled}), BagooTheme.canvas);
+    expect(theme.checkColor?.resolve({}), Colors.white);
+    expect(theme.shape, isA<RoundedRectangleBorder>());
+    expect(tester.takeException(), isNull);
+  });
   for (final name in [
     'home',
     'signed-home',
