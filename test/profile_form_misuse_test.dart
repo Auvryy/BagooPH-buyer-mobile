@@ -163,6 +163,24 @@ void main() {
     }
   });
 
+  testWidgets('wallet amount input rejects malformed typed and pasted text', (
+    tester,
+  ) async {
+    await open(tester, wallet: true);
+    final amount = find.widgetWithText(TextFormField, 'Amount (PHP)');
+    await reveal(tester, amount);
+    await tester.enterText(amount, '25.50');
+    expect(tester.widget<TextFormField>(amount).controller!.text, '25.50');
+    for (final value in ['25.50x', '1e2', 'NaN', '-25.50', '1,000']) {
+      await tester.enterText(amount, value);
+      expect(
+        tester.widget<TextFormField>(amount).controller!.text,
+        '25.50',
+        reason: value,
+      );
+    }
+  });
+
   testWidgets(
     'repeated credit taps send once and uncertain retry reuses intent',
     (tester) async {

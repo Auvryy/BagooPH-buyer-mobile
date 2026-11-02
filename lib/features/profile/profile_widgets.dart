@@ -261,6 +261,8 @@ abstract class ProfileFormState<T extends StatefulWidget> extends State<T> {
           ? [mobileNumberFormatter]
           : keyboard == TextInputType.number
           ? [unsignedIntegerFormatter]
+          : keyboard?.decimal == true
+          ? [unsignedDecimalFormatter]
           : null,
       autofillHints: autofill,
       maxLength: max,

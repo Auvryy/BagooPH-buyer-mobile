@@ -103,4 +103,39 @@ void main() {
       );
     },
   );
+
+  test('signed coordinate edits keep the sign and range of precision', () {
+    const previous = TextEditingValue(
+      text: '-14.2500',
+      selection: TextSelection.collapsed(offset: 8),
+    );
+    for (final value in [
+      '+14.25',
+      '.5',
+      '14.12345678',
+      '1e2',
+      'NaN',
+      'Infinity',
+      '14,25',
+      '14.2x',
+      '14\u200b25',
+    ]) {
+      expect(
+        signedCoordinateFormatter.formatEditUpdate(
+          previous,
+          TextEditingValue(text: value),
+        ),
+        previous,
+        reason: value,
+      );
+    }
+
+    for (final value in ['', '-', '-0', '-14.', '-14.25', '180.0000000']) {
+      final next = TextEditingValue(
+        text: value,
+        selection: TextSelection.collapsed(offset: value.length),
+      );
+      expect(signedCoordinateFormatter.formatEditUpdate(previous, next), next);
+    }
+  });
 }

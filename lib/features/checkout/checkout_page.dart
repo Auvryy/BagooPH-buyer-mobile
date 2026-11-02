@@ -906,7 +906,9 @@ class _CheckoutPageState extends State<CheckoutPage>
       focusNode: _fieldFocus.putIfAbsent(key, FocusNode.new),
       controller: _fields[key],
       keyboardType: keyboard,
-      inputFormatters: keyboard == TextInputType.phone
+      inputFormatters: key == 'shipping_latitude' || key == 'shipping_longitude'
+          ? [signedCoordinateFormatter]
+          : keyboard == TextInputType.phone
           ? [mobileNumberFormatter]
           : keyboard == TextInputType.number
           ? [unsignedIntegerFormatter]

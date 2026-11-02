@@ -149,6 +149,36 @@ void main() {
     });
   }
 
+  check('coordinate fields reject malformed edits but allow signed drafts', (
+    tester,
+  ) async {
+    await open(tester);
+    final latitude = coordinate('Latitude');
+    await Scrollable.ensureVisible(tester.element(latitude), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.enterText(latitude, '-14.125');
+    expect(value(tester, 'Latitude'), '-14.125');
+    await tester.enterText(latitude, '-14.12345678');
+    expect(value(tester, 'Latitude'), '-14.125');
+    await tester.enterText(latitude, 'NaN');
+    expect(value(tester, 'Latitude'), '-14.125');
+    await tester.enterText(latitude, '+14.25');
+    expect(value(tester, 'Latitude'), '-14.125');
+
+    await tester.enterText(latitude, '-');
+    expect(value(tester, 'Latitude'), '-');
+    await tester.enterText(latitude, '');
+    expect(value(tester, 'Latitude'), isEmpty);
+
+    final longitude = coordinate('Longitude');
+    await Scrollable.ensureVisible(tester.element(longitude), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.enterText(longitude, '-180.0000000');
+    expect(value(tester, 'Longitude'), '-180.0000000');
+    await tester.enterText(longitude, '-180.00000001');
+    expect(value(tester, 'Longitude'), '-180.0000000');
+  });
+
   for (final invalid in [
     '+14.25',
     '.5',
@@ -156,6 +186,7 @@ void main() {
     'NaN',
     'Infinity',
     '14.12345678',
+    '91',
   ]) {
     check('manual coordinate format cannot bypass the server rule: $invalid', (
       tester,
@@ -168,6 +199,17 @@ void main() {
       expect(repository.orderCalls, 0);
     });
   }
+
+  check('longitude outside the server range cannot open order review', (
+    tester,
+  ) async {
+    await open(tester);
+    tester.widget<TextFormField>(coordinate('Longitude')).controller!.text =
+        '-181';
+    await press(tester, find.widgetWithText(FilledButton, 'Review order'));
+    expect(find.text('Confirm your order'), findsNothing);
+    expect(repository.orderCalls, 0);
+  });
 
   check('a queued review activation cannot confirm while GPS is pending', (
     tester,
