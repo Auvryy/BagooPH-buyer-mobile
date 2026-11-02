@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'auth_shell.dart';
@@ -49,9 +50,13 @@ class _LoginPageState extends State<LoginPage> {
   late final GoogleAuthRepository _googleAuth;
   bool _googleAvailable = false;
   Timer? _googleCooldown;
+  late final RetryCooldown _emailLoginCooldown;
   @override
   void initState() {
     super.initState();
+    _emailLoginCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     _email.text = widget.repository.session.rememberedEmail ?? '';
     _remember = widget.repository.session.remembersLogin;
     _googleProvider = widget.googleProvider ?? NativeGoogleIdentityProvider();
@@ -117,7 +122,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _submit() async {
-    if (_busy) {
+    if (_busy || _emailLoginCooldown.active) {
       return;
     }
     setState(() {
@@ -153,6 +158,9 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) {
         return;
       }
+      if (error.status == 429) {
+        _emailLoginCooldown.start(error.data, retryAt: error.retryAt);
+      }
       setState(() {
         _error = error.fields.isEmpty
             ? error.message
@@ -174,6 +182,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void dispose() {
     _googleCooldown?.cancel();
+    _emailLoginCooldown.dispose();
     _googleAuth.abandon();
     _email.dispose();
     _password.dispose();
@@ -244,9 +253,13 @@ class _LoginPageState extends State<LoginPage> {
           ),
           const SizedBox(height: 12),
           SubmitButton(
-            label: _busy ? 'Signing in…' : 'Log In',
+            label: _emailLoginCooldown.active
+                ? 'Try again in ${_emailLoginCooldown.remainingSeconds}s'
+                : _busy
+                ? 'Signing in…'
+                : 'Log In',
             busy: _busy,
-            onPressed: _submit,
+            onPressed: _emailLoginCooldown.active ? null : _submit,
           ),
           if (_googleAvailable) ...[
             const SizedBox(height: 16),

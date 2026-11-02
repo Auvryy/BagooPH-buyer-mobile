@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_widgets.dart';
@@ -34,6 +37,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
   late BuyerAccountScope _offersAccount;
   late final Map<String, dynamic> _values;
   late final String _input;
+  late final RetryCooldown _choicesCooldown;
   Map<String, dynamic> _page = {};
   bool _loading = false, _decided = false;
   String? _error;
@@ -49,6 +53,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
       _page = {};
       _values.clear();
       _loading = false;
+      _choicesCooldown.clear(notify: false);
       _error = 'Your buyer account changed or voucher access ended. Close this picker and reopen it from checkout.';
     }
 
@@ -78,28 +83,71 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
     Map<String, dynamic> result,
     int requested,
   ) {
-    final page = mapOf(result['offers']);
+    final rawPage = result['offers'];
+    if (rawPage is! Map || rawPage.keys.any((key) => key is! String)) {
+      throw const BackendException(
+        'These voucher choices could not be confirmed. Try again.',
+      );
+    }
+    final page = Map<String, dynamic>.from(rawPage);
     final current = page['current_page'], last = page['last_page'];
+    final rows = page['data'];
     if (current is! int ||
         current != requested ||
         current < 1 ||
         current > 100000 ||
         last is! int ||
         last < 1 ||
-        page['data'] is! List) {
+        last > 100000 ||
+        page['per_page'] != 12 ||
+        rows is! List ||
+        rows.length > 12 ||
+        rows.any(
+          (row) => row is! Map || row.keys.any((key) => key is! String),
+        )) {
       throw const BackendException(
         'These voucher choices could not be confirmed. Try again.',
       );
     }
-    return {
-      ...page,
-      'last_page': last.clamp(1, 100000),
-      'data': mapsOf(page['data']),
-    };
+    final offers = requireRowsWithIds(
+      rows,
+      idKey: 'revision_id',
+      error: 'These voucher choices could not be confirmed. Try again.',
+    );
+    final pagination = parsePaginationMetadata(
+      page,
+      rowCount: offers.length,
+      requirePageNumbers: true,
+    );
+    final expectedLastPage = pagination == null || pagination.total == 0
+        ? 1
+        : (pagination.total + 11) ~/ 12;
+    final outOfRange = current > last;
+    final expectedRows =
+        pagination == null || outOfRange || pagination.total == 0
+        ? 0
+        : current < last
+        ? 12
+        : pagination.total - (last - 1) * 12;
+    final validRange =
+        pagination != null &&
+        pagination.lastPage == expectedLastPage &&
+        offers.length == expectedRows &&
+        (!outOfRange || offers.isEmpty) &&
+        (outOfRange || pagination.total == 0 || offers.isNotEmpty) &&
+        (offers.isEmpty ||
+            pagination.from == (current - 1) * 12 + 1 &&
+                pagination.to == pagination.from! + offers.length - 1);
+    if (!validRange) {
+      throw const BackendException(
+        'These voucher choices could not be confirmed. Try again.',
+      );
+    }
+    return {...page, 'data': offers};
   }
 
   Future<void> _load({int? target}) async {
-    if (!_ensure() || _loading || _decided) return;
+    if (!_ensure() || _loading || _decided || _choicesCooldown.active) return;
     final generation = ++_generation;
     _offersAccount.invalidate();
     var requested = target ?? _number;
@@ -139,6 +187,13 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
         _expire(propagate: true);
         return;
       }
+      if (error.status == 429) {
+        _choicesCooldown.start(
+          error.data,
+          retryAt: error.retryAt,
+          notify: false,
+        );
+      }
       setState(() => _error = error.message);
     } finally {
       if (mounted && _account.isCurrent && generation == _generation) {
@@ -150,6 +205,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
   void _changePage(int delta, int from, int generation) {
     if (!_ensure() ||
         _loading ||
+        _choicesCooldown.active ||
         _decided ||
         generation != _generation ||
         from != _number) {
@@ -177,8 +233,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
     final correctSlot = widget.shopId == null
         ? offer['issuer'] == 'platform' && offer['shop_id'] == null
         : offer['issuer'] == 'shop' && offer['shop_id'] == widget.shopId;
-    if (revision is! int ||
-        revision < 1 ||
+    if (positiveInt32ResourceId(revision) == null ||
         offer['eligible'] != true ||
         !correctSlot) {
       return;
@@ -202,6 +257,9 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
   @override
   void initState() {
     super.initState();
+    _choicesCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _account = (widget.account ?? BuyerAccountScope(widget.repository.session))
         .fork();
@@ -237,6 +295,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
     WidgetsBinding.instance.removeObserver(this);
     _account.invalidate();
     _offersAccount.invalidate();
+    _choicesCooldown.dispose();
     _generation++;
     super.dispose();
   }
@@ -300,8 +359,14 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
                         if (_error != null) ...[
                           Notice(_error!, error: true),
                           TextButton(
-                            onPressed: _loading ? null : () => _load(),
-                            child: const Text('Try again'),
+                            onPressed: _loading || _choicesCooldown.active
+                                ? null
+                                : () => _load(),
+                            child: Text(
+                              _choicesCooldown.active
+                                  ? 'Try again in ${_choicesCooldown.remainingSeconds}s'
+                                  : 'Try again',
+                            ),
                           ),
                         ],
                         if (!_loading &&
@@ -337,7 +402,13 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
                                     repository: widget.repository,
                                     account: _offersAccount,
                                     onSaved: _load,
-                                    onUse: _loading || offer['eligible'] != true
+                                    onUse:
+                                        _loading ||
+                                            offer['eligible'] != true ||
+                                            positiveInt32ResourceId(
+                                                  offer['revision_id'],
+                                                ) ==
+                                                null
                                         ? null
                                         : () => _choose(offer, generation),
                                   ),
@@ -351,7 +422,10 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
                             runSpacing: 8,
                             children: [
                               OutlinedButton(
-                                onPressed: _loading || _number <= 1
+                                onPressed:
+                                    _loading ||
+                                        _choicesCooldown.active ||
+                                        _number <= 1
                                     ? null
                                     : () => _changePage(-1, number, generation),
                                 child: const Text('Previous'),
@@ -365,6 +439,7 @@ class _VoucherPickerPageState extends State<VoucherPickerPage>
                               OutlinedButton(
                                 onPressed:
                                     _loading ||
+                                        _choicesCooldown.active ||
                                         _number >=
                                             (_page['last_page'] as num? ?? 1)
                                     ? null

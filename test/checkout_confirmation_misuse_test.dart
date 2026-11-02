@@ -24,6 +24,44 @@ void main() {
   setUpAll(() => HttpOverrides.global = NoNetworkHttpOverrides());
   tearDownAll(() => HttpOverrides.global = originalOverrides);
 
+  testWidgets('repeated wallet cancellation taps open one confirmation', (
+    tester,
+  ) async {
+    final repository = FakeBuyerRepository();
+    addTearDown(repository.session.close);
+    final payment = ownedOrderResult();
+    payment.props['payment'] = {
+      'id': 41,
+      'order_number': 'TEST-PAYMENT-41',
+      'status': 'pending',
+      'can_pay': true,
+      'amount_cents': 125000,
+      'expires_at': DateTime.now()
+          .add(const Duration(hours: 1))
+          .toUtc()
+          .toIso8601String(),
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: OrderResultPage(repository: repository, initial: payment),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final cancel = tester
+        .widget<TextButton>(find.widgetWithText(TextButton, 'Cancel payment'))
+        .onPressed!;
+    for (var index = 0; index < 8; index++) {
+      cancel();
+    }
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog, skipOffstage: false), findsOneWidget);
+    expect(repository.orderCalls, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final action in ['Place order', 'Back', 'Keep payment']) {
     testWidgets(
       'repeated $action activations decide only the current confirmation',
@@ -43,6 +81,7 @@ void main() {
           'amount_cents': 125000,
           'expires_at': DateTime.now()
               .add(const Duration(hours: 1))
+              .toUtc()
               .toIso8601String(),
         };
         try {

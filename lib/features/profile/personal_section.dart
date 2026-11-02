@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/auth_validation.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/uploads.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -94,135 +95,145 @@ class _PersonalSectionState extends BuyerProfileFormState<PersonalSection> {
     child: InputDecorator(
       decoration: InputDecoration(labelText: title, enabled: false),
       child: SelectableText(
-        value?.toString().isNotEmpty == true
-            ? value.toString()
+        value is String && value.trim().isNotEmpty
+            ? value.trim()
             : 'Not recorded',
         style: const TextStyle(fontSize: 14, height: 1.5),
       ),
     ),
   );
 
+  String? get _birthday {
+    final value = user['birthday'];
+    if (value is! String) return null;
+    if (strictDateTime(value) != null) return value.substring(0, 10);
+    return strictDateOnly(value) != null ? value : null;
+  }
+
   @override
-  Widget build(BuildContext context) => content([
-    const ProfileHeading(
-      'Personal Information',
-      'Update your contact information and profile photo.',
-      Icons.person_outline,
-    ),
-    Wrap(
-      spacing: 20,
-      runSpacing: 16,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (_avatar != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.memory(
-              _avatar!.bytes,
-              width: 88,
-              height: 88,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) =>
-                  const Icon(Icons.broken_image_outlined, size: 64),
-            ),
-          )
-        else
-          ProfileAvatar(
-            {...user, if (_remove) 'avatar': null},
-            widget.repository.session,
-            size: 88,
-          ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            OutlinedButton.icon(
-              onPressed: busy ? null : _pick,
-              icon: const Icon(Icons.add_a_photo_outlined),
-              label: const Text('Choose profile photo'),
-            ),
-            if (user['avatar'] != null || _avatar != null)
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => setState(() {
-                        _remove = true;
-                        _avatar = null;
-                        _dirty = true;
-                      }),
-                child: const Text('Remove photo'),
+  Widget build(BuildContext context) {
+    final emailVerified = strictDateTime(user['email_verified_at']) != null;
+    return content([
+      const ProfileHeading(
+        'Personal Information',
+        'Update your contact information and profile photo.',
+        Icons.person_outline,
+      ),
+      Wrap(
+        spacing: 20,
+        runSpacing: 16,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (_avatar != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.memory(
+                _avatar!.bytes,
+                width: 88,
+                height: 88,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    const Icon(Icons.broken_image_outlined, size: 64),
               ),
-          ],
+            )
+          else
+            ProfileAvatar(
+              {...user, if (_remove) 'avatar': null},
+              widget.repository.session,
+              size: 88,
+            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                onPressed: busy ? null : _pick,
+                icon: const Icon(Icons.add_a_photo_outlined),
+                label: const Text('Choose profile photo'),
+              ),
+              if (user['avatar'] != null || _avatar != null)
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => setState(() {
+                          _remove = true;
+                          _avatar = null;
+                          _dirty = true;
+                        }),
+                  child: const Text('Remove photo'),
+                ),
+            ],
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Text(
+        _avatar != null || _remove
+            ? 'Photo change selected. Save your profile to apply it.'
+            : 'JPG, PNG, WEBP or GIF, up to 3 MB.',
+        style: const TextStyle(fontSize: 12, height: 1.6),
+      ),
+      const Divider(height: 40),
+      _record('Registered name', user['name']),
+      for (final e in {
+        'first_name': 'First name',
+        'middle_name': 'Middle name',
+        'last_name': 'Last name',
+      }.entries)
+        _record(e.value, user[e.key]),
+      _record('Original sign-in email', user['email']),
+      Text(
+        !emailVerified
+            ? 'Email verification is required for account security actions.'
+            : 'Your sign-in email is verified.',
+        style: const TextStyle(fontSize: 12, height: 1.6),
+      ),
+      if (!emailVerified)
+        TextButton(
+          onPressed: busy
+              ? null
+              : () => perform(() async {
+                  final result = await widget.repository.mutate(
+                    '/email/verification-notification',
+                    {},
+                    requireMessage: false,
+                  );
+                  checkBuyerAccount(result: result);
+                  return 'Verification link requested. Check your sign-in email.';
+                }, validate: false),
+          child: const Text('Resend verification email'),
         ),
-      ],
-    ),
-    const SizedBox(height: 12),
-    Text(
-      _avatar != null || _remove
-          ? 'Photo change selected. Save your profile to apply it.'
-          : 'JPG, PNG, WEBP or GIF, up to 3 MB.',
-      style: const TextStyle(fontSize: 12, height: 1.6),
-    ),
-    const Divider(height: 40),
-    _record('Registered name', user['name']),
-    for (final e in {
-      'first_name': 'First name',
-      'middle_name': 'Middle name',
-      'last_name': 'Last name',
-    }.entries)
-      _record(e.value, user[e.key]),
-    _record('Original sign-in email', user['email']),
-    Text(
-      user['email_verified_at'] == null
-          ? 'Email verification is required for account security actions.'
-          : 'Your sign-in email is verified.',
-      style: const TextStyle(fontSize: 12, height: 1.6),
-    ),
-    if (user['email_verified_at'] == null)
-      TextButton(
-        onPressed: busy
-            ? null
-            : () => perform(() async {
-                final result = await widget.repository.mutate(
-                  '/email/verification-notification',
-                  {},
-                  requireMessage: false,
-                );
-                checkBuyerAccount(result: result);
-                return 'Verification link requested. Check your sign-in email.';
-              }, validate: false),
-        child: const Text('Resend verification email'),
+      const SizedBox(height: 20),
+      field(
+        'phone',
+        'Mobile contact',
+        _phone,
+        required: false,
+        max: 20,
+        keyboard: TextInputType.phone,
+        autofill: const [AutofillHints.telephoneNumber],
+        hint: 'Philippine mobile number, such as 09171234567.',
+        onChanged: (_) => _dirty = true,
       ),
-    const SizedBox(height: 20),
-    field(
-      'phone',
-      'Mobile contact',
-      _phone,
-      required: false,
-      max: 20,
-      keyboard: TextInputType.phone,
-      autofill: const [AutofillHints.telephoneNumber],
-      hint: 'Philippine mobile number, such as 09171234567.',
-      onChanged: (_) => _dirty = true,
-    ),
-    _record('Birthday', user['birthday']?.toString().split('T').first),
-    _record('Gender', user['sex'] ?? user['gender']),
-    TextButton.icon(
-      onPressed: busy ? null : widget.onIdentity,
-      icon: const Icon(Icons.fingerprint),
-      label: Text(
-        reviewed(user)
-            ? 'Request an identity correction'
-            : 'Review identity verification',
+      _record('Birthday', _birthday),
+      _record('Gender', user['sex'] ?? user['gender']),
+      TextButton.icon(
+        onPressed: busy ? null : widget.onIdentity,
+        icon: const Icon(Icons.fingerprint),
+        label: Text(
+          reviewed(user)
+              ? 'Request an identity correction'
+              : 'Review identity verification',
+        ),
       ),
-    ),
-    const SizedBox(height: 12),
-    SubmitButton(
-      label: busy ? 'Saving profile…' : 'Save Profile Changes',
-      onPressed: _save,
-      busy: busy,
-    ),
-  ]);
+      const SizedBox(height: 12),
+      SubmitButton(
+        label: busy ? 'Saving profile…' : 'Save Profile Changes',
+        onPressed: _save,
+        busy: busy,
+      ),
+    ]);
+  }
 }
 
 class PasswordSection extends StatefulWidget {

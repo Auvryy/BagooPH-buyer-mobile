@@ -62,6 +62,72 @@ void main() {
     expect(quotes, isNotEmpty);
   }
 
+  for (final id in [0, -1, 1.5, '1', null]) {
+    check('checkout rejects malformed opening item ID $id before quoting', (
+      tester,
+    ) async {
+      ((initial.props['items'] as List).first as Map)['id'] = id;
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(quotes, isEmpty);
+      expect(
+        find.textContaining('checkout details could not be confirmed'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  check('duplicate saved-address IDs cannot reach checkout choices', (
+    tester,
+  ) async {
+    final addresses = initial.props['addresses'] as List;
+    addresses.add({...Map<String, dynamic>.from(addresses.first as Map)});
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(quotes, isEmpty);
+    expect(
+      find.textContaining('checkout details could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  check('duplicate pickup-hub IDs disable only the pickup choice', (
+    tester,
+  ) async {
+    initial.props['pickupHubs'] = [
+      {
+        'id': 91,
+        'name': 'Synthetic Bayan Hub',
+        'city_municipality': 'San Pablo City',
+        'logistics_company_id': 41,
+      },
+      {
+        'id': 91,
+        'name': 'Other listed hub',
+        'city_municipality': 'Calamba City',
+        'logistics_company_id': 41,
+      },
+    ];
+    await open(tester);
+
+    expect(
+      find.textContaining('Pickup choices could not be confirmed'),
+      findsNWidgets(2),
+    );
+    final hubChoice = find.ancestor(
+      of: find.text('Bayan Hub self-pickup'),
+      matching: find.byType(InkWell),
+    );
+    expect(tester.widget<InkWell>(hubChoice).onTap, isNull);
+    expect(find.text('Pickup Bayan Hub'), findsNothing);
+    expect(quotes, isNotEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   Future<void> review(WidgetTester tester) async {
     await press(tester, find.widgetWithText(FilledButton, 'Review order'));
     expect(find.text('Confirm your order'), findsOneWidget);
@@ -94,6 +160,43 @@ void main() {
     expect(repository.submittedOrder?['checkout_token'], checkoutToken());
     expect(find.text('Order PRIVATE-41 recorded.'), findsOneWidget);
   });
+
+  check('malformed address-book limit cannot save an address at checkout', (
+    tester,
+  ) async {
+    initial.props['addresses'] = <Map<String, dynamic>>[];
+    initial.props['defaultAddressId'] = null;
+    initial.props['addressBookLimit'] = 1.5;
+    await open(tester);
+
+    final saveAddress = tester.widget<CheckboxListTile>(
+      find.widgetWithText(
+        CheckboxListTile,
+        'Save this address for future orders',
+      ),
+    );
+    expect(saveAddress.onChanged, isNull);
+    expect(
+      find.textContaining('address book limit could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    expect(repository.orderCalls, 0);
+  });
+
+  check(
+    'malformed address-book limit leaves an existing-address order usable',
+    (tester) async {
+      initial.props['addressBookLimit'] = 1.5;
+      await open(tester);
+      await review(tester);
+      await press(tester, find.byType(CheckboxListTile).last);
+      await press(tester, find.widgetWithText(FilledButton, 'Place order'));
+      expect(repository.orderCalls, 1);
+      expect(repository.submittedOrder?['save_address'], isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   check('checkout clears private form fields on resume after account expiry', (
     tester,
@@ -204,6 +307,7 @@ void main() {
         'amount_cents': 125000,
         'expires_at': DateTime.now()
             .add(const Duration(hours: 1))
+            .toUtc()
             .toIso8601String(),
       };
       await tester.pumpWidget(

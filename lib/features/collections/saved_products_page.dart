@@ -108,8 +108,7 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
       }
       setState(() {
         _page = result;
-        _number = (mapOf(result.props['entries'])['current_page'] as num)
-            .toInt();
+        _number = mapOf(result.props['entries'])['current_page'] as int;
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
@@ -229,10 +228,22 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
                         itemBuilder: (context, index) {
                           final entry = _rows[index];
                           final product = mapOf(entry['product']);
-                          final id = (entry['product_id'] as num).toInt();
-                          if (product.isEmpty) {
+                          final id = entry['product_id'] as int;
+                          final slug = product['slug'];
+                          final hasConfirmedProductRoute =
+                              product['id'] is int &&
+                              product['id'] == id &&
+                              slug is String &&
+                              slug.trim().isNotEmpty &&
+                              slug == slug.trim();
+                          if (!hasConfirmedProductRoute) {
+                            final rawReason = entry['unavailable_reason'];
                             return _UnavailableSavedProduct(
-                              reason: entry['unavailable_reason']?.toString() ?? 'This saved product is currently unavailable.',
+                              reason:
+                                  rawReason is String &&
+                                      rawReason.trim().isNotEmpty
+                                  ? rawReason.trim()
+                                  : 'Product details could not be confirmed. You can remove this saved item.',
                               removing: _removing.contains(id),
                               onRemove: () => _remove(id),
                             );
@@ -244,14 +255,13 @@ class _SavedProductsPageState extends State<SavedProductsPage> {
                             saving: _removing.contains(id),
                             saveLabel: 'Remove from saved products',
                             onSave: () => _remove(id),
-                            onTap: () =>
-                                _openProduct(product['slug']?.toString() ?? ''),
+                            onTap: () => _openProduct(slug),
                           );
                         },
                       ),
                       CollectionPagination(
                         current: _number,
-                        last: (_entries['last_page'] as num?)?.toInt() ?? 1,
+                        last: _entries['last_page'] as int? ?? 1,
                         busy: _loading,
                         onPage: (page) => _load(page: page),
                       ),

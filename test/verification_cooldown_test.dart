@@ -38,4 +38,43 @@ void main() {
       );
     }
   });
+
+  test('remaining code cooldown honors Retry-After and stays bounded', () {
+    expect(
+      verificationCooldownRemainingSeconds(
+        {'cooldown': 10},
+        retryAt: now.add(const Duration(seconds: 45)),
+        now: now,
+      ),
+      45,
+    );
+    expect(
+      verificationCooldownRemainingSeconds(
+        {'cooldown': 90},
+        retryAt: now.add(const Duration(seconds: 30)),
+        now: now,
+      ),
+      90,
+    );
+    expect(
+      verificationCooldownRemainingSeconds({'cooldown': 7200}, now: now),
+      3600,
+    );
+    final longDeadline = now.add(const Duration(hours: 2));
+    expect(verificationCooldownSecondsUntil(longDeadline, now: now), 3600);
+    expect(
+      verificationCooldownSecondsUntil(
+        longDeadline,
+        now: now.add(const Duration(hours: 1)),
+      ),
+      3600,
+    );
+    expect(
+      verificationCooldownSecondsUntil(
+        longDeadline,
+        now: now.add(const Duration(hours: 2)),
+      ),
+      0,
+    );
+  });
 }

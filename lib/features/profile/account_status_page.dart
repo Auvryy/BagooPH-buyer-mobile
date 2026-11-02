@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/application_text_validation.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_widgets.dart';
@@ -22,6 +26,7 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
     with WidgetsBindingObserver {
   Map<String, dynamic> _status = {};
   final _drafts = <String, TextEditingController>{};
+  late final RetryCooldown _requestCooldown;
   Object? _owner;
   bool _conflict = false;
   String _key(Map<String, dynamic> source) =>
@@ -29,6 +34,9 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
   @override
   void initState() {
     super.initState();
+    _requestCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _load();
   }
@@ -42,6 +50,7 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
   void onFailure(BackendException error) {
     if (error.status == 409) _conflict = true;
     if ([401, 403, 419].contains(error.status)) {
+      _requestCooldown.clear(notify: false);
       _status = {};
       for (final draft in _drafts.values) {
         draft.clear();
@@ -54,25 +63,80 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
     return null;
   }, validate: false);
   Future<void> _fetch() async {
+    if (mounted && _status.isNotEmpty) setState(() => _status = {});
     final page = await widget.repository.document('/account/status');
     widget.repository.requireNoErrors(page);
     final status = mapOf(page.props['status']);
     final account = mapOf(status['account']);
+    final accountId = positiveResourceId(account['id']);
     if (page.component != 'Auth/AccountStatus' ||
-        account['id'] is! num ||
-        account['id'] <= 0 ||
+        accountId == null ||
         page.user?['role'] != 'buyer' ||
-        page.user?['id'] != account['id'] ||
-        _owner != null && _owner != account['id']) {
+        positiveResourceId(page.user?['id']) != accountId ||
+        _owner != null && _owner != accountId) {
       throw const BackendException(
         'Account status is unavailable for this buyer session.',
         status: 401,
       );
     }
+    final sourcesValue = status['sources'];
+    final sources = mapsOf(sourcesValue);
+    final requestHistoryValue = status['requests'];
+    final requests = mapsOf(requestHistoryValue);
+    final emailUpdateValue = status['email_update'];
+    final emailUpdate = emailUpdateValue is Map
+        ? mapOf(emailUpdateValue)
+        : <String, dynamic>{};
+    final emailUpdateValid =
+        emailUpdateValue == null ||
+        emailUpdateValue is Map &&
+            emailUpdate['pending'] is bool &&
+            (emailUpdate['pending'] != true ||
+                emailUpdate['attempts'] is int &&
+                    (emailUpdate['attempts'] as int) >= 0);
+    final sourceKeys = <String>{};
+    final requestIds = <int>{};
+    if (sourcesValue is! List ||
+        sources.length != sourcesValue.length ||
+        sources.any((source) {
+          final id = positiveResourceId(source['id']);
+          final type = source['type'];
+          final token = source['source_token'];
+          final pendingId = source['pending_request_id'];
+          return id == null ||
+              type is! String ||
+              type.trim().isEmpty ||
+              token is! String ||
+              RegExp(r'^[a-f0-9]{64}$').stringMatch(token) != token ||
+              source['status'] is! String ||
+              (source['status'] as String).trim().isEmpty ||
+              pendingId != null && positiveResourceId(pendingId) == null ||
+              !sourceKeys.add(_key(source));
+        }) ||
+        requestHistoryValue is! List ||
+        requests.length != requestHistoryValue.length ||
+        requests.any((request) {
+          final id = positiveResourceId(request['id']);
+          final createdAt = request['created_at'];
+          final decision = request['decision'];
+          return id == null ||
+              !requestIds.add(id) ||
+              request['status'] is! String ||
+              (request['status'] as String).trim().isEmpty ||
+              request['message'] is! String ||
+              createdAt is! String ||
+              strictDateTime(createdAt) == null ||
+              decision != null && decision is! Map;
+        }) ||
+        !emailUpdateValid) {
+      throw const BackendException(
+        'Account status details could not be confirmed. Refresh the status.',
+      );
+    }
     if (!mounted) return;
-    final keys = mapsOf(status['sources']).map(_key).toSet();
+    final keys = sources.map(_key).toSet();
     setState(() {
-      _owner = account['id'];
+      _owner = accountId;
       _status = status;
       _conflict = false;
       for (final key
@@ -83,25 +147,66 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
   }
 
   Future<void> _submit(Map<String, dynamic> source) async {
-    if (_conflict || source['pending_request_id'] != null) return;
-    final key = _key(source);
+    if (_requestCooldown.active ||
+        _conflict ||
+        source['pending_request_id'] != null) {
+      return;
+    }
+    final subjectId = positiveResourceId(source['id']);
+    final token = source['source_token'];
+    final sourceType = source['type'];
+    final currentSources = mapsOf(_status['sources'])
+        .where((current) => _key(current) == _key(source))
+        .toList();
+    if (subjectId == null ||
+        sourceType is! String ||
+        sourceType.trim().isEmpty ||
+        token is! String ||
+        RegExp(r'^[a-f0-9]{64}$').stringMatch(token) != token ||
+        currentSources.length != 1 ||
+        currentSources.single['pending_request_id'] != null) {
+      setState(
+        () =>
+            problem = 'This review request is unavailable. Refresh the status.',
+      );
+      return;
+    }
+    final activeSource = currentSources.single;
+    final key = _key(activeSource);
     final message = _drafts[key]?.text.trim() ?? '';
-    if (message.length < 20 || message.length > 2000) {
+    final length = message.runes.length;
+    if (length < 20 || length > 2000) {
       setState(() => problem = 'Explain your request in 20–2,000 characters.');
       return;
     }
+    final textError = buyerNotesTextError(message);
+    if (textError != null) {
+      setState(() => problem = textError);
+      return;
+    }
     await perform(() async {
-      final result = await widget.repository.session.jsonPost(
-        '/account/review-requests',
-        {
-          'subject_type': source['type'],
-          'subject_id': source['id'],
-          'source_token': source['source_token'],
-          'message': message,
-        },
-      );
-      if (result['id'] is! num ||
-          result['id'] <= 0 ||
+      late final Map<String, dynamic> result;
+      try {
+        result = await widget.repository.session.jsonPost(
+          '/account/review-requests',
+          {
+            'subject_type': activeSource['type'],
+            'subject_id': subjectId,
+            'source_token': activeSource['source_token'],
+            'message': message,
+          },
+        );
+      } on BackendException catch (error) {
+        if (error.status == 429) {
+          _requestCooldown.start(
+            error.data,
+            retryAt: error.retryAt,
+            notify: false,
+          );
+        }
+        rethrow;
+      }
+      if (positiveResourceId(result['id']) == null ||
           result['status'] is! String) {
         throw const BackendException(
           'Your review request was not confirmed. Refresh the status before trying again.',
@@ -116,6 +221,7 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _requestCooldown.dispose();
     for (final draft in _drafts.values) {
       draft.dispose();
     }
@@ -216,10 +322,14 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
                         ),
                       ),
                       FilledButton(
-                        onPressed: busy || _conflict
+                        onPressed: busy || _conflict || _requestCooldown.active
                             ? null
                             : () => _submit(Map.of(source)),
-                        child: const Text('Request a review'),
+                        child: Text(
+                          _requestCooldown.active
+                              ? 'Try again in ${_requestCooldown.remainingSeconds}s'
+                              : 'Request a review',
+                        ),
                       ),
                     ],
                   ],

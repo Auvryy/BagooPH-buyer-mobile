@@ -144,12 +144,14 @@ class ReviewRepository extends FakeBuyerRepository {
           'name': 'Everyday Carry Canvas Tote',
           'shop': {'name': 'Everyday Goods', 'city': 'San Pablo City'},
         },
+        for (var id = 2; id <= 6; id++) product(id),
       ],
-      'current_page': page,
-      'last_page': 2,
+      'current_page': 1,
+      'last_page': 1,
+      'per_page': 18,
       'total': 6,
       'from': 1,
-      'to': 1,
+      'to': 6,
     },
     'categories': [
       {'slug': 'bags', 'name': 'Bags'},
@@ -627,7 +629,7 @@ void main() {
               lessThan(scene.$1.height),
             );
             expect(
-              tester.getRect(find.text('₱1,200.00')).bottom,
+              tester.getRect(find.text('₱1,200.00').first).bottom,
               lessThan(scene.$1.height),
             );
           }

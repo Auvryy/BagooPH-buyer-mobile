@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/request_id.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/verification_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -13,6 +16,21 @@ import '../../core/buyer_actions.dart';
 import '../products/product_widgets.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
+
+final _sessionIdPattern = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+  caseSensitive: false,
+);
+
+Map<String, dynamic>? _stringKeyedMap(Object? value) {
+  if (value is! Map || value.keys.any((key) => key is! String)) return null;
+  return value.map<String, dynamic>(
+    (key, entry) => MapEntry(key as String, entry),
+  );
+}
+
+DateTime? _nullableSessionTime(Object? value) =>
+    value == null ? null : strictDateTime(value, requireTimezone: true);
 
 class SessionsSection extends StatefulWidget {
   const SessionsSection({
@@ -60,6 +78,129 @@ class _SessionsSectionState extends State<SessionsSection>
     if (_current) return true;
     _accessLost();
     return false;
+  }
+
+  bool _validSessionEntry(
+    Map<String, dynamic> entry, {
+    required String currentSessionId,
+    required bool signInHistory,
+  }) {
+    final id = entry['id'];
+    final device = entry['device'];
+    final channel = entry['channel'];
+    final method = entry['method'];
+    final deviceType = entry['device_type'];
+    final network = entry['network'];
+    final status = entry['status'];
+    final signedInAt = entry['signed_in_at'];
+    final lastSeenAt = entry['last_seen_at'];
+    final endedAt = entry['ended_at'];
+
+    return id is String &&
+        _sessionIdPattern.hasMatch(id) &&
+        device is String &&
+        device.trim().isNotEmpty &&
+        channel is String &&
+        channel.trim().isNotEmpty &&
+        method is String &&
+        method.trim().isNotEmpty &&
+        const {'phone', 'tablet', 'computer', 'unknown'}.contains(deviceType) &&
+        (network == null ||
+            network is String &&
+                network.trim().isNotEmpty &&
+                network.length <= 64 &&
+                !RegExp(r'[\x00-\x1f]').hasMatch(network)) &&
+        entry['current'] is bool &&
+        (entry['current'] as bool) == (id == currentSessionId) &&
+        entry['active'] is bool &&
+        const {'active', 'signed_out', 'expired', 'ended'}.contains(status) &&
+        (entry['active'] as bool) == (status == 'active') &&
+        (signedInAt == null || _nullableSessionTime(signedInAt) != null) &&
+        (!signInHistory || signedInAt != null) &&
+        (lastSeenAt == null || _nullableSessionTime(lastSeenAt) != null) &&
+        (endedAt == null || _nullableSessionTime(endedAt) != null);
+  }
+
+  bool _validSessionPage(
+    Object? value, {
+    required String currentSessionId,
+    required bool signInHistory,
+  }) {
+    final page = _stringKeyedMap(value);
+    if (page == null || page['data'] is! List) return false;
+    final rows = page['data'] as List;
+    if (rows.length > 12 || page['per_page'] != 12) return false;
+    final pagination = parsePaginationMetadata(
+      page,
+      rowCount: rows.length,
+      requirePageNumbers: true,
+    );
+    final expectedLastPage = pagination == null || pagination.total == 0
+        ? 1
+        : (pagination.total + 11) ~/ 12;
+    if (pagination == null || pagination.lastPage != expectedLastPage) {
+      return false;
+    }
+    if (rows.isNotEmpty &&
+        (pagination.from != (pagination.currentPage - 1) * 12 + 1 ||
+            pagination.to != pagination.from! + rows.length - 1)) {
+      return false;
+    }
+
+    final ids = <String>{};
+    for (final value in rows) {
+      final entry = _stringKeyedMap(value);
+      if (entry == null ||
+          !_validSessionEntry(
+            entry,
+            currentSessionId: currentSessionId,
+            signInHistory: signInHistory,
+          )) {
+        return false;
+      }
+      if (!ids.add(entry['id'] as String)) return false;
+    }
+    return true;
+  }
+
+  bool _validSessionsResponse(Map<String, dynamic> data) {
+    final owner = data['sessionOwnerId'];
+    final currentSessionId = data['currentSessionId'];
+    final historyDays = data['historyDays'];
+    if (owner is! int ||
+        owner != _owner ||
+        currentSessionId is! String ||
+        !_sessionIdPattern.hasMatch(currentSessionId) ||
+        data['canConfirmByEmail'] is! bool ||
+        historyDays is! int ||
+        historyDays < 0 ||
+        !data.containsKey('lastSignIn')) {
+      return false;
+    }
+
+    final lastSignIn = data['lastSignIn'];
+    final validLastSignIn =
+        lastSignIn == null ||
+        (() {
+          final entry = _stringKeyedMap(lastSignIn);
+          return entry != null &&
+              _validSessionEntry(
+                entry,
+                currentSessionId: currentSessionId,
+                signInHistory: true,
+              );
+        })();
+    return validLastSignIn &&
+        _validSessionPage(
+          data['sessions'],
+          currentSessionId: currentSessionId,
+          signInHistory: false,
+        ) &&
+        _validSessionPage(
+          data['signIns'],
+          currentSessionId: currentSessionId,
+          signInHistory: true,
+        );
   }
 
   @override
@@ -114,35 +255,18 @@ class _SessionsSectionState extends State<SessionsSection>
           status: 401,
         );
       }
-      bool validList(dynamic value) {
-        final list = mapOf(value);
-        return list['data'] is List &&
-            (list['data'] as List).length <= 12 &&
-            list['current_page'] is num &&
-            list['last_page'] is num &&
-            mapsOf(list['data']).every(
-              (entry) =>
-                  entry['id'] is String &&
-                  entry['device'] is String &&
-                  entry['current'] is bool &&
-                  entry['active'] is bool &&
-                  [
-                    'active',
-                    'signed_out',
-                    'expired',
-                    'ended',
-                  ].contains(entry['status']),
-            );
-      }
-
       if (data['sessionOwnerId'] is! int ||
           data['sessionOwnerId'] != _owner ||
-          !validList(data['sessions']) ||
-          !validList(data['signIns']) ||
-          data['currentSessionId'] is! String) {
+          data['currentSessionId'] is! String ||
+          !_sessionIdPattern.hasMatch(data['currentSessionId'] as String)) {
+        throw const BackendException(
+          'Your buyer account changed. Reopen login activity from your profile.',
+          status: 401,
+        );
+      }
+      if (!_validSessionsResponse(data)) {
         throw const BackendException(
           'Login activity could not be confirmed for your account.',
-          status: 401,
         );
       }
       if (mounted && generation == _generation) setState(() => _data = data);
@@ -379,12 +503,16 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
   Map<String, dynamic>? _submitted;
   DateTime? _nextCode;
   Timer? _timer;
+  late final RetryCooldown _revokeCooldown;
   int _cooldown = 0;
-  bool _lost = false;
+  bool _lost = false, _submittingRevoke = false;
   @override
   void initState() {
     super.initState();
     _account = widget.account.fork();
+    _revokeCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     _lost = !_account.isCurrent;
     WidgetsBinding.instance.addObserver(this);
   }
@@ -395,6 +523,7 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
       _account.invalidate();
       _lost = true;
       _timer?.cancel();
+      _revokeCooldown.clear(notify: false);
       _submitted = null;
       _password.clear();
       _code.clear();
@@ -403,7 +532,15 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
       errors = {};
       widget.onAccessLost();
     } else if (error.status == 429) {
-      _wait(error.data, retryAt: error.retryAt);
+      if (_submittingRevoke) {
+        _revokeCooldown.start(
+          error.data,
+          retryAt: error.retryAt,
+          notify: false,
+        );
+      } else {
+        _wait(error.data, retryAt: error.retryAt);
+      }
     } else if (error.status == 422 || error.fields.isNotEmpty) {
       _submitted = null;
     }
@@ -443,6 +580,7 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
     _account.invalidate();
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _revokeCooldown.dispose();
     _password.dispose();
     _code.dispose();
     super.dispose();
@@ -480,35 +618,41 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
   }
 
   Future<void> _submit() async {
-    await perform(() async {
-      _submitted ??= jsonDecode(
-        jsonEncode({
-          'request_token': _intent,
-          'confirmation_method': _method,
-          'current_password': _method == 'password' ? _password.text : null,
-          'code': _method == 'email' ? _code.text : null,
-        }),
-      ) as Map<String, dynamic>;
-      final data = await widget.repository.json(
-        widget.session == null
-            ? '/account/security/sessions/revoke-others'
-            : '/account/security/sessions/${Uri.encodeComponent(widget.session!['id'])}/revoke',
-        _submitted!,
-      );
-      _account.check();
-      if (data['reference'] is! String ||
-          !RegExp(r'^[a-f0-9-]{36}$').hasMatch(data['reference']) ||
-          data['affected_count'] is! int ||
-          data['affected_count'] < 0 ||
-          data['message'] is! String ||
-          (data['message'] as String).trim().isEmpty) {
-        throw const BackendException(
-          'Sign-out could not be confirmed. Refresh login activity before retrying.',
+    if (_revokeCooldown.active) return;
+    _submittingRevoke = true;
+    try {
+      await perform(() async {
+        _submitted ??= jsonDecode(
+          jsonEncode({
+            'request_token': _intent,
+            'confirmation_method': _method,
+            'current_password': _method == 'password' ? _password.text : null,
+            'code': _method == 'email' ? _code.text : null,
+          }),
+        ) as Map<String, dynamic>;
+        final data = await widget.repository.json(
+          widget.session == null
+              ? '/account/security/sessions/revoke-others'
+              : '/account/security/sessions/${Uri.encodeComponent(widget.session!['id'])}/revoke',
+          _submitted!,
         );
-      }
-      if (mounted) Navigator.pop(context, data['message']);
-      return null;
-    });
+        _account.check();
+        if (data['reference'] is! String ||
+            !_sessionIdPattern.hasMatch(data['reference'] as String) ||
+            data['affected_count'] is! int ||
+            data['affected_count'] < 0 ||
+            data['message'] is! String ||
+            (data['message'] as String).trim().isEmpty) {
+          throw const BackendException(
+            'Sign-out could not be confirmed. Refresh login activity before retrying.',
+          );
+        }
+        if (mounted) Navigator.pop(context, data['message']);
+        return null;
+      });
+    } finally {
+      _submittingRevoke = false;
+    }
     if (mounted && errors.isNotEmpty) setState(() => _submitted = null);
   }
 
@@ -615,10 +759,12 @@ class _RevokeDialogState extends ProfileFormState<_RevokeDialog>
                     error: true,
                   ),
                 SubmitButton(
-                  label: _submitted == null
+                  label: _revokeCooldown.active
+                      ? 'Retry sign-out in ${_revokeCooldown.remainingSeconds}s'
+                      : _submitted == null
                       ? 'Confirm sign out'
                       : 'Retry same sign-out request',
-                  onPressed: _submit,
+                  onPressed: _revokeCooldown.active ? null : _submit,
                   busy: busy,
                 ),
                 TextButton(

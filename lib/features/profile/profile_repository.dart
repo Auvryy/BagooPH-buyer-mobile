@@ -1,4 +1,5 @@
 import '../../core/buyer_repository.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/uploads.dart';
 
@@ -25,8 +26,7 @@ class ProfileRepository {
     buyer.requireNoErrors(page);
     final user = mapOf(page.props['user']);
     if (page.component != 'Buyer/Profile' ||
-        user['id'] is! num ||
-        (user['id'] as num) <= 0 ||
+        positiveResourceId(user['id']) == null ||
         page.user?['role'] != 'buyer' ||
         user['id'] != page.user?['id']) {
       throw const BackendException(

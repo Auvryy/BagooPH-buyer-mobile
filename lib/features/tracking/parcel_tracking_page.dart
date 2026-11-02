@@ -297,9 +297,13 @@ class _ParcelTrackingPageState extends State<ParcelTrackingPage> {
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: _number,
           builder: (context, value, _) => SubmitButton(
-            label: 'Track parcel',
+            label: _tracking.coolingDown
+                ? 'Try again in ${_tracking.retrySeconds}s'
+                : 'Track parcel',
             busy: _tracking.loading,
-            onPressed: value.text.trim().isEmpty ? null : _lookup,
+            onPressed: value.text.trim().isEmpty || _tracking.coolingDown
+                ? null
+                : _lookup,
           ),
         ),
       ],
@@ -344,9 +348,13 @@ class _ParcelTrackingPageState extends State<ParcelTrackingPage> {
       Align(
         alignment: Alignment.centerLeft,
         child: OutlinedButton.icon(
-          onPressed: _tracking.loading ? null : _retry,
+          onPressed: _tracking.loading || _tracking.coolingDown ? null : _retry,
           icon: const Icon(Icons.refresh),
-          label: const Text('Try again'),
+          label: Text(
+            _tracking.coolingDown
+                ? 'Try again in ${_tracking.retrySeconds}s'
+                : 'Try again',
+          ),
         ),
       ),
     ],
@@ -440,9 +448,15 @@ class _ParcelTrackingPageState extends State<ParcelTrackingPage> {
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
-              onPressed: _tracking.loading ? null : _tracking.refresh,
+              onPressed: _tracking.loading || _tracking.coolingDown
+                  ? null
+                  : _tracking.refresh,
               icon: const Icon(Icons.refresh),
-              label: const Text('Refresh tracking'),
+              label: Text(
+                _tracking.coolingDown
+                    ? 'Refresh in ${_tracking.retrySeconds}s'
+                    : 'Refresh tracking',
+              ),
             ),
           ),
           const Divider(height: 32),

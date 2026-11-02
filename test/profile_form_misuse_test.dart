@@ -163,6 +163,105 @@ void main() {
     }
   });
 
+  testWidgets('malformed wallet request history disables new requests', (
+    tester,
+  ) async {
+    (repository.page.props['wallet']
+            as Map<String, dynamic>)['credit_requests'] =
+        'not-a-list';
+    await open(tester, wallet: true);
+
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Request credits'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      find.textContaining('Credit request history could not be confirmed'),
+      findsOneWidget,
+    );
+    expect(repository.credits, isEmpty);
+  });
+
+  testWidgets('a retained wallet request callback rechecks pending requests', (
+    tester,
+  ) async {
+    await open(tester, wallet: true);
+    tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Amount (PHP)'),
+            )
+            .controller!
+            .text =
+        '25.50';
+    tester
+            .widget<TextFormField>(find.widgetWithText(TextFormField, 'Reason'))
+            .controller!
+            .text =
+        'Synthetic QA credit';
+    final submit = tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Request credits'),
+        )
+        .onPressed!;
+    (repository.page.props['wallet']
+        as Map<String, dynamic>)['credit_requests'] = [
+      {'status': 'pending'},
+    ];
+
+    submit();
+    await tester.pumpAndSettle();
+    expect(repository.credits, isEmpty);
+  });
+
+  testWidgets('wallet amount input rejects malformed typed and pasted text', (
+    tester,
+  ) async {
+    await open(tester, wallet: true);
+    final amount = find.widgetWithText(TextFormField, 'Amount (PHP)');
+    await reveal(tester, amount);
+    await tester.enterText(amount, '25.50');
+    expect(tester.widget<TextFormField>(amount).controller!.text, '25.50');
+    for (final value in ['25.50x', '1e2', 'NaN', '-25.50', '1,000']) {
+      await tester.enterText(amount, value);
+      expect(
+        tester.widget<TextFormField>(amount).controller!.text,
+        '25.50',
+        reason: value,
+      );
+    }
+  });
+
+  testWidgets('wallet credit reasons reject backend-unsafe notes', (
+    tester,
+  ) async {
+    await open(tester, wallet: true);
+    tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Amount (PHP)'),
+            )
+            .controller!
+            .text =
+        '25.50';
+    final reason = find.widgetWithText(TextFormField, 'Reason');
+    final submit = find.widgetWithText(FilledButton, 'Request credits');
+    for (final value in [
+      '<script>credit request</script>',
+      'javascript:credit()',
+      'Reason\twith tab',
+      'Hidden\u200bcharacter',
+    ]) {
+      tester.widget<TextFormField>(reason).controller!.text = value;
+      await reveal(tester, submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(repository.credits, isEmpty, reason: value);
+    }
+  });
+
   testWidgets(
     'repeated credit taps send once and uncertain retry reuses intent',
     (tester) async {

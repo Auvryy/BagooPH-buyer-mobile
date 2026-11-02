@@ -4,16 +4,59 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
-import '../products/product_model.dart';
 import 'purchase_quote.dart';
+
+bool _validBagItems(dynamic value) {
+  if (value is! List) return false;
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map) return false;
+    final id = row['id'], quantity = row['quantity'];
+    if (id is! int ||
+        id < 1 ||
+        !ids.add(id) ||
+        quantity is! int ||
+        quantity < 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int? _stockCount(Object? value) =>
+    value is int && value >= 0 && value <= 99999 ? value : null;
 
 int bagMaximumQuantity(
   Map<String, dynamic> item,
   List<Map<String, dynamic>> items,
 ) {
-  if (item['available_for_purchase'] != true) return 0;
+  if (item['available_for_purchase'] != true || !_validBagItems(items)) {
+    return 0;
+  }
   final product = mapOf(item['product']);
   final variants = mapOf(product['variants']);
+  final stock = _stockCount(product['stock']);
+  if (stock == null) return 0;
+  final rawCombinations = variants['combinations'];
+  if (rawCombinations != null) {
+    if (rawCombinations is! List) return 0;
+    final combinations = mapsOf(rawCombinations);
+    if (combinations.length != rawCombinations.length ||
+        combinations.any((row) => _stockCount(row['stock']) == null)) {
+      return 0;
+    }
+  }
+  final rawSizes = variants['sizes'];
+  if (rawSizes != null) {
+    if (rawSizes is! List) return 0;
+    final sizes = mapsOf(rawSizes);
+    if (sizes.length != rawSizes.length ||
+        sizes.any(
+          (row) => row['stock'] != null && _stockCount(row['stock']) == null,
+        )) {
+      return 0;
+    }
+  }
   final others = items.where(
     (row) =>
         row['id'] != item['id'] &&
@@ -21,8 +64,7 @@ int bagMaximumQuantity(
             (item['product_id'] ?? product['id']),
   );
   int units(Iterable<Map<String, dynamic>> rows) =>
-      rows.fold(0, (n, row) => n + (amount(row['quantity']) ?? 0).toInt());
-  final stock = (amount(product['stock']) ?? 0).toInt();
+      rows.fold(0, (count, row) => count + (row['quantity'] as int));
   var maximum = stock - units(others);
   if (mapOf(product['shop'])['vacation_mode'] == true ||
       mapsOf(variants['colors']).any(
@@ -38,7 +80,7 @@ int bagMaximumQuantity(
         .firstOrNull;
     maximum = math.min(
       maximum,
-      (amount(combination?['stock']) ?? 0).toInt() -
+      (_stockCount(combination?['stock']) ?? 0) -
           units(
             others.where(
               (row) =>
@@ -53,7 +95,7 @@ int bagMaximumQuantity(
     if (size != null) {
       maximum = math.min(
         maximum,
-        (amount(size['stock']) ?? 0).toInt() -
+        (size['stock'] == null ? stock : _stockCount(size['stock'])!) -
             units(others.where((row) => row['size'] == item['size'])),
       );
     }
@@ -134,6 +176,7 @@ class BagController extends ChangeNotifier {
     final user = page.user;
     final owner = user?['id'];
     if (page.component != 'Cart/Index' ||
+        !_validBagItems(page.props['items']) ||
         user != null &&
             (user['role'] != 'buyer' || owner is! int || owner < 1) ||
         _ownerBound && owner != _owner ||
@@ -150,9 +193,9 @@ class BagController extends ChangeNotifier {
       final fromServer = page.props['selectedBagItemIds'];
       if (selected.isEmpty) {
         if (fromServer is List) {
-          selected.addAll(fromServer.whereType<num>().map((id) => id.toInt()));
+          selected.addAll(fromServer.whereType<int>().where((id) => id > 0));
         } else if (selectable.isNotEmpty) {
-          selected.add((selectable.first['id'] as num).toInt());
+          selected.add(selectable.first['id'] as int);
         }
       }
       _initialized = true;

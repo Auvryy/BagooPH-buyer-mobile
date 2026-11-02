@@ -41,12 +41,14 @@ WebPage repayment({
         'event_type': 'record-repayment',
         'amount_cents': 9500,
         'reason': 'Earlier recorded transfer.',
+        'created_at': '2026-11-01T10:00:00Z',
       },
       {
         'id': source,
         'event_type': 'record-repayment',
         'amount_cents': 9500,
         'reason': 'Latest recorded transfer.',
+        'created_at': '2026-11-01T11:00:00Z',
       },
       if (action == 'confirm-receipt')
         {
@@ -54,6 +56,7 @@ WebPage repayment({
           'event_type': 'report-nonreceipt',
           'amount_cents': 9500,
           'reason': 'Receipt needs investigation.',
+          'created_at': '2026-11-01T12:00:00Z',
         },
     ],
   };
@@ -67,12 +70,17 @@ WebPage returnIndex() => WebPage('Returns/Index', {
   'cases': {
     'current_page': 1,
     'last_page': 1,
+    'per_page': 12,
+    'total': 1,
+    'from': 1,
+    'to': 1,
     'data': [
       {
         'id': 4,
         'reference': 'PRIVATE-RETURN-4',
         'order_number': 'TEST-11',
         'status': 'requested',
+        'created_at': '2026-11-01T00:00:00Z',
       },
     ],
   },
@@ -153,6 +161,83 @@ void main() {
   }
 
   testWidgets(
+    'a malformed latest transfer cannot be used as a repayment source',
+    (tester) async {
+      final page = repayment();
+      final item = page.props['returnCase'] as Map<String, dynamic>;
+      final money = item['money'] as Map<String, dynamic>;
+      (money['history'] as List).add({
+        'id': 999,
+        'event_type': 'record-repayment',
+        'amount_cents': 'not-money',
+        'reason': 'Malformed transfer row.',
+        'created_at': '2026-11-01T12:00:00Z',
+      });
+      session.onPage = (_) async => page;
+
+      await open(tester);
+      expect(
+        find.widgetWithText(FilledButton, 'Confirm repayment received'),
+        findsNothing,
+      );
+      expect(find.text('₱0.00'), findsNothing);
+      expect(session.submissions, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'a transfer without a valid timestamp cannot enable repayment confirmation',
+    (tester) async {
+      final page = repayment();
+      final item = page.props['returnCase'] as Map<String, dynamic>;
+      final money = item['money'] as Map<String, dynamic>;
+      (money['history'] as List).add({
+        'id': 999,
+        'event_type': 'record-repayment',
+        'amount_cents': 9500,
+        'reason': 'Transfer row with an unconfirmed timestamp.',
+        'created_at': '2026-02-30T10:00:00Z',
+      });
+      session.onPage = (_) async => page;
+
+      await open(tester);
+
+      expect(
+        find.widgetWithText(FilledButton, 'Confirm repayment received'),
+        findsNothing,
+      );
+      expect(session.submissions, isEmpty);
+    },
+  );
+
+  testWidgets('an invalid return adjustment is not presented as zero money', (
+    tester,
+  ) async {
+    final page = returnDetail();
+    final item = page.props['returnCase'] as Map<String, dynamic>;
+    item['money'] = {
+      'mode': 'cod',
+      'adjustment': {
+        'gross_cents': 10000,
+        'shop_discount_cents': 500,
+        'platform_discount_cents': 0,
+        'buyer_cents': 'not-money',
+      },
+      'actions': [],
+      'history': [],
+    };
+    session.onPage = (_) async => page;
+
+    await open(tester);
+
+    expect(find.textContaining('Buyer repayment due: ₱0.00'), findsNothing);
+    expect(
+      find.textContaining('repayment amount could not be confirmed'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
     'repeated repayment presses send one request and uncertain retries keep its intent',
     (tester) async {
       await decision(tester, 'confirm-receipt');
@@ -191,24 +276,26 @@ void main() {
       tester,
     ) async {
       session.onPage = (_) async => repayment(source: source);
-      await decision(tester, 'confirm-receipt');
-      await returnPress(
-        tester,
+      await open(tester);
+      expect(
         find.widgetWithText(FilledButton, 'Confirm repayment received'),
+        findsNothing,
       );
       expect(session.submissions, isEmpty);
     });
   }
 
   for (final version in [null, 0, -1, 1.5, '8']) {
-    testWidgets('repayment cannot submit an invalid case version: $version', (
+    testWidgets('an invalid case version hides repayment actions: $version', (
       tester,
     ) async {
       session.onPage = (_) async => repayment(version: version);
-      await decision(tester, 'confirm-receipt');
-      await returnPress(
-        tester,
+
+      await open(tester);
+
+      expect(
         find.widgetWithText(FilledButton, 'Confirm repayment received'),
+        findsNothing,
       );
       expect(session.submissions, isEmpty);
     });

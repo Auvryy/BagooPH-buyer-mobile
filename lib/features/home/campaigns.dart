@@ -33,12 +33,48 @@ class _CampaignsState extends State<Campaigns> {
     super.dispose();
   }
 
+  List<Map<String, dynamic>> _visibleBanners(
+    List<Map<String, dynamic>> banners,
+  ) => banners.where((b) => b['image'] is String).take(5).toList();
+
+  String _bannerKey(Map<String, dynamic> banner) =>
+      '${banner['id']}-${mapOf(banner['measurement'])['revision_id']}-${banner['image']}';
+
+  @override
+  void didUpdateWidget(Campaigns oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previous = _visibleBanners(oldWidget.banners);
+    final current = _visibleBanners(widget.banners);
+    if (previous.length == current.length &&
+        Iterable<int>.generate(current.length).every(
+          (index) => _bannerKey(previous[index]) == _bannerKey(current[index]),
+        )) {
+      return;
+    }
+
+    final currentKey = _index < previous.length
+        ? _bannerKey(previous[_index])
+        : null;
+    final retainedIndex = currentKey == null
+        ? -1
+        : current.indexWhere((banner) => _bannerKey(banner) == currentKey);
+    _index = current.isEmpty
+        ? 0
+        : retainedIndex >= 0
+        ? retainedIndex
+        : _index.clamp(0, current.length - 1);
+    if (current.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _controller.hasClients) {
+          _controller.jumpToPage(_index);
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final banners = widget.banners
-        .where((b) => b['image'] is String)
-        .take(5)
-        .toList();
+    final banners = _visibleBanners(widget.banners);
     if (banners.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
@@ -108,9 +144,7 @@ class _CampaignsState extends State<Campaigns> {
                     children: [
                       ExcludeSemantics(
                         child: AdvertisementExposure(
-                          key: ValueKey(
-                            '${banner['id']}-${mapOf(banner['measurement'])['revision_id']}-${banner['image']}',
-                          ),
+                          key: ValueKey(_bannerKey(banner)),
                           active: widget.active && _index == i,
                           onImpression: () => widget.onImpression?.call(banner),
                           builder: (context, ready) => RemoteImage(

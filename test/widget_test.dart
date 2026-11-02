@@ -143,6 +143,29 @@ void main() {
     },
   );
 
+  testWidgets('registration blocks backend-invalid names before preflight', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MainApp(repository: repository));
+    await press(tester, find.text('Sign Up'));
+    await tester.enterText(field('First name'), 'Ana2');
+    await tester.enterText(field('Last name'), 'Buyer');
+    await press(tester, find.widgetWithText(FilledButton, 'Continue'));
+    expect(repository.validationCalls, 0);
+    expect(
+      find.text(
+        'Use Latin letters, spaces, apostrophes, hyphens or periods. Numbers and other symbols are not allowed.',
+      ),
+      findsOneWidget,
+    );
+
+    tester.widget<TextField>(input('First name')).controller!.text =
+        List.filled(51, 'A').join();
+    await press(tester, find.widgetWithText(FilledButton, 'Continue'));
+    expect(repository.validationCalls, 0);
+    expect(find.text('Use at most 50 characters.'), findsOneWidget);
+  });
+
   testWidgets(
     'password recovery verifies email before allowing password change',
     (tester) async {

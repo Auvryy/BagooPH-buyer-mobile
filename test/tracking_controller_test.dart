@@ -89,6 +89,31 @@ void main() {
   );
 
   test(
+    'tracking 429 honors Retry-After and blocks further lookup requests',
+    () async {
+      session.onPage = (_) async => throw BackendException(
+        'Too many tracking requests. Try again shortly.',
+        status: 429,
+        data: const {'cooldown': 10},
+        retryAt: DateTime.now().toUtc().add(const Duration(seconds: 45)),
+      );
+
+      await controller.lookup('BAGOO-1');
+      expect(session.pageRequests, hasLength(1));
+      expect(controller.coolingDown, isTrue);
+      expect(controller.retrySeconds, greaterThan(30));
+
+      await controller.lookup('BAGOO-2');
+      expect(session.pageRequests, hasLength(1));
+      expect(
+        controller.problem,
+        'Wait before checking another tracking number.',
+      );
+      expect(controller.loading, isFalse);
+    },
+  );
+
+  test(
     'new searches clear old parcels and local invalid input makes no request',
     () async {
       session.onPage = (_) async => publicTrackingPage();

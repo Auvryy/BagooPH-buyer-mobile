@@ -4,12 +4,40 @@ import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_model.dart';
 import '../products/product_widgets.dart';
 import '../profile/order_detail_page.dart';
 import '../profile/profile_repository.dart';
+
+int? _paymentCents(Object? value) => value is int && value >= 0 ? value : null;
+
+List<Map<String, dynamic>>? _paymentItems(Object? value) {
+  if (value is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  for (final raw in value) {
+    if (raw is! Map || raw.keys.any((key) => key is! String)) return null;
+    final row = Map<String, dynamic>.from(raw);
+    final name = row['name'];
+    final quantity = row['quantity'];
+    final unitPrice = amount(row['unit_price']);
+    if (name is! String ||
+        name.trim().isEmpty ||
+        quantity is! int ||
+        quantity < 1 ||
+        unitPrice == null ||
+        unitPrice < 0) {
+      return null;
+    }
+    rows.add(row);
+  }
+  return rows;
+}
 
 class OrderResultPage extends StatefulWidget {
   const OrderResultPage({
@@ -65,17 +93,27 @@ class _OrderResultPageState extends State<OrderResultPage>
 
   bool _busy = false;
   bool _confirmed = false;
+  bool _cancelDialogOpen = false;
   String? _error;
   Timer? _deadline;
+  late final RetryCooldown _paymentCooldown;
   final _checkedDeadlines = <String>{};
-  bool get _canPay {
+  bool get _canCancel {
     final payment = mapOf(_page.props['payment']);
-    final expiry = DateTime.tryParse(payment['expires_at']?.toString() ?? '');
-    return _current &&
+    final expiry = strictDateTime(payment['expires_at']);
+    return positiveResourceId(payment['id']) != null &&
+        _current &&
         payment['can_pay'] == true &&
         payment['status'] == 'pending' &&
         expiry != null &&
         expiry.isAfter(widget.now());
+  }
+
+  bool get _canPay {
+    final payment = mapOf(_page.props['payment']);
+    return _canCancel &&
+        _paymentCents(payment['amount_cents']) != null &&
+        (payment['items'] == null || _paymentItems(payment['items']) != null);
   }
 
   @override
@@ -84,6 +122,9 @@ class _OrderResultPageState extends State<OrderResultPage>
     _page = widget.initial;
     _account =
         widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
+    _paymentCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    }, now: widget.now);
     WidgetsBinding.instance.addObserver(this);
     try {
       _checkOwner(_page);
@@ -91,13 +132,16 @@ class _OrderResultPageState extends State<OrderResultPage>
       _discardPrivate();
       return;
     }
+    if (_page.props['orders'] is Map && _ordersPagination(_page) == null) {
+      _error = 'Recorded order pagination could not be confirmed. Refresh and try again.';
+    }
     _scheduleDeadline();
   }
 
   void _scheduleDeadline() {
     _deadline?.cancel();
     final payment = mapOf(_page.props['payment']);
-    final expiry = DateTime.tryParse(payment['expires_at']?.toString() ?? '');
+    final expiry = strictDateTime(payment['expires_at']);
     if (expiry == null || payment['status'] != 'pending') return;
     final key = '${payment['id']}:${payment['expires_at']}';
     if (_checkedDeadlines.contains(key)) return;
@@ -129,6 +173,7 @@ class _OrderResultPageState extends State<OrderResultPage>
   void dispose() {
     _account.invalidate();
     _deadline?.cancel();
+    _paymentCooldown.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -138,6 +183,33 @@ class _OrderResultPageState extends State<OrderResultPage>
       _account.invalidate();
     }
     _account.check(page: page);
+  }
+
+  PaginationMetadata? _ordersPagination(
+    WebPage page, {
+    bool requirePageNumbers = false,
+  }) {
+    final raw = page.props['orders'];
+    final orders = mapOf(raw);
+    final data = orders['data'];
+    if (raw is! Map || data is! List) return null;
+    final rows = mapsOf(data);
+    if (rows.length != data.length) return null;
+    return parsePaginationMetadata(
+      orders,
+      rowCount: rows.length,
+      requirePageNumbers: requirePageNumbers,
+    );
+  }
+
+  void _requirePaymentId(WebPage page, int expectedId) {
+    final payment = mapOf(page.props['payment']);
+    if (page.props['payment'] is! Map ||
+        positiveResourceId(payment['id']) != expectedId) {
+      throw const BackendException(
+        'This wallet payment could not be confirmed. Refresh your orders.',
+      );
+    }
   }
 
   @override
@@ -151,12 +223,13 @@ class _OrderResultPageState extends State<OrderResultPage>
   }
 
   Future<void> _openOrder(dynamic value) async {
-    if (!_ensureAccount() || _busy || value is! num || value <= 0) return;
+    final id = positiveResourceId(value);
+    if (!_ensureAccount() || _busy || id == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => OrderDetailPage(
           repository: ProfileRepository(widget.repository),
-          orderId: value.toInt(),
+          orderId: id,
         ),
       ),
     );
@@ -165,6 +238,14 @@ class _OrderResultPageState extends State<OrderResultPage>
   Future<void> _refresh({int? number}) async {
     if (!_ensureAccount() || _busy) return;
     final payment = mapOf(_page.props['payment']);
+    final paymentId = positiveResourceId(payment['id']);
+    if (payment.isNotEmpty && paymentId == null) {
+      setState(
+        () =>
+            _error = 'This wallet payment is unavailable. Refresh your orders.',
+      );
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -173,17 +254,17 @@ class _OrderResultPageState extends State<OrderResultPage>
       final page = await widget.repository.document(
         payment.isEmpty
             ? '/buyer/orders?page=${number ?? 1}'
-            : '/wallet/payments/${payment['id']}',
+            : '/wallet/payments/$paymentId',
       );
       _checkOwner(page);
       widget.repository.requireNoErrors(page);
-      if (payment.isEmpty
-          ? page.props['orders'] is! Map
-          : page.props['payment'] is! Map) {
+      if (payment.isEmpty &&
+          _ordersPagination(page, requirePageNumbers: true) == null) {
         throw const BackendException(
-          'These order details are unavailable. Sign in again if your session expired.',
+          'Recorded order pagination could not be confirmed. Refresh and try again.',
         );
       }
+      if (payment.isNotEmpty) _requirePaymentId(page, paymentId!);
       if (mounted) {
         setState(() {
           _page = page;
@@ -207,14 +288,31 @@ class _OrderResultPageState extends State<OrderResultPage>
   }
 
   Future<void> _payment(String action) async {
-    if (!_ensureAccount() || _busy) {
+    if (!_ensureAccount() ||
+        _busy ||
+        _cancelDialogOpen ||
+        _paymentCooldown.active) {
       return;
     }
     final payment = mapOf(_page.props['payment']);
+    final paymentId = positiveResourceId(payment['id']);
+    if (paymentId == null) {
+      setState(
+        () =>
+            _error = 'This wallet payment is unavailable. Refresh your orders.',
+      );
+      return;
+    }
     if (action == 'pay' && !_canPay) {
       setState(
         () => _error =
             'This payment needs a fresh server review before it can be paid.',
+      );
+      return;
+    }
+    if (action == 'cancel' && !_canCancel) {
+      setState(
+        () => _error = 'This payment needs a fresh server review before it can be cancelled.',
       );
       return;
     }
@@ -224,6 +322,7 @@ class _OrderResultPageState extends State<OrderResultPage>
     }
     if (action == 'cancel') {
       bool decided = false;
+      bool? consent;
       void finishConfirmation(BuildContext dialogContext, bool value) {
         if (decided ||
             !dialogContext.mounted ||
@@ -234,25 +333,30 @@ class _OrderResultPageState extends State<OrderResultPage>
         Navigator.pop(dialogContext, value);
       }
 
-      final consent = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Cancel this wallet payment?'),
-          content: const Text(
-            'The order will not be paid with wallet credits.',
+      _cancelDialogOpen = true;
+      try {
+        consent = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Cancel this wallet payment?'),
+            content: const Text(
+              'The order will not be paid with wallet credits.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => finishConfirmation(context, false),
+                child: const Text('Keep payment'),
+              ),
+              FilledButton(
+                onPressed: () => finishConfirmation(context, true),
+                child: const Text('Cancel payment'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => finishConfirmation(context, false),
-              child: const Text('Keep payment'),
-            ),
-            FilledButton(
-              onPressed: () => finishConfirmation(context, true),
-              child: const Text('Cancel payment'),
-            ),
-          ],
-        ),
-      );
+        );
+      } finally {
+        _cancelDialogOpen = false;
+      }
       if (!mounted || !_ensureAccount() || consent != true) {
         return;
       }
@@ -263,7 +367,7 @@ class _OrderResultPageState extends State<OrderResultPage>
     });
     try {
       await widget.repository.session.jsonPost(
-        '/wallet/payments/${payment['id']}/$action',
+        '/wallet/payments/$paymentId/$action',
         {
           'request_token': payment['request_token'],
           'payment_confirmed': _confirmed,
@@ -271,15 +375,11 @@ class _OrderResultPageState extends State<OrderResultPage>
       );
       if (!mounted || !_ensureAccount()) return;
       final updated = await widget.repository.document(
-        '/wallet/payments/${payment['id']}',
+        '/wallet/payments/$paymentId',
       );
       _checkOwner(updated);
       widget.repository.requireNoErrors(updated);
-      if (updated.props['payment'] is! Map) {
-        throw const BackendException(
-          'Refresh this payment to check its recorded status.',
-        );
-      }
+      _requirePaymentId(updated, paymentId);
       if (mounted) {
         setState(() {
           _page = updated;
@@ -290,6 +390,9 @@ class _OrderResultPageState extends State<OrderResultPage>
     } on BackendException catch (e) {
       if (_lostAccess(e)) return;
       if (mounted) {
+        if (e.status == 429) {
+          _paymentCooldown.start(e.data, retryAt: e.retryAt, notify: false);
+        }
         setState(
           () => _error = e.fields.isEmpty
               ? e.message
@@ -313,9 +416,7 @@ class _OrderResultPageState extends State<OrderResultPage>
       final page = await widget.repository.document('/wallet/payments/$id');
       _checkOwner(page);
       widget.repository.requireNoErrors(page);
-      if (page.props['payment'] is! Map) {
-        throw const BackendException('This wallet payment is unavailable.');
-      }
+      _requirePaymentId(page, id);
       if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -358,9 +459,19 @@ class _OrderResultPageState extends State<OrderResultPage>
       );
     }
     final payment = mapOf(_page.props['payment']);
-    final orders = mapsOf(mapOf(_page.props['orders'])['data']);
+    final ordersMap = mapOf(_page.props['orders']);
+    final ordersPagination = _ordersPagination(_page);
+    final ordersAreValid = ordersMap.isEmpty || ordersPagination != null;
+    final orders = ordersAreValid
+        ? mapsOf(ordersMap['data'])
+        : const <Map<String, dynamic>>[];
     final message = mapOf(_page.props['flash'])['success'];
-    final expiry = DateTime.tryParse(payment['expires_at']?.toString() ?? '');
+    final expiry = strictDateTime(payment['expires_at']);
+    final amountCents = _paymentCents(payment['amount_cents']);
+    final balanceCents = _paymentCents(payment['balance_cents']);
+    final paymentItems = payment['items'] == null
+        ? const <Map<String, dynamic>>[]
+        : _paymentItems(payment['items']);
     final canPay = _canPay;
     return PopScope(
       canPop: !_busy,
@@ -400,7 +511,7 @@ class _OrderResultPageState extends State<OrderResultPage>
                         children: [
                           ProductHeading('Order ${payment['order_number']}'),
                           Text('Reference: ${payment['reference']}'),
-                          if (payment['order_id'] is num)
+                          if (positiveResourceId(payment['order_id']) != null)
                             TextButton(
                               onPressed: _busy
                                   ? null
@@ -409,7 +520,9 @@ class _OrderResultPageState extends State<OrderResultPage>
                             ),
                           const SizedBox(height: 16),
                           Text(
-                            pesos((amount(payment['amount_cents']) ?? 0) / 100),
+                            amountCents == null
+                                ? 'Payment amount unavailable'
+                                : pesos(amountCents / 100),
                             style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.w800,
@@ -420,7 +533,7 @@ class _OrderResultPageState extends State<OrderResultPage>
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           Text(
-                            'Available virtual credits: ${payment['balance_cents'] == null ? 'Unavailable' : pesos((amount(payment['balance_cents']) ?? 0) / 100)}',
+                            'Available virtual credits: ${balanceCents == null ? 'Unavailable' : pesos(balanceCents / 100)}',
                           ),
                           Text(
                             'Payment deadline: ${readableDateTime(payment['expires_at'])}',
@@ -432,11 +545,19 @@ class _OrderResultPageState extends State<OrderResultPage>
                             const Notice(
                               'The payment deadline has passed. Only the server can confirm its final status.',
                             ),
-                          for (final line in mapsOf(payment['items']))
-                            Text(
-                              '${line['name']} × ${line['quantity']} · ${pesos(line['unit_price'])} each',
-                              style: const TextStyle(height: 1.7),
-                            ),
+                          if (payment['items'] != null && paymentItems == null)
+                            const Notice(
+                              'Order item details could not be confirmed. Refresh recorded status before continuing.',
+                              error: true,
+                            )
+                          else
+                            for (final line
+                                in paymentItems ??
+                                    const <Map<String, dynamic>>[])
+                              Text(
+                                '${line['name']} × ${line['quantity']} · ${pesos(line['unit_price'])} each',
+                                style: const TextStyle(height: 1.7),
+                              ),
                           if (payment['paid_at'] != null)
                             Text(
                               'Paid: ${readableDateTime(payment['paid_at'])}',
@@ -471,19 +592,58 @@ class _OrderResultPageState extends State<OrderResultPage>
                                   : (v) =>
                                         setState(() => _confirmed = v ?? false),
                               title: Text(
-                                'I confirm paying ${pesos((amount(payment['amount_cents']) ?? 0) / 100)} in virtual wallet credits for this order.',
+                                'I confirm paying ${pesos(amountCents! / 100)} in virtual wallet credits for this order.',
                               ),
                             ),
                             FilledButton(
-                              onPressed: _busy ? null : () => _payment('pay'),
-                              child: const Text('Confirm payment'),
+                              onPressed: _busy || _paymentCooldown.active
+                                  ? null
+                                  : () => _payment('pay'),
+                              child: Text(
+                                _paymentCooldown.active
+                                    ? 'Try again in ${_paymentCooldown.remainingSeconds}s'
+                                    : 'Confirm payment',
+                              ),
                             ),
                             TextButton(
-                              onPressed: _busy
+                              onPressed: _busy || _paymentCooldown.active
                                   ? null
                                   : () => _payment('cancel'),
-                              child: const Text('Cancel payment'),
+                              child: Text(
+                                _paymentCooldown.active
+                                    ? 'Cancel payment in ${_paymentCooldown.remainingSeconds}s'
+                                    : 'Cancel payment',
+                              ),
                             ),
+                          ] else if (amountCents == null) ...[
+                            const Notice(
+                              'Payment amount could not be confirmed. Refresh recorded status before continuing.',
+                              error: true,
+                            ),
+                            if (_canCancel)
+                              TextButton(
+                                onPressed: _busy || _paymentCooldown.active
+                                    ? null
+                                    : () => _payment('cancel'),
+                                child: Text(
+                                  _paymentCooldown.active
+                                      ? 'Cancel payment in ${_paymentCooldown.remainingSeconds}s'
+                                      : 'Cancel payment',
+                                ),
+                              ),
+                          ] else if (payment['items'] != null &&
+                              paymentItems == null) ...[
+                            if (_canCancel)
+                              TextButton(
+                                onPressed: _busy || _paymentCooldown.active
+                                    ? null
+                                    : () => _payment('cancel'),
+                                child: Text(
+                                  _paymentCooldown.active
+                                      ? 'Cancel payment in ${_paymentCooldown.remainingSeconds}s'
+                                      : 'Cancel payment',
+                                ),
+                              ),
                           ] else
                             const Text(
                               'This payment cannot accept further credits. Check its recorded status.',
@@ -505,7 +665,7 @@ class _OrderResultPageState extends State<OrderResultPage>
                               ),
                             ),
                             Text('Status: ${order['status']}'),
-                            if (order['id'] is num)
+                            if (positiveResourceId(order['id']) != null)
                               TextButton(
                                 onPressed: _busy
                                     ? null
@@ -516,14 +676,17 @@ class _OrderResultPageState extends State<OrderResultPage>
                             Text(
                               'Payment: ${order['payment_method'] ?? 'Not provided'} · ${order['payment_status'] ?? 'Not provided'}',
                             ),
-                            if (order['wallet_payment'] != null)
+                            if (positiveResourceId(
+                                  mapOf(order['wallet_payment'])['id'],
+                                ) !=
+                                null)
                               TextButton(
                                 onPressed: _busy
                                     ? null
                                     : () => _openPayment(
-                                        (mapOf(order['wallet_payment'])['id']
-                                                as num)
-                                            .toInt(),
+                                        positiveResourceId(
+                                          mapOf(order['wallet_payment'])['id'],
+                                        )!,
                                       ),
                                 child: const Text('Review wallet payment'),
                               ),
@@ -531,64 +694,30 @@ class _OrderResultPageState extends State<OrderResultPage>
                         ),
                       ),
                   ],
-                  if (orders.isEmpty && payment.isEmpty)
+                  if (orders.isEmpty && payment.isEmpty && ordersAreValid)
                     const Text('No orders recorded.'),
                   if (payment.isEmpty &&
-                      (amount(mapOf(_page.props['orders'])['last_page']) ?? 1) >
-                          1)
+                      ordersPagination != null &&
+                      ordersPagination.lastPage > 1)
                     Wrap(
                       spacing: 16,
                       children: [
                         TextButton(
-                          onPressed:
-                              _busy ||
-                                  (amount(
-                                            mapOf(
-                                              _page.props['orders'],
-                                            )['current_page'],
-                                          ) ??
-                                          1) <=
-                                      1
+                          onPressed: _busy || ordersPagination.currentPage <= 1
                               ? null
                               : () => _refresh(
-                                  number:
-                                      (amount(
-                                                mapOf(
-                                                  _page.props['orders'],
-                                                )['current_page'],
-                                              ) ??
-                                              1)
-                                          .toInt() -
-                                      1,
+                                  number: ordersPagination.currentPage - 1,
                                 ),
                           child: const Text('Previous orders'),
                         ),
                         TextButton(
                           onPressed:
                               _busy ||
-                                  (amount(
-                                            mapOf(
-                                              _page.props['orders'],
-                                            )['current_page'],
-                                          ) ??
-                                          1) >=
-                                      (amount(
-                                            mapOf(
-                                              _page.props['orders'],
-                                            )['last_page'],
-                                          ) ??
-                                          1)
+                                  ordersPagination.currentPage >=
+                                      ordersPagination.lastPage
                               ? null
                               : () => _refresh(
-                                  number:
-                                      (amount(
-                                                mapOf(
-                                                  _page.props['orders'],
-                                                )['current_page'],
-                                              ) ??
-                                              1)
-                                          .toInt() +
-                                      1,
+                                  number: ordersPagination.currentPage + 1,
                                 ),
                           child: const Text('Next orders'),
                         ),

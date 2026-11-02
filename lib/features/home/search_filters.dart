@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/numeric_input.dart';
 import '../products/product_widgets.dart';
 import 'search_controller.dart';
 
@@ -90,6 +91,25 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
       style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
     ),
   );
+  List<Map<String, dynamic>> _uniqueChoices(
+    List<Map<String, dynamic>> rows,
+    String id,
+    String name,
+  ) {
+    final values = <String>{};
+    for (final row in rows) {
+      final value = row[id], label = row[name];
+      if (value is! String ||
+          value.trim().isEmpty ||
+          label is! String ||
+          label.trim().isEmpty ||
+          !values.add(value)) {
+        return const [];
+      }
+    }
+    return rows;
+  }
+
   Widget _choice(
     String label,
     String selected,
@@ -97,24 +117,28 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
     String id,
     String name,
     ValueChanged<String> changed,
-  ) => DropdownButtonFormField<String>(
-    initialValue: rows.any((row) => row[id] == selected) ? selected : '',
-    isExpanded: true,
-    decoration: InputDecoration(labelText: label),
-    items: [
-      DropdownMenuItem(value: '', child: Text('All ${label.toLowerCase()}')),
-      for (final row in rows)
-        DropdownMenuItem(
-          value: row[id].toString(),
-          child: Text(
-            row[name].toString(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+  ) {
+    final options = _uniqueChoices(rows, id, name);
+    return DropdownButtonFormField<String>(
+      initialValue: options.any((row) => row[id] == selected) ? selected : '',
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        DropdownMenuItem(value: '', child: Text('All ${label.toLowerCase()}')),
+        for (final row in options)
+          DropdownMenuItem(
+            value: row[id] as String,
+            child: Text(
+              row[name] as String,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
-    ],
-    onChanged: (value) => setState(() => changed(value ?? '')),
-  );
+      ],
+      onChanged: (value) => setState(() => changed(value ?? '')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Form(
     key: _form,
@@ -184,6 +208,7 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
         TextFormField(
           controller: _min,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [unsignedDecimalFormatter],
           decoration: const InputDecoration(
             labelText: 'Minimum price',
             prefixText: '₱ ',
@@ -194,6 +219,7 @@ class _SearchFiltersFormState extends State<SearchFiltersForm> {
         TextFormField(
           controller: _max,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [unsignedDecimalFormatter],
           decoration: const InputDecoration(
             labelText: 'Maximum price',
             prefixText: '₱ ',

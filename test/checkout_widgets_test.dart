@@ -105,18 +105,63 @@ void main() {
       expect(repo.orderCalls, 0);
     },
   );
+  testWidgets('best voucher comparison waits after a rate limit', (
+    tester,
+  ) async {
+    final vouchers = VoucherRepository();
+    repo.session.close();
+    repo = vouchers;
+    var requests = 0;
+    vouchers.bestHandler = (_) async {
+      requests++;
+      throw BackendException(
+        'Too many attempts. Please wait before trying again.',
+        status: 429,
+        retryAt: DateTime.now().add(const Duration(seconds: 30)),
+      );
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: CheckoutPage(repository: repo, initial: checkoutPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Use best vouchers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use best vouchers'));
+    await tester.pumpAndSettle();
+
+    final retryButton = find.ancestor(
+      of: find.textContaining('Try again in'),
+      matching: find.byType(OutlinedButton),
+    );
+    expect(retryButton, findsOneWidget);
+    expect(tester.widget<OutlinedButton>(retryButton).onPressed, isNull);
+    expect(requests, 1);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('voucher comparison cannot replace a newer delivery selection', (
     tester,
   ) async {
     final vouchers = VoucherRepository();
     repo.session.close();
     repo = vouchers;
+    final initial = checkoutPage();
+    initial.props['pickupHubs'] = [
+      {
+        'id': 5,
+        'name': 'Test Bayan Hub',
+        'city_municipality': 'San Pablo City',
+        'logistics_company_id': 41,
+      },
+    ];
     final pending = Completer<Map<String, dynamic>>();
     vouchers.bestHandler = (_) => pending.future;
     await tester.pumpWidget(
       MaterialApp(
         theme: BagooTheme.light,
-        home: CheckoutPage(repository: repo, initial: checkoutPage()),
+        home: CheckoutPage(repository: repo, initial: initial),
       ),
     );
     await tester.pumpAndSettle();
@@ -150,6 +195,25 @@ void main() {
   testWidgets('summary separates product savings from shipping savings', (
     tester,
   ) async {
+    final voucher = <String, dynamic>{
+      'id': 20,
+      'revision_id': 9,
+      'code': 'SAVE',
+      'name': 'Voucher',
+      'issuer': 'platform',
+      'discount_type': 'fixed',
+      'shop_id': null,
+      'shop_name': null,
+      'product_scope': 'all',
+    };
+    final shop =
+        Map<String, dynamic>.from(
+            mapOf(checkoutPage().props['quote'])['shops'].first as Map,
+          )
+          ..['discount'] = 30.0
+          ..['product_discount'] = 20.0
+          ..['shipping_discount'] = 10.0
+          ..['total'] = 1220.0;
     repo.quoteHandler = (_) async => {
       'success': true,
       'availableVouchers': [],
@@ -158,6 +222,24 @@ void main() {
         'discount': 30,
         'shipping_discount': 10,
         'total': 1220,
+        'voucher': voucher,
+        'vouchers': [voucher],
+        'redemptions': [
+          {
+            'revision_id': 9,
+            'discount_cents': 3000,
+            'allocations': [
+              {
+                'shop_id': 2,
+                'product_discount_cents': 2000,
+                'shipping_discount_cents': 1000,
+                'seller_expense_cents': 0,
+                'platform_expense_cents': 3000,
+              },
+            ],
+          },
+        ],
+        'shops': [shop],
       },
     };
     await tester.pumpWidget(
@@ -169,8 +251,114 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('-₱20.00'), findsOneWidget);
     expect(find.text('-₱10.00'), findsOneWidget);
-    expect(find.text('-₱30.00'), findsNothing);
+    expect(find.text('-₱30.00'), findsOneWidget);
     expect(find.text('₱1,220.00'), findsWidgets);
+  });
+  testWidgets(
+    'malformed voucher metadata does not show a partial offer count',
+    (tester) async {
+      repo.quoteHandler = (_) async => {
+        'success': true,
+        'quote': checkoutPage().props['quote'],
+        'availableVouchers': [
+          {'id': 20, 'revision_id': 9, 'issuer': 'platform'},
+          'malformed voucher row',
+        ],
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: CheckoutPage(repository: repo, initial: checkoutPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('1 offers in the current quote'),
+        findsNothing,
+      );
+      expect(
+        find.text(
+          'Voucher availability could not be confirmed. Open a voucher slot to refresh it.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+  testWidgets('complete voucher metadata keeps the offer count', (
+    tester,
+  ) async {
+    repo.quoteHandler = (_) async => {
+      'success': true,
+      'quote': checkoutPage().props['quote'],
+      'availableVouchers': [
+        {
+          'id': 20,
+          'revision_id': 9,
+          'code': 'SAVE',
+          'name': 'Voucher',
+          'issuer': 'platform',
+          'discount_type': 'fixed',
+          'shop_id': null,
+          'shop_name': null,
+          'product_scope': 'all',
+          'eligible': true,
+          'unavailable_reason': null,
+          'saving': 0.0,
+        },
+      ],
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: CheckoutPage(repository: repo, initial: checkoutPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('1 offers in the current quote'),
+      findsOneWidget,
+    );
+  });
+  testWidgets('shop free-shipping metadata is not counted as an offer', (
+    tester,
+  ) async {
+    repo.quoteHandler = (_) async => {
+      'success': true,
+      'quote': checkoutPage().props['quote'],
+      'availableVouchers': [
+        {
+          'id': 20,
+          'revision_id': 9,
+          'code': 'SHIP',
+          'name': 'Shipping voucher',
+          'issuer': 'shop',
+          'discount_type': 'free_shipping',
+          'shop_id': 2,
+          'shop_name': 'Test store',
+          'product_scope': 'all',
+          'eligible': true,
+          'unavailable_reason': null,
+          'saving': 0.0,
+        },
+      ],
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: CheckoutPage(repository: repo, initial: checkoutPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('1 offers in the current quote'), findsNothing);
+    expect(
+      find.text(
+        'Voucher availability could not be confirmed. Open a voucher slot to refresh it.',
+      ),
+      findsOneWidget,
+    );
   });
   testWidgets(
     'recipient validation survives long scrolling and width changes',

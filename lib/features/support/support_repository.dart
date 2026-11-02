@@ -18,9 +18,9 @@ class SupportAssistantRepository {
     final order = orderNumber?.trim() ?? '';
     final errors = <String, String>{
       if (question.isEmpty) 'message': 'Enter a question for Bagoo Support.',
-      if (question.length > 1000)
+      if (question.runes.length > 1000)
         'message': 'Keep your message within 1,000 characters.',
-      if (order.length > 50)
+      if (order.runes.length > 50)
         'order_number': 'Keep the order number within 50 characters.',
     };
     if (errors.isNotEmpty) {
@@ -37,16 +37,24 @@ class SupportAssistantRepository {
       );
     }
     final suggestions = result['suggested_questions'];
+    final cleanSuggestions = <String>[];
+    final seenSuggestions = <String>{};
+    if (suggestions is List) {
+      for (final value in suggestions.take(30)) {
+        if (value is! String) continue;
+        final question = value.trim();
+        if (question.isEmpty ||
+            question.runes.length > 1000 ||
+            !seenSuggestions.add(question)) {
+          continue;
+        }
+        cleanSuggestions.add(question);
+        if (cleanSuggestions.length == 3) break;
+      }
+    }
     return SupportAnswer(
       reply: reply.trim(),
-      suggestions: List.unmodifiable(
-        (suggestions is List ? suggestions : const <dynamic>[])
-            .whereType<String>()
-            .map((question) => question.trim())
-            .where((question) => question.isNotEmpty && question.length <= 1000)
-            .toSet()
-            .take(3),
-      ),
+      suggestions: List.unmodifiable(cleanSuggestions),
     );
   }
 }

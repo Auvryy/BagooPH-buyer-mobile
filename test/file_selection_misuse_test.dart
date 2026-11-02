@@ -66,6 +66,52 @@ void main() {
     expect(upload.mime, 'image/png');
     expect(upload.bytes, returnPhotoBytes());
   });
+  for (final entry
+      in <
+        ({String name, List<int> bytes, String field, String mime, bool avatar})
+      >[
+        (
+          name: 'photo.jpg',
+          bytes: [0xff, 0xd8, 0xff, 0xd9],
+          field: 'photo',
+          mime: 'image/jpeg',
+          avatar: false,
+        ),
+        (
+          name: 'photo.webp',
+          bytes: [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
+          field: 'photo',
+          mime: 'image/webp',
+          avatar: false,
+        ),
+        (
+          name: 'avatar.gif',
+          bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61],
+          field: 'avatar',
+          mime: 'image/gif',
+          avatar: true,
+        ),
+        (
+          name: 'identity.pdf',
+          bytes: [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37],
+          field: 'id_document',
+          mime: 'application/pdf',
+          avatar: false,
+        ),
+      ]) {
+    test('accepts a matching supported signature: ${entry.name}', () async {
+      final bytes = Uint8List.fromList(entry.bytes);
+      picker.next = XFile.fromData(bytes, path: '/qa/${entry.name}');
+      final upload = await pickUpload(
+        entry.field,
+        avatar: entry.avatar,
+        imageOnly: !entry.avatar && entry.mime != 'application/pdf',
+      );
+      expect(upload!.name, entry.name);
+      expect(upload.mime, entry.mime);
+      expect(upload.bytes, bytes);
+    });
+  }
   for (final length in [0, 5 * 1024 * 1024 + 1]) {
     test('rejects invalid reported file size $length', () async {
       picker.next = ChangingFile(Uint8List(1), reported: length);
@@ -89,6 +135,23 @@ void main() {
       );
     });
   }
+  test('an image extension cannot disguise corrupt image bytes', () async {
+    picker.next = XFile.fromData(
+      Uint8List.fromList('not an image'.codeUnits),
+      path: '/qa/photo.png',
+    );
+    await expectLater(
+      pickUpload('photo', imageOnly: true),
+      throwsA(isA<BackendException>()),
+    );
+  });
+  test('an image extension cannot disguise a different image format', () async {
+    picker.next = XFile.fromData(returnPhotoBytes(), path: '/qa/photo.jpg');
+    await expectLater(
+      pickUpload('photo', imageOnly: true),
+      throwsA(isA<BackendException>()),
+    );
+  });
   test('a file emptied after selection cannot become an upload', () async {
     picker.next = ChangingFile(Uint8List(0));
     await expectLater(

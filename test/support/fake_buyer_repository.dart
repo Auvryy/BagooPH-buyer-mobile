@@ -23,22 +23,52 @@ Map<String, dynamic> product(int id) => {
 WebPage homePage({
   bool signedIn = false,
   int page = 1,
-  int lastPage = 1,
+  int? lastPage,
+  int? total,
   List<Map<String, dynamic>>? products,
-}) => WebPage('Buyer/Home', {
-  'auth': {'user': signedIn ? buyer : null},
-  'errors': {},
-  'categories': [
-    {'id': 2, 'name': 'Electronics and Gadgets', 'slug': 'electronics'},
-  ],
-  'banners': [],
-  'feedProducts': {
-    'data': products ?? [product(1), product(2)],
-    'current_page': page,
-    'last_page': lastPage,
-    'total': 4,
-  },
-});
+}) {
+  const pageSize = 18;
+  final rows = products == null
+      ? <Map<String, dynamic>>[product(1), product(2)]
+      : List<Map<String, dynamic>>.of(products);
+  final totalCount = total ?? rows.length;
+  final last =
+      lastPage ??
+      (totalCount == 0 ? 1 : (totalCount + pageSize - 1) ~/ pageSize);
+  final current = page < 1
+      ? 1
+      : page > last
+      ? last
+      : page;
+  final remaining = totalCount - (current - 1) * pageSize;
+  final expectedRows = remaining <= 0
+      ? 0
+      : remaining < pageSize
+      ? remaining
+      : pageSize;
+  while (rows.length < expectedRows) {
+    rows.add(product(100000 + current * pageSize + rows.length));
+  }
+  final from = expectedRows == 0 ? null : (current - 1) * pageSize + 1;
+  final to = expectedRows == 0 ? null : from! + expectedRows - 1;
+  return WebPage('Buyer/Home', {
+    'auth': {'user': signedIn ? buyer : null},
+    'errors': {},
+    'categories': [
+      {'id': 2, 'name': 'Electronics and Gadgets', 'slug': 'electronics'},
+    ],
+    'banners': [],
+    'feedProducts': {
+      'data': rows,
+      'current_page': current,
+      'last_page': last,
+      'per_page': pageSize,
+      'total': totalCount,
+      'from': from,
+      'to': to,
+    },
+  });
+}
 
 class FakeBuyerRepository extends BuyerRepository {
   FakeBuyerRepository() : super(FakeSession());
@@ -66,9 +96,12 @@ class FakeBuyerRepository extends BuyerRepository {
   Future<WebPage> search(Map<String, String> filters, {int page = 1}) async {
     searchRequests.add({...filters, 'page': '$page'});
     final home = homePage(signedIn: signedIn, page: page);
+    final searchProducts = Map<String, dynamic>.from(
+      home.props['feedProducts'] as Map,
+    )..['per_page'] = 24;
     return WebPage('Buyer/Search', {
       ...home.props,
-      'products': home.props['feedProducts'],
+      'products': searchProducts,
       'locations': <Map<String, dynamic>>[],
       'relatedProducts': [],
       'suggestions': [],
@@ -187,6 +220,7 @@ class FakeBuyerRepository extends BuyerRepository {
   Future<WebPage> registration() async => const WebPage('Auth/Register', {
     'birthDateLimits': {'adult_maximum': '2008-10-26', 'today': '2026-10-26'},
     'policies': {
+      'required': true,
       'terms_version': '2026-10-12',
       'privacy_version': '2026-10-12',
       'terms_url': '/terms/2026-10-12',
@@ -304,6 +338,10 @@ WebPage checkoutPage() => WebPage('Checkout/Index', {
     'discount': 0.0,
     'shipping_discount': 0.0,
     'total': 1250.0,
+    'voucher': null,
+    'vouchers': <Map<String, dynamic>>[],
+    'voucher_error': null,
+    'redemptions': <Map<String, dynamic>>[],
     'shops': [
       {
         'shop_id': 2,
@@ -357,7 +395,15 @@ class FakeSession extends WebSession {
             'user': buyer,
             'canUsePortal': true,
             'addresses': [],
-            'orders': {'data': [], 'current_page': 1, 'last_page': 1},
+            'orders': {
+              'data': [],
+              'current_page': 1,
+              'last_page': 1,
+              'per_page': 12,
+              'total': 0,
+              'from': null,
+              'to': null,
+            },
             'orderCounts': {},
             'ordersCount': 0,
           });

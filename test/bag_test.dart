@@ -70,6 +70,32 @@ void main() {
       2,
     );
   });
+  for (final field in [
+    'product stock',
+    'variant stock',
+    'other Bag quantity',
+  ]) {
+    test('Bag quantity calculation rejects fractional $field', () {
+      final current = line(1);
+      final another = line(2, color: 'Blue');
+      if (field == 'product stock') {
+        current['product'] = {...mapOf(current['product']), 'stock': 5.5};
+      } else if (field == 'variant stock') {
+        final product = Map<String, dynamic>.from(current['product'] as Map);
+        final variants = Map<String, dynamic>.from(product['variants'] as Map);
+        final combinations = List<Map<String, dynamic>>.from(
+          variants['combinations'] as List,
+        );
+        combinations[0] = {...combinations[0], 'stock': 1.5};
+        variants['combinations'] = combinations;
+        current['product'] = {...product, 'variants': variants};
+      } else {
+        another['quantity'] = 1.5;
+      }
+
+      expect(bagMaximumQuantity(current, [current, another]), 0);
+    });
+  }
   test(
     'selection quotes discard stale results and require matching item IDs',
     () async {
@@ -97,6 +123,32 @@ void main() {
       repo.session.close();
     },
   );
+  test('a partial quote never leaves the Bag ready for checkout', () async {
+    final repo = BagRepository();
+    repo.bagQuoteHandler = (ids) async {
+      final response = priced(ids);
+      final quote = mapOf(response['quote']);
+      response['quote'] = {
+        ...quote,
+        'items': [...mapsOf(quote['items']), 'malformed quote row'],
+      };
+      return response;
+    };
+    final controller = BagController(repo);
+    addTearDown(() {
+      controller.dispose();
+      repo.session.close();
+    });
+
+    await controller.load();
+
+    expect(controller.quote, isNull);
+    expect(
+      controller.quoteError,
+      contains('item prices could not be confirmed'),
+    );
+    expect(controller.ready, isFalse);
+  });
   test(
     'failed removals preserve rows and selection until server confirmation',
     () async {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 
 class SaleClock extends StatefulWidget {
@@ -48,9 +49,7 @@ class _SaleClockState extends State<SaleClock> with WidgetsBindingObserver {
 
   void _resetTime() {
     _origin = DateTime.now();
-    _server =
-        DateTime.tryParse(widget.offer['server_now']?.toString() ?? '') ??
-        _origin;
+    _server = strictDateTime(widget.offer['server_now']) ?? _origin;
   }
 
   void _schedule() {
@@ -67,7 +66,7 @@ class _SaleClockState extends State<SaleClock> with WidgetsBindingObserver {
       mapOf(widget.offer['active'])['ends_at'],
       mapOf(widget.offer['upcoming'])['starts_at'],
     ].whereType<String>()) {
-      final boundary = DateTime.tryParse(value);
+      final boundary = strictDateTime(value);
       if (boundary != null && !boundary.isAfter(_now) && _seen.add(value)) {
         widget.onBoundary();
       }
@@ -89,12 +88,10 @@ class _SaleClockState extends State<SaleClock> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final active = mapOf(widget.offer['active']);
-    final end = DateTime.tryParse(
-      (active.isEmpty
-                  ? mapOf(widget.offer['upcoming'])['starts_at']
-                  : active['ends_at'])
-              ?.toString() ??
-          '',
+    final end = strictDateTime(
+      active.isEmpty
+          ? mapOf(widget.offer['upcoming'])['starts_at']
+          : active['ends_at'],
     );
     if (end == null) return const SizedBox.shrink();
     final seconds = end.difference(_now).inSeconds.clamp(0, 99999999);

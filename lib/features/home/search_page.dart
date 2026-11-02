@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_actions.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/catalogue_pages.dart';
@@ -216,14 +217,14 @@ class _SearchPageState extends State<SearchPage> {
       BuyerActions.login(context, productSlug: product['slug'].toString());
       return;
     }
-    final id = (product['id'] as num).toInt();
+    final id = product['id'] as int;
     if (_saving.contains(id)) return;
     setState(() => _saving.add(id));
     try {
       await widget.repository.saveProduct(id, !saved);
       if (!mounted) return;
-      final ids = Set<dynamic>.from(
-        _catalogue.data?.props['savedProductIds'] as List? ?? [],
+      final ids = positiveResourceIds(
+        _catalogue.data?.props['savedProductIds'],
       );
       saved ? ids.remove(id) : ids.add(id);
       setState(() => _catalogue.data?.props['savedProductIds'] = ids.toList());
@@ -238,8 +239,8 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _card(Map<String, dynamic> product) {
-    final id = (product['id'] as num).toInt();
-    final saved = (_catalogue.data?.props['savedProductIds'] as List? ?? [])
+    final id = product['id'] as int;
+    final saved = positiveResourceIds(_catalogue.data?.props['savedProductIds'])
         .contains(id);
     return ProductCard(
       product: product,

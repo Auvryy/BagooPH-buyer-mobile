@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../products/product_widgets.dart';
 
@@ -35,8 +37,30 @@ const _receipt = [
 ];
 
 List<Map<String, dynamic>> _history(Map<String, dynamic> tracking) {
+  final raw = tracking['history'];
+  if (raw == null) return [];
+  if (raw is! List) return [];
+  final rows = <Map<String, dynamic>>[];
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return [];
+    rows.add(Map<String, dynamic>.from(row));
+  }
+  if (rows.any((event) {
+    final id = event['id'];
+    final type = event['type'];
+    final location = event['location'];
+    final label = event['label'];
+    return id != null && positiveResourceId(id) == null ||
+        type is! String ||
+        type.trim().isEmpty ||
+        strictDateTime(event['created_at']) == null ||
+        location != null && location is! String ||
+        label != null && label is! String;
+  })) {
+    return [];
+  }
   final seen = <dynamic>{};
-  final history = mapsOf(tracking['history'])
+  final history = rows
       .where((event) => event['id'] == null || seen.add(event['id']))
       .toList();
   history.sort(
@@ -46,8 +70,50 @@ List<Map<String, dynamic>> _history(Map<String, dynamic> tracking) {
 }
 
 int _time(dynamic value) =>
-    DateTime.tryParse(value?.toString() ?? '')?.millisecondsSinceEpoch ??
-    8640000000000000;
+    strictDateTime(value)?.millisecondsSinceEpoch ?? 8640000000000000;
+
+List<Map<String, dynamic>>? completeBuyerOrderNotices(Object? raw) {
+  if (raw is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  final ids = <String>{};
+  final uuid = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  );
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return null;
+    final notice = Map<String, dynamic>.from(row);
+    final id = notice['id'];
+    final type = notice['type'];
+    final data = notice['data'];
+    final readAt = notice['read_at'];
+    final createdAt = notice['created_at'];
+    final checkpointId = notice['checkpoint_id'];
+    final milestone = notice['milestone'];
+    final href = notice['href'];
+    if (id is! String ||
+        !uuid.hasMatch(id) ||
+        !ids.add(id.toLowerCase()) ||
+        type is! String ||
+        type.trim().isEmpty ||
+        !notice.containsKey('read_at') ||
+        !notice.containsKey('checkpoint_id') ||
+        !notice.containsKey('milestone') ||
+        data is! Map ||
+        data.keys.any((key) => key is! String) ||
+        readAt != null && strictDateTime(readAt) == null ||
+        strictDateTime(createdAt) == null ||
+        checkpointId != null && positiveResourceId(checkpointId) == null ||
+        milestone != null &&
+            (milestone is! String || milestone.trim().isEmpty) ||
+        href != null && href is! String ||
+        data['title'] != null && data['title'] is! String ||
+        data['body'] != null && data['body'] is! String) {
+      return null;
+    }
+    rows.add(notice);
+  }
+  return rows;
+}
 
 List<Map<String, dynamic>> buyerJourneyEntries(
   Map<String, dynamic> tracking,
@@ -119,10 +185,7 @@ buyerMilestones(Map<String, dynamic> tracking, Map<String, dynamic> order) {
       items.isNotEmpty &&
       items.every((item) => item['review'] is Map);
   final recorded = [
-    DateTime.tryParse(
-              (tracking['placed_at'] ?? order['created_at'])?.toString() ?? '',
-            ) !=
-            null ||
+    strictDateTime(tracking['placed_at'] ?? order['created_at']) != null ||
         has(['placed', 'order_placed']),
     has(_packing),
     has(_shipped),
@@ -205,11 +268,13 @@ class OrderJourney extends StatelessWidget {
     required this.order,
     required this.notices,
     required this.onRead,
+    this.noticesAvailable = true,
     this.busy = false,
   });
   final Map<String, dynamic> order;
   final List<Map<String, dynamic>> notices;
   final ValueChanged<String> onRead;
+  final bool noticesAvailable;
   final bool busy;
   @override
   Widget build(BuildContext context) {
@@ -270,7 +335,11 @@ class OrderJourney extends StatelessWidget {
         ProductHeading(
           'Parcel journey and updates${unread > 0 ? ' · $unread unread' : ''}',
         ),
-        if (entries.isEmpty)
+        if (!noticesAvailable)
+          const Text(
+            'Order updates could not be confirmed. Refresh this order to check again.',
+          )
+        else if (entries.isEmpty)
           const Text('No checkpoints or order updates are recorded yet.'),
         for (final entry in entries)
           Padding(

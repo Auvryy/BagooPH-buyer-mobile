@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_actions.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../engagement/buyer_destination_router.dart';
@@ -47,7 +48,25 @@ class _NotificationsPageState extends State<NotificationsPage>
       BuyerEngagementRepository(widget.repository);
   Map<String, dynamic> get _paginator => mapOf(_page?.props['notices']);
   List<Map<String, dynamic>> get _notices => mapsOf(_paginator['data']);
-  Map<String, dynamic> get _snapshot => mapOf(_page?.props['readSnapshot']);
+  Map<String, dynamic> get _snapshot =>
+      _repository.confirmedNotificationReadSnapshot(
+        _page?.props['readSnapshot'],
+      ) ??
+      const {};
+
+  void _expireInboxAfterIdentityChange() {
+    if (!mounted) return;
+    _scopeGeneration++;
+    _generation++;
+    setState(() {
+      _page = null;
+      _number = 1;
+      _filter = 'all';
+      _reading = null;
+      _loading = false;
+      _error = 'Your account changed. Sign in again to view notifications.';
+    });
+  }
 
   @override
   void initState() {
@@ -121,8 +140,7 @@ class _NotificationsPageState extends State<NotificationsPage>
       }
       setState(() {
         _page = result;
-        _number = (mapOf(result.props['notices'])['current_page'] as num)
-            .toInt();
+        _number = mapOf(result.props['notices'])['current_page'] as int;
       });
     } on BackendException catch (e) {
       if (mounted && generation == _generation) {
@@ -143,7 +161,7 @@ class _NotificationsPageState extends State<NotificationsPage>
     try {
       final response = await _repository.notificationPreview();
       final summary = mapOf(response['summary']);
-      final count = (summary['unread'] as num).toInt();
+      final count = summary['unread'] as int;
       if (_currentInbox(scope)) widget.onSummaryChanged?.call(count);
     } on BackendException {
       // The inbox stays useful when the optional toolbar badge is unavailable.
@@ -178,6 +196,7 @@ class _NotificationsPageState extends State<NotificationsPage>
       return;
     }
     final scope = _scopeGeneration;
+    final identityEpoch = widget.repository.session.identityEpoch;
     setState(() {
       _reading = 'all';
       _error = null;
@@ -185,11 +204,19 @@ class _NotificationsPageState extends State<NotificationsPage>
     try {
       final count = await _repository.markNotificationSnapshotRead(snapshot);
       if (!_currentScope(scope)) return;
+      if (identityEpoch != widget.repository.session.identityEpoch) {
+        _expireInboxAfterIdentityChange();
+        return;
+      }
       widget.onSummaryChanged?.call(count);
       await _load(page: 1);
       await _refreshSummary(scope);
     } on BackendException catch (e) {
       if (!_currentScope(scope)) return;
+      if (identityEpoch != widget.repository.session.identityEpoch) {
+        _expireInboxAfterIdentityChange();
+        return;
+      }
       final message = e.fields['snapshot'] ?? e.message;
       await _load(page: 1);
       await _refreshSummary(scope);
@@ -329,7 +356,7 @@ class _NotificationsPageState extends State<NotificationsPage>
                         ),
                       _Paginator(
                         current: _number,
-                        last: (_paginator['last_page'] as num?)?.toInt() ?? 1,
+                        last: _paginator['last_page'] as int? ?? 1,
                         busy: _loading || _reading != null,
                         onPage: (page) => _load(page: page),
                       ),
@@ -722,7 +749,7 @@ class _Paginator extends StatelessWidget {
 }
 
 String _manilaDate(dynamic raw) {
-  final parsed = DateTime.tryParse(raw?.toString() ?? '');
+  final parsed = strictDateTime(raw);
   if (parsed == null) return 'Date unavailable';
   final date = parsed.toUtc().add(const Duration(hours: 8));
   const months = [

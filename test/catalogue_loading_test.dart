@@ -39,7 +39,10 @@ WebPage searchResult(int id) => WebPage('Buyer/Search', {
     'data': [product(id)],
     'current_page': 1,
     'last_page': 1,
+    'per_page': 24,
     'total': 1,
+    'from': 1,
+    'to': 1,
   },
 });
 
@@ -121,7 +124,7 @@ void main() {
         initial: homePage(signedIn: true),
       );
       expect(controller.products, hasLength(2));
-      expect(controller.total, 4);
+      expect(controller.total, 2);
       expect(controller.user?['id'], 7);
       expect(repo.homeRequests, isEmpty);
       controller.dispose();

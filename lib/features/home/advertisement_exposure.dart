@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/resource_ids.dart';
 import '../../core/viewport_visibility.dart';
 
 class BuyerAdvertisementSession {
@@ -9,9 +10,8 @@ class BuyerAdvertisementSession {
   final Future<void> Function(Map<String, dynamic>, String) send;
   final _attempted = <String>{};
   void record(Map<String, dynamic> measurement, String type) {
-    final revision = measurement['revision_id'];
-    if (revision is! num ||
-        revision <= 0 ||
+    final revision = positiveResourceId(measurement['revision_id']);
+    if (revision == null ||
         !['impression', 'click'].contains(type) ||
         !_attempted.add('$revision:$type')) {
       return;

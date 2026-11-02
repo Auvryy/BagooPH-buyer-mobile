@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/count_metadata.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
@@ -26,12 +27,55 @@ const buyerOrderFilters = {
   'return_refund': 'Return/Refund',
 };
 
+int? _positiveId(dynamic value) => value is int && value > 0 ? value : null;
+
+List<Map<String, dynamic>>? completePurchaseItems(Object? value) {
+  if (value is! List || value.isEmpty) return null;
+  final rows = mapsOf(value);
+  final ids = <int>{};
+  if (rows.length != value.length) return null;
+  for (final row in rows) {
+    final id = _positiveId(row['id']);
+    final quantity = row['quantity'];
+    final unitPrice = amount(row['unit_price']);
+    final subtotal = amount(row['subtotal']);
+    final rawProduct = row['product'];
+    if (id == null ||
+        !ids.add(id) ||
+        quantity is! int ||
+        quantity < 1 ||
+        unitPrice == null ||
+        unitPrice < 0 ||
+        subtotal == null ||
+        subtotal < 0 ||
+        (unitPrice * quantity * 100).round() != (subtotal * 100).round() ||
+        rawProduct != null && rawProduct is! Map ||
+        row['color'] != null && row['color'] is! String ||
+        row['size'] != null && row['size'] is! String ||
+        row['sku_snapshot'] != null && row['sku_snapshot'] is! String) {
+      return null;
+    }
+    final product = mapOf(rawProduct);
+    final name = product['name'];
+    if (name != null && (name is! String || name.trim().isEmpty)) return null;
+    if ((name is! String || name.trim().isEmpty) &&
+        (row['sku_snapshot'] is! String ||
+            (row['sku_snapshot'] as String).trim().isEmpty)) {
+      return null;
+    }
+  }
+  return rows;
+}
+
 Future<void> openWalletPayment(
   BuildContext context,
   ProfileRepository repository,
   int id, {
   BuyerAccountScope? parentAccount,
 }) async {
+  if (id < 1) {
+    throw const BackendException('This wallet payment is unavailable.');
+  }
   final account =
       parentAccount?.fork() ?? BuyerAccountScope(repository.session);
   account.check();
@@ -63,6 +107,9 @@ Future<void> buyAgain(
   String token, {
   BuyerAccountScope? parentAccount,
 }) async {
+  if (orderId < 1) {
+    throw const BackendException('This order is unavailable for your account.');
+  }
   final account =
       parentAccount?.fork() ?? BuyerAccountScope(repository.session);
   account.check();
@@ -71,13 +118,18 @@ Future<void> buyAgain(
     'request_token': token,
   });
   account.check();
-  final rows = mapsOf(mapOf(response['result'])['items']);
-  if (mapOf(response['result'])['order_id'] != orderId ||
+  final result = mapOf(response['result']);
+  final rawItems = result['items'];
+  final rows = mapsOf(rawItems);
+  final cartItemIds = <int>{};
+  if (result['order_id'] != orderId ||
+      rawItems is! List ||
+      rows.length != rawItems.length ||
       rows.isEmpty ||
-      rows.any(
-        (row) =>
-            row['cart_item_id'] is! int || (row['cart_item_id'] as int) <= 0,
-      )) {
+      rows.any((row) {
+        final id = _positiveId(row['cart_item_id']);
+        return id == null || !cartItemIds.add(id);
+      })) {
     throw const BackendException(
       'The Buy again selection was not confirmed. Check your Bag before retrying.',
     );
@@ -89,7 +141,7 @@ Future<void> buyAgain(
           repository: repository.buyer,
           account: account,
           initialSelection: rows
-              .map((row) => (row['cart_item_id'] as num).toInt())
+              .map((row) => row['cart_item_id'] as int)
               .toList(),
         ),
       ),
@@ -172,6 +224,7 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
         _confirming ||
         id is! int ||
         id < 1 ||
+        completePurchaseItems(order['items']) == null ||
         !ensureBuyerAccess()) {
       return;
     }
@@ -191,7 +244,10 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
     final current = mapsOf(mapOf(widget.page.props['orders'])['data'])
         .where((row) => row['id'] == id)
         .firstOrNull;
-    if (current?['can_confirm_receipt'] != true) return;
+    if (current?['can_confirm_receipt'] != true ||
+        completePurchaseItems(current?['items']) == null) {
+      return;
+    }
     await perform(() async {
       final result = await widget.repository.mutate(
         '/buyer/orders/$id/confirm',
@@ -267,7 +323,7 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
                       ),
                     ),
                     child: Text(
-                      '${status.value} (${counts[status.key] ?? 0})',
+                      '${status.value} (${nonNegativeCount(counts[status.key])?.toString() ?? (counts[status.key] == null ? '0' : '—')})',
                       style: TextStyle(
                         color: current == status.key
                             ? BagooTheme.strong
@@ -310,141 +366,165 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
           ),
         ),
       for (final order in mapsOf(paginator['data']))
-        Padding(
-          padding: const EdgeInsets.only(bottom: 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                mapOf(
-                      mapOf(
-                        mapsOf(order['items']).firstOrNull?['product'],
-                      )['shop'],
-                    )['name']?.toString() ??
-                    'Purchase',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Order #${order['order_number']}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  height: 1.6,
-                ),
-              ),
-              Text(
-                mapOf(order['tracking'])['status_label']?.toString() ??
-                    order['status']?.toString().replaceAll('_', ' ') ??
-                    'Status not loaded',
-                style: const TextStyle(
-                  color: BagooTheme.strong,
-                  fontWeight: FontWeight.w700,
-                  height: 1.7,
-                ),
-              ),
-              const Divider(height: 24),
-              for (final item in mapsOf(order['items']))
-                OrderItemSummary(
-                  item: item,
-                  session: widget.repository.session,
-                  repository: widget.repository.buyer,
-                ),
-              if (order['delivery'] != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    'Tracking: ${mapOf(order['delivery'])['tracking_number'] ?? 'Not recorded'}\n${mapOf(order['tracking'])['stage_label'] ?? ''}\nHolder: ${mapOf(order['tracking'])['custodian'] ?? 'Not recorded'}',
-                    style: const TextStyle(fontSize: 12, height: 1.7),
-                  ),
-                ),
-              Text(
-                'Order total: ${pesos(order['total_amount'])}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  height: 1.7,
-                ),
-              ),
-              Text(
-                'Payment: ${order['payment_method'] ?? 'Not recorded'} · ${order['payment_status'] ?? 'Not recorded'}',
-                style: const TextStyle(fontSize: 12, height: 1.7),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+        Builder(
+          builder: (context) {
+            final orderItems = completePurchaseItems(order['items']);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: busy || widget.loading
-                        ? null
-                        : () => perform(() async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => OrderDetailPage(
-                                  repository: widget.repository,
-                                  orderId: (order['id'] as num).toInt(),
-                                ),
-                              ),
-                            );
-                            await widget.reload();
-                            return null;
-                          }, validate: false),
-                    icon: const Icon(Icons.local_shipping_outlined),
-                    label: const Text('Track Parcel'),
+                  Text(
+                    mapOf(
+                          mapOf(orderItems?.firstOrNull?['product'])['shop'],
+                        )['name']?.toString() ??
+                        'Purchase',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                  if (order['wallet_payment'] is Map)
-                    TextButton(
-                      onPressed: busy || widget.loading
-                          ? null
-                          : () => perform(() async {
-                              await openWalletPayment(
-                                context,
-                                widget.repository,
-                                (mapOf(order['wallet_payment'])['id'] as num)
-                                    .toInt(),
-                                parentAccount: accountScope,
-                              );
-                              await widget.reload();
-                              return null;
-                            }, validate: false),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Order #${order['order_number']}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      height: 1.6,
+                    ),
+                  ),
+                  Text(
+                    mapOf(order['tracking'])['status_label']?.toString() ??
+                        order['status']?.toString().replaceAll('_', ' ') ??
+                        'Status not loaded',
+                    style: const TextStyle(
+                      color: BagooTheme.strong,
+                      fontWeight: FontWeight.w700,
+                      height: 1.7,
+                    ),
+                  ),
+                  const Divider(height: 24),
+                  if (orderItems == null)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
                       child: Text(
-                        order['payment_status'] == 'pending'
-                            ? 'Pay with wallet'
-                            : 'Wallet payment',
+                        'Order item details are incomplete. Refresh this order before confirming receipt.',
+                        style: TextStyle(color: BagooTheme.muted, height: 1.6),
                       ),
                     ),
-                  if (order['can_confirm_receipt'] == true)
-                    FilledButton(
-                      onPressed: busy || widget.loading || _confirming
-                          ? null
-                          : () => _confirmReceipt(order),
-                      child: const Text('Confirm Received'),
+                  for (final item
+                      in orderItems ?? const <Map<String, dynamic>>[])
+                    OrderItemSummary(
+                      item: item,
+                      session: widget.repository.session,
+                      repository: widget.repository.buyer,
                     ),
-                  if (order['can_buy_again'] == true &&
-                      order['buy_again_token'] is String)
-                    TextButton(
-                      onPressed: busy || widget.loading
-                          ? null
-                          : () => perform(() async {
-                              await buyAgain(
-                                context,
-                                widget.repository,
-                                (order['id'] as num).toInt(),
-                                order['buy_again_token'],
-                                parentAccount: accountScope,
-                              );
-                              return null;
-                            }, validate: false),
-                      child: const Text('Buy again'),
+                  if (order['delivery'] != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        'Tracking: ${mapOf(order['delivery'])['tracking_number'] ?? 'Not recorded'}\n${mapOf(order['tracking'])['stage_label'] ?? ''}\nHolder: ${mapOf(order['tracking'])['custodian'] ?? 'Not recorded'}',
+                        style: const TextStyle(fontSize: 12, height: 1.7),
+                      ),
                     ),
+                  Text(
+                    'Order total: ${pesos(order['total_amount'])}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      height: 1.7,
+                    ),
+                  ),
+                  Text(
+                    'Payment: ${order['payment_method'] ?? 'Not recorded'} · ${order['payment_status'] ?? 'Not recorded'}',
+                    style: const TextStyle(fontSize: 12, height: 1.7),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed:
+                            busy ||
+                                widget.loading ||
+                                _positiveId(order['id']) == null
+                            ? null
+                            : () => perform(() async {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => OrderDetailPage(
+                                      repository: widget.repository,
+                                      orderId: _positiveId(order['id'])!,
+                                    ),
+                                  ),
+                                );
+                                await widget.reload();
+                                return null;
+                              }, validate: false),
+                        icon: const Icon(Icons.local_shipping_outlined),
+                        label: const Text('Track Parcel'),
+                      ),
+                      if (order['wallet_payment'] is Map)
+                        TextButton(
+                          onPressed:
+                              busy ||
+                                  widget.loading ||
+                                  _positiveId(
+                                        mapOf(order['wallet_payment'])['id'],
+                                      ) ==
+                                      null
+                              ? null
+                              : () => perform(() async {
+                                  await openWalletPayment(
+                                    context,
+                                    widget.repository,
+                                    _positiveId(
+                                      mapOf(order['wallet_payment'])['id'],
+                                    )!,
+                                    parentAccount: accountScope,
+                                  );
+                                  await widget.reload();
+                                  return null;
+                                }, validate: false),
+                          child: Text(
+                            order['payment_status'] == 'pending'
+                                ? 'Pay with wallet'
+                                : 'Wallet payment',
+                          ),
+                        ),
+                      if (order['can_confirm_receipt'] == true &&
+                          orderItems != null)
+                        FilledButton(
+                          onPressed: busy || widget.loading || _confirming
+                              ? null
+                              : () => _confirmReceipt(order),
+                          child: const Text('Confirm Received'),
+                        ),
+                      if (order['can_buy_again'] == true &&
+                          order['buy_again_token'] is String &&
+                          _positiveId(order['id']) != null)
+                        TextButton(
+                          onPressed: busy || widget.loading
+                              ? null
+                              : () => perform(() async {
+                                  await buyAgain(
+                                    context,
+                                    widget.repository,
+                                    _positiveId(order['id'])!,
+                                    order['buy_again_token'],
+                                    parentAccount: accountScope,
+                                  );
+                                  return null;
+                                }, validate: false),
+                          child: const Text('Buy again'),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 32),
                 ],
               ),
-              const Divider(height: 32),
-            ],
-          ),
+            );
+          },
         ),
       ProfilePagination(paginator, (number) {
         if (!_confirming && ensureBuyerAccess()) {

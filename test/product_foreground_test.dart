@@ -50,6 +50,20 @@ class DelayedReminderRepository extends FakeBuyerRepository {
       pendingReminder.future;
 }
 
+class RateLimitedReminderRepository extends FakeBuyerRepository {
+  int reminderCalls = 0;
+
+  @override
+  Future<WebPage> reminder(String slug, int id, bool subscribed) async {
+    reminderCalls++;
+    throw BackendException(
+      'Too many attempts. Please wait before trying again.',
+      status: 429,
+      retryAt: DateTime.now().add(const Duration(seconds: 30)),
+    );
+  }
+}
+
 WebPage salePage({String name = 'Sale product'}) => productPage(
   signedIn: true,
   override: {
@@ -264,6 +278,40 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('sale reminder honors the server rate-limit deadline', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 1000);
+    addTearDown(tester.view.reset);
+    final repo = RateLimitedReminderRepository()
+      ..signedIn = true
+      ..productResponse = reminderPage(signedIn: true);
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Remind me'));
+    await tester.tap(find.text('Remind me'));
+    await tester.pumpAndSettle();
+
+    final retryButtonFinder = find.ancestor(
+      of: find.textContaining('Try again in'),
+      matching: find.byType(TextButton),
+    );
+    expect(retryButtonFinder, findsOneWidget);
+    final retryButton = tester.widget<TextButton>(retryButtonFinder);
+    expect(retryButton.onPressed, isNull);
+    expect(repo.reminderCalls, 1);
+    expect(find.textContaining('Too many attempts'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('countdown boundaries wait for their visible route', (
     tester,

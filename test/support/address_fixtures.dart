@@ -13,8 +13,8 @@ Map<String, dynamic> deliveryAddress({int id = 2, bool isDefault = false}) => {
   'barangay': 'San Rafael',
   'postal_code': '4000',
   'landmark': 'Near test school',
-  'latitude': '14.0689',
-  'longitude': '121.3250',
+  'latitude': 14.0689,
+  'longitude': 121.3250,
   'type': 'Home',
   'is_default': isDefault,
 };

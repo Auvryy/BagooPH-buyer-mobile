@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/widgets.dart';
 import '../checkout/location_picker.dart';
 import 'auth_shell.dart';
@@ -72,7 +73,7 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
     if (widget.disabled) return;
     final maximum = widget.contract.adultMaximum;
     if (maximum.isBefore(DateTime(1900))) return;
-    final chosen = DateTime.tryParse(_fields['birthday']!.text);
+    final chosen = strictDateOnly(_fields['birthday']!.text);
     final initial =
         chosen != null &&
             !chosen.isBefore(DateTime(1900)) &&
@@ -132,6 +133,7 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
     String? Function(String?)? validator,
     TextInputType? keyboard,
     Iterable<String>? autofill,
+    int? maxLength,
   }) => AuthField(
     key: ValueKey('google-$key'),
     label: label,
@@ -140,6 +142,7 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
     validator: validator,
     keyboardType: keyboard,
     autofillHints: autofill,
+    maxLength: maxLength,
     error: widget.errors[key],
     onChanged: (_) => widget.onEdit(key),
   );
@@ -168,21 +171,22 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
         _field(
           'first_name',
           'First name',
+          maxLength: 50,
           autofill: const [AutofillHints.givenName],
-          validator: (v) =>
-              (v?.trim().length ?? 0) < 2 || (v?.trim().length ?? 0) > 50
-              ? 'Use 2–50 characters for your first name.'
-              : null,
+          validator: (v) => registrationNameValidator(v, label: 'first name'),
         ),
-        _field('middle_initial', 'Middle initial (optional)'),
+        _field(
+          'middle_initial',
+          'Middle initial (optional)',
+          maxLength: 3,
+          validator: registrationMiddleInitialValidator,
+        ),
         _field(
           'last_name',
           'Last name',
+          maxLength: 50,
           autofill: const [AutofillHints.familyName],
-          validator: (v) =>
-              (v?.trim().length ?? 0) < 2 || (v?.trim().length ?? 0) > 50
-              ? 'Use 2–50 characters for your last name.'
-              : null,
+          validator: (v) => registrationNameValidator(v, label: 'last name'),
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 18),
@@ -227,6 +231,7 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
           'Mobile number (optional)',
           keyboard: TextInputType.phone,
           autofill: const [AutofillHints.telephoneNumber],
+          maxLength: 24,
           validator: (v) =>
               (v?.length ?? 0) > 24 ? 'Use at most 24 characters.' : null,
         ),
@@ -283,15 +288,14 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
           _field(
             'address',
             'Street / house / unit',
-            validator: (v) =>
-                (v?.trim().length ?? 0) < 5 || (v?.trim().length ?? 0) > 500
-                ? 'Enter a complete street address (5–500 characters).'
-                : null,
+            maxLength: 500,
+            validator: registrationAddressValidator,
           ),
           _field(
             'postal_code',
             'Postal code',
             keyboard: TextInputType.number,
+            maxLength: 4,
             validator: (v) => RegExp(r'^[0-9]{4}$').hasMatch(v?.trim() ?? '')
                 ? null
                 : 'Enter a four-digit postal code.',

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/buyer_repository.dart';
@@ -39,6 +40,26 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
   await tester.pump();
 }
 
+class _StopsAfterThreeQuestions extends ListBase<Object?> {
+  @override
+  int get length => 4;
+
+  @override
+  set length(int value) => throw UnsupportedError('Read-only test list.');
+
+  @override
+  Object? operator [](int index) => switch (index) {
+    0 => 'First question?',
+    1 => 'Second question?',
+    2 => 'Third question?',
+    _ => throw StateError('The parser read past its three-question limit.'),
+  };
+
+  @override
+  void operator []=(int index, Object? value) =>
+      throw UnsupportedError('Read-only test list.');
+}
+
 Widget _app(
   BuyerRepository repository, {
   int owner = 7,
@@ -72,6 +93,35 @@ void main() {
     repository = BuyerRepository(session);
   });
   tearDown(() => session.close());
+
+  testWidgets('fractional buyer ID cannot open support chat as another user', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: SupportAssistantPage(
+          repository: repository,
+          user: {...buyer, 'id': 7.5},
+          available: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final supportChat = tester.widget<IconButton>(
+      find
+          .ancestor(
+            of: find.byIcon(Icons.support_agent_outlined),
+            matching: find.byType(IconButton),
+          )
+          .first,
+    );
+    expect(supportChat.onPressed, isNull);
+    expect(session.getRequests, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   test(
     'uses the existing support contract and sanitizes suggested questions',
@@ -135,6 +185,34 @@ void main() {
     );
   });
 
+  test('counts supplementary Unicode as server characters', () async {
+    final message = List.filled(600, '🧡').join();
+    session.onPost = (_) async => {
+      'reply': 'Received.',
+      'suggested_questions': [message],
+    };
+
+    final answer = await SupportAssistantRepository(repository).ask(message);
+
+    expect(session.posts.single.values['message'], message);
+    expect(answer.suggestions, [message]);
+  });
+
+  test('stops parsing suggestions after three usable questions', () async {
+    session.onPost = (_) async => {
+      'reply': 'Received.',
+      'suggested_questions': _StopsAfterThreeQuestions(),
+    };
+
+    final answer = await SupportAssistantRepository(repository).ask('Help');
+
+    expect(answer.suggestions, [
+      'First question?',
+      'Second question?',
+      'Third question?',
+    ]);
+  });
+
   testWidgets(
     'a suggested question stays editable and survives a failed send',
     (tester) async {
@@ -179,6 +257,42 @@ void main() {
       expect(find.text('Try again'), findsNothing);
     },
   );
+
+  testWidgets('a rate-limited support request keeps its draft and waits', (
+    tester,
+  ) async {
+    session.onPost = (_) async => throw BackendException(
+      'Too many attempts. Please wait before trying again.',
+      status: 429,
+      retryAt: DateTime.now().add(const Duration(seconds: 30)),
+    );
+    await tester.pumpWidget(_app(repository));
+    await tester.enterText(_input('Message'), 'Please check my order.');
+    await _tap(tester, find.byTooltip('Send message'));
+
+    final retryButtonFinder = find.ancestor(
+      of: find.textContaining('Try again in'),
+      matching: find.byType(OutlinedButton),
+    );
+    expect(retryButtonFinder, findsOneWidget);
+    final retryButton = tester.widget<OutlinedButton>(retryButtonFinder);
+    final sendButton = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Send message'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(retryButton.onPressed, isNull);
+    expect(sendButton.onPressed, isNull);
+    expect(session.posts, hasLength(1));
+    expect(
+      tester.widget<TextField>(_input('Message')).controller!.text,
+      'Please check my order.',
+    );
+    expect(find.textContaining('Too many attempts'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('prevents duplicate sends and ignores a reply after disposal', (
     tester,

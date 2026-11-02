@@ -52,39 +52,39 @@ void main() {
     },
   );
 
-  test(
-    'the buyer Home alias still requires a fetched buyer and numeric owner',
-    () async {
-      for (final user in <Map<String, Object?>?>[
-        {'id': 101, 'role': 'seller'},
-        {'id': 101, 'role': 'courier'},
-        {'id': '101', 'role': 'buyer'},
-        {'role': 'buyer'},
-        null,
-      ]) {
-        final session = ControlledWebSession();
-        addTearDown(session.close);
-        session.onGet = (_) async => {
-          'authenticated': true,
-          'redirect': '/buyer',
-        };
-        session.onPage = (_) async => WebPage('Buyer/Home', {
-          'auth': {'user': user},
-        });
-        await expectLater(
-          BuyerRepository(session).currentSession(),
-          throwsA(
-            isA<BackendException>().having(
-              (e) => e.status,
-              'invalid buyer status',
-              401,
-            ),
+  test('the buyer Home alias still requires a fetched buyer and positive integer owner', () async {
+    for (final user in <Map<String, Object?>?>[
+      {'id': 101, 'role': 'seller'},
+      {'id': 101, 'role': 'courier'},
+      {'id': '101', 'role': 'buyer'},
+      {'id': 0, 'role': 'buyer'},
+      {'id': -1, 'role': 'buyer'},
+      {'id': 7.5, 'role': 'buyer'},
+      {'role': 'buyer'},
+      null,
+    ]) {
+      final session = ControlledWebSession();
+      addTearDown(session.close);
+      session.onGet = (_) async => {
+        'authenticated': true,
+        'redirect': '/buyer',
+      };
+      session.onPage = (_) async => WebPage('Buyer/Home', {
+        'auth': {'user': user},
+      });
+      await expectLater(
+        BuyerRepository(session).currentSession(),
+        throwsA(
+          isA<BackendException>().having(
+            (e) => e.status,
+            'invalid buyer status',
+            401,
           ),
-        );
-        expect(session.pageRequests, ['http://localhost/buyer']);
-      }
-    },
-  );
+        ),
+      );
+      expect(session.pageRequests, ['http://localhost/buyer']);
+    }
+  });
 
   test(
     'unsupported and foreign session paths remain denied without fetching them',

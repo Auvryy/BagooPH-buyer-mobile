@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/count_metadata.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import 'profile_repository.dart';
@@ -212,19 +215,98 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     try {
       var page = await _repository.load(tab: _tab, query: Map.of(_query));
       if (!mounted || generation != _generation || !_ensureAccount()) return;
-      final corrected = <String, String>{};
-      for (final entry in {
-        'page': mapOf(page.props['orders']),
-        'wallet_page': mapOf(mapOf(page.props['wallet'])['transactions']),
-        'voucher_page': mapOf(mapOf(page.props['voucherCollection'])['offers']),
-      }.entries) {
-        final current = (entry.value['current_page'] as num?)?.toInt() ?? 1;
-        final last = (entry.value['last_page'] as num?)?.toInt() ?? 1;
-        if (current > last && last >= 1) corrected[entry.key] = '$last';
+
+      Map<String, String> correctedQuery(WebPage response) {
+        final corrected = <String, String>{};
+        final paginators = <String, (Object?, int)>{
+          'page': (response.props['orders'], 12),
+          'wallet_page': (mapOf(response.props['wallet'])['transactions'], 10),
+          'voucher_page': (
+            mapOf(response.props['voucherCollection'])['offers'],
+            12,
+          ),
+        };
+        for (final entry in paginators.entries) {
+          final rawPage = entry.value.$1;
+          if (rawPage == null) continue;
+          if (rawPage is! Map || rawPage.keys.any((key) => key is! String)) {
+            throw const BackendException(
+              'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          final paginator = Map<String, dynamic>.from(rawPage);
+          final rawRows = paginator['data'];
+          if (rawRows is! List ||
+              rawRows.any(
+                (row) => row is! Map || row.keys.any((key) => key is! String),
+              )) {
+            throw const BackendException(
+              'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          final rows = mapsOf(rawRows);
+          if (entry.key == 'voucher_page') {
+            requireRowsWithIds(
+              paginator['data'],
+              idKey: 'revision_id',
+              error: 'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          final requestedValue = _query[entry.key] ?? '1';
+          final requestedPage = int.tryParse(requestedValue) ?? 0;
+          if (!RegExp(r'^[1-9][0-9]*$').hasMatch(requestedValue) ||
+              !isValidBuyerPageRequest(requestedPage)) {
+            throw const BackendException(
+              'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          final basicMetadata = parsePaginationMetadata(
+            paginator,
+            rowCount: rows.length,
+            requirePageNumbers: true,
+          );
+          if (basicMetadata == null) {
+            throw const BackendException(
+              'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          if (basicMetadata.currentPage > basicMetadata.lastPage) {
+            if (!isValidBuyerPageRequest(basicMetadata.lastPage)) {
+              throw const BackendException(
+                'Profile pagination could not be confirmed. Refresh and try again.',
+              );
+            }
+            corrected[entry.key] = '${basicMetadata.lastPage}';
+            continue;
+          }
+          final metadata = parseContractPaginationMetadata(
+            paginator,
+            rowCount: rows.length,
+            requestedPage: requestedPage,
+            pageSize: entry.value.$2,
+          );
+          if (metadata == null) {
+            throw const BackendException(
+              'Profile pagination could not be confirmed. Refresh and try again.',
+            );
+          }
+          if (metadata.currentPage != requestedPage) {
+            corrected[entry.key] = '${metadata.currentPage}';
+          }
+        }
+        return corrected;
       }
+
+      final corrected = correctedQuery(page);
       if (corrected.isNotEmpty && mounted && generation == _generation) {
         _query.addAll(corrected);
         page = await _repository.load(tab: _tab, query: Map.of(_query));
+        if (!mounted || generation != _generation || !_ensureAccount()) return;
+        if (correctedQuery(page).isNotEmpty) {
+          throw const BackendException(
+            'Profile pagination could not be confirmed. Refresh and try again.',
+          );
+        }
       }
       if (!mounted ||
           generation != _generation ||
@@ -350,8 +432,8 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
 
   Future<void> _openSupport() async {
     if (_loading || _openingSupport || _signingOut || _page == null) return;
-    final userId = user['id'];
-    if (userId is! num) {
+    final userId = positiveResourceId(user['id']);
+    if (userId == null) {
       widget.onLogin();
       return;
     }
@@ -373,8 +455,8 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openEngagement(String destination) async {
-    final userId = widget.user?['id'];
-    if (userId is! num) {
+    final userId = positiveResourceId(widget.user?['id']);
+    if (userId == null) {
       widget.onLogin();
       return;
     }
@@ -383,17 +465,17 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
         builder: (_) => switch (destination) {
           'saved' => SavedProductsPage(
             repository: widget.repository,
-            ownerId: userId.toInt(),
+            ownerId: userId,
             onSearch: widget.onSearch,
           ),
           'followed' => FollowedShopsPage(
             repository: widget.repository,
-            ownerId: userId.toInt(),
+            ownerId: userId,
             onSearch: widget.onSearch,
           ),
           _ => NotificationsPage(
             repository: widget.repository,
-            ownerId: userId.toInt(),
+            ownerId: userId,
             onSearch: widget.onSearch,
             onProfileSection: (section) {
               _select(section);
@@ -544,7 +626,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
       'orders',
       'My Purchases & Orders',
       Icons.inventory_2_outlined,
-      count: _page?.props['ordersCount']?.toString(),
+      count: nonNegativeCount(_page?.props['ordersCount'])?.toString(),
     ),
     Padding(
       padding: const EdgeInsets.only(left: 16, top: 4),
@@ -599,16 +681,16 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
       'addresses',
       'Delivery Address Book',
       Icons.location_on_outlined,
-      count: _page == null
-          ? null
-          : mapsOf(_page!.props['addresses']).length.toString(),
+      count: confirmedSavedAddresses(_page?.props['addresses'])?.length
+          .toString(),
     ),
     _link('wallet', 'Bagoo Wallet', Icons.account_balance_wallet_outlined),
     _link(
       'vouchers',
       'Vouchers & Promos',
       Icons.local_offer_outlined,
-      count: _page?.props['availableVoucherCount']?.toString(),
+      count: nonNegativeCount(_page?.props['availableVoucherCount'])
+          ?.toString(),
     ),
     const Divider(height: 24),
     ListTile(
@@ -785,10 +867,13 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                mapOf(
-                                      _page?.props['orderCounts'],
-                                    )[status.key]?.toString() ??
-                                    '0',
+                                () {
+                                  final value = mapOf(
+                                    _page?.props['orderCounts'],
+                                  )[status.key];
+                                  return nonNegativeCount(value)?.toString() ??
+                                      (value == null ? '0' : '—');
+                                }(),
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
@@ -887,7 +972,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
       ),
       'sessions' => SessionsSection(
         repository: _repository,
-        owner: (user['id'] as num).toInt(),
+        owner: positiveResourceId(user['id'])!,
         active: widget.active && _section == 'sessions',
         refreshVersion: _activityRefresh,
       ),

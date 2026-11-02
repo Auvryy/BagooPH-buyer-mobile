@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/uploads.dart';
@@ -11,6 +13,7 @@ import '../../core/file_selection.dart';
 import '../checkout/location_picker.dart';
 import 'auth_shell.dart';
 import 'policy_page.dart';
+import 'registration_policy_contract.dart';
 import 'verification_page.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -66,12 +69,26 @@ class _RegisterPageState extends State<RegisterPage> {
     'barangay': '',
   };
   Timer? _emailTimer;
+  late final RetryCooldown _codeCooldown, _emailCheckCooldown;
+  late final RetryCooldown _registrationCooldown;
   int _emailGeneration = 0;
   String? _emailStatus;
+  bool _emailCheckLimited = false;
+  Map<String, String>? get _policies => checkedBuyerRegistrationPolicies(
+    _contract?['policies'],
+    widget.repository.session,
+  );
 
   @override
   void initState() {
     super.initState();
+    void changed() {
+      if (mounted) setState(() {});
+    }
+
+    _codeCooldown = RetryCooldown(changed);
+    _emailCheckCooldown = RetryCooldown(changed);
+    _registrationCooldown = RetryCooldown(changed);
     _load();
   }
 
@@ -108,22 +125,25 @@ class _RegisterPageState extends State<RegisterPage> {
             : entry.value.text.trim(),
     'sex': _sex,
     'policy_accepted': _accepted,
-    'terms_version': mapOf(_contract?['policies'])['terms_version'],
-    'privacy_version': mapOf(_contract?['policies'])['privacy_version'],
+    'terms_version': _policies?['terms_version'],
+    'privacy_version': _policies?['privacy_version'],
     if (_addAddress) ..._location,
   };
 
   void _emailChanged() {
     _emailTimer?.cancel();
     final generation = ++_emailGeneration;
+    final limited = _emailCheckCooldown.active;
     setState(() {
-      _emailStatus = null;
+      _emailStatus = limited ? 'Email availability checks are paused.' : null;
+      _emailCheckLimited = limited;
       _checkingEmail = false;
     });
     final email = _fields['email']!.text.trim().toLowerCase();
-    if (emailValidator(email) != null) return;
+    if (emailValidator(email) != null || limited) return;
     _emailTimer = Timer(const Duration(milliseconds: 500), () async {
       if (!mounted) return;
+      if (_emailCheckCooldown.active) return;
       setState(() => _checkingEmail = true);
       try {
         final available = await widget.repository.registrationEmailAvailable(
@@ -138,6 +158,10 @@ class _RegisterPageState extends State<RegisterPage> {
           });
         }
       } on BackendException catch (e) {
+        if (mounted && e.status == 429) {
+          _emailCheckLimited = true;
+          _emailCheckCooldown.start(e.data, retryAt: e.retryAt);
+        }
         if (mounted && generation == _emailGeneration) {
           setState(() => _emailStatus = e.message);
         }
@@ -193,7 +217,16 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _submit() async {
-    if (_busy || _step == 2 && _addAddress && _locationLoading) {
+    if (_busy ||
+        (_step == 2 && _verifiedToken == null && _codeCooldown.active) ||
+        _registrationCooldown.active ||
+        (_step == 2 && _addAddress && _locationLoading)) {
+      return;
+    }
+    if (_policies == null) {
+      setState(
+        () => _error = 'Account policy details could not be confirmed. Reload registration before continuing.',
+      );
       return;
     }
     setState(() {
@@ -226,13 +259,22 @@ class _RegisterPageState extends State<RegisterPage> {
           return;
         }
         if (_verifiedToken == null) {
-          final sent = await widget.repository.sendCode(
-            _fields['email']!.text,
-            'registration',
-          );
+          late final Map<String, dynamic> sent;
+          try {
+            sent = await widget.repository.sendCode(
+              _fields['email']!.text,
+              'registration',
+            );
+          } on BackendException catch (error) {
+            if (mounted && error.status == 429) {
+              _codeCooldown.start(error.data, retryAt: error.retryAt);
+            }
+            rethrow;
+          }
           if (!mounted) {
             return;
           }
+          _codeCooldown.start(sent);
           final token = await verifyEmailCode(
             context,
             widget.repository,
@@ -256,6 +298,10 @@ class _RegisterPageState extends State<RegisterPage> {
       }
     } on BackendException catch (e) {
       if (mounted) {
+        if (e.status == 429 &&
+            !(_verifiedToken == null && _codeCooldown.active)) {
+          _registrationCooldown.start(e.data, retryAt: e.retryAt);
+        }
         _showError(e);
       }
     } finally {
@@ -267,15 +313,13 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Future<void> _pickBirthday() async {
     final limits = mapOf(_contract?['birthDateLimits']);
-    final maximum = DateTime.tryParse(
-      limits['adult_maximum']?.toString() ?? '',
-    );
+    final maximum = strictDateOnly(limits['adult_maximum']);
     if (maximum == null) {
       return;
     }
     final selected = await showDatePicker(
       context: context,
-      initialDate: DateTime.tryParse(_fields['birthday']!.text) ?? maximum,
+      initialDate: strictDateOnly(_fields['birthday']!.text) ?? maximum,
       firstDate: DateTime(1900),
       lastDate: maximum,
       helpText: 'You must be at least 18 years old',
@@ -290,7 +334,7 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   void _policy(String key) {
-    final path = mapOf(_contract?['policies'])[key];
+    final path = _policies?[key];
     if (path is String) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -308,6 +352,7 @@ class _RegisterPageState extends State<RegisterPage> {
     TextInputType? keyboard,
     String? Function(String?)? validator,
     Iterable<String>? autofill,
+    int? maxLength,
   }) => AuthField(
     key: ValueKey(key),
     label: label,
@@ -317,6 +362,7 @@ class _RegisterPageState extends State<RegisterPage> {
     password: password,
     keyboardType: keyboard,
     autofillHints: autofill,
+    maxLength: maxLength,
     validator: validator,
     error: _errors[key],
     onChanged: (_) {
@@ -332,6 +378,9 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   void dispose() {
     _emailTimer?.cancel();
+    _codeCooldown.dispose();
+    _emailCheckCooldown.dispose();
+    _registrationCooldown.dispose();
     _emailGeneration++;
     _document = null;
     for (final c in _fields.values) {
@@ -355,6 +404,14 @@ class _RegisterPageState extends State<RegisterPage> {
             key: _summary,
             padding: const EdgeInsets.only(bottom: 20),
             child: Notice(_error!, error: true),
+          ),
+        if (_contract != null && _policies == null)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 20),
+            child: Notice(
+              'Account policy links could not be confirmed. Reload registration before creating an account.',
+              error: true,
+            ),
           ),
         if (_contract == null) ...[
           if (_busy)
@@ -389,23 +446,25 @@ class _RegisterPageState extends State<RegisterPage> {
                   _field(
                     'first_name',
                     'First name',
+                    maxLength: 50,
                     autofill: const [AutofillHints.givenName],
-                    validator: (v) => (v?.trim().length ?? 0) < 2
-                        ? 'Enter your first name.'
-                        : null,
+                    validator: (v) =>
+                        registrationNameValidator(v, label: 'first name'),
                   ),
                   _field(
                     'middle_initial',
                     'Middle initial (optional)',
                     hint: 'e.g. D.',
+                    maxLength: 3,
+                    validator: registrationMiddleInitialValidator,
                   ),
                   _field(
                     'last_name',
                     'Last name',
+                    maxLength: 50,
                     autofill: const [AutofillHints.familyName],
-                    validator: (v) => (v?.trim().length ?? 0) < 2
-                        ? 'Enter your last name.'
-                        : null,
+                    validator: (v) =>
+                        registrationNameValidator(v, label: 'last name'),
                   ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 18),
@@ -437,8 +496,12 @@ class _RegisterPageState extends State<RegisterPage> {
                     keyboard: TextInputType.emailAddress,
                     autofill: const [AutofillHints.email],
                     validator: emailValidator,
+                    maxLength: 255,
                   ),
-                  if (_checkingEmail || _emailStatus != null)
+                  if (_checkingEmail ||
+                      _emailStatus != null ||
+                      _emailCheckCooldown.active ||
+                      _emailCheckLimited)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 16),
                       child: Semantics(
@@ -446,6 +509,10 @@ class _RegisterPageState extends State<RegisterPage> {
                         child: Text(
                           _checkingEmail
                               ? 'Checking email availability…'
+                              : _emailCheckCooldown.active
+                              ? 'Email availability check paused. Try again in ${_emailCheckCooldown.remainingSeconds}s; registration will confirm the address.'
+                              : _emailCheckLimited
+                              ? 'Email availability could not be checked. Registration will confirm the address.'
                               : _emailStatus!,
                           style: const TextStyle(fontSize: 12, height: 1.7),
                         ),
@@ -457,6 +524,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     password: true,
                     autofill: const [AutofillHints.newPassword],
                     validator: passwordValidator,
+                    maxLength: 128,
                   ),
                   _field(
                     'password_confirmation',
@@ -467,6 +535,7 @@ class _RegisterPageState extends State<RegisterPage> {
                             (v?.isNotEmpty ?? false)
                         ? null
                         : 'Passwords do not match.',
+                    maxLength: 128,
                   ),
                 ] else ...[
                   AuthField(
@@ -488,6 +557,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     hint: '09XX XXX XXXX',
                     keyboard: TextInputType.phone,
                     autofill: const [AutofillHints.telephoneNumber],
+                    maxLength: 24,
                   ),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
@@ -512,14 +582,14 @@ class _RegisterPageState extends State<RegisterPage> {
                     _field(
                       'address',
                       'Street / house / unit',
-                      validator: (value) => (value?.trim().length ?? 0) < 5
-                          ? 'Enter a complete street address.'
-                          : null,
+                      validator: registrationAddressValidator,
+                      maxLength: 500,
                     ),
                     _field(
                       'postal_code',
                       'Postal code',
                       keyboard: TextInputType.number,
+                      maxLength: 4,
                       validator: (value) =>
                           RegExp(r'^[0-9]{4}$').hasMatch(value?.trim() ?? '')
                           ? null
@@ -560,7 +630,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     value: _accepted,
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
-                    onChanged: _busy
+                    onChanged: _busy || _policies == null
                         ? null
                         : (v) => setState(() => _accepted = v ?? false),
                     title: const Text(
@@ -572,11 +642,15 @@ class _RegisterPageState extends State<RegisterPage> {
                     spacing: 12,
                     children: [
                       TextButton(
-                        onPressed: () => _policy('terms_url'),
+                        onPressed: _policies == null
+                            ? null
+                            : () => _policy('terms_url'),
                         child: const Text('Terms of Use'),
                       ),
                       TextButton(
-                        onPressed: () => _policy('privacy_url'),
+                        onPressed: _policies == null
+                            ? null
+                            : () => _policy('privacy_url'),
                         child: const Text('Privacy Notice'),
                       ),
                     ],
@@ -584,11 +658,22 @@ class _RegisterPageState extends State<RegisterPage> {
                   const SizedBox(height: 16),
                 ],
                 SubmitButton(
-                  label: _step == 1
+                  label: _registrationCooldown.active
+                      ? 'Try again in ${_registrationCooldown.remainingSeconds}s'
+                      : _step == 1
                       ? 'Continue'
+                      : _verifiedToken == null && _codeCooldown.active
+                      ? 'Send code in ${_codeCooldown.remainingSeconds}s'
                       : 'Verify email & create account',
                   busy: _busy,
-                  onPressed: _submit,
+                  onPressed:
+                      _policies == null ||
+                          _registrationCooldown.active ||
+                          (_step == 2 &&
+                              _verifiedToken == null &&
+                              _codeCooldown.active)
+                      ? null
+                      : _submit,
                 ),
                 if (_step == 2)
                   TextButton(

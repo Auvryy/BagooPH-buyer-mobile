@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/buyer_account_scope.dart';
+import '../../core/resource_ids.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../home/product_card.dart';
@@ -130,7 +132,12 @@ void viewImage(
 }
 
 String readableDate(dynamic value) {
-  final date = DateTime.tryParse(value?.toString() ?? '');
+  final raw = value?.toString() ?? '';
+  final dateOnly = strictDateOnly(raw);
+  if (dateOnly != null) {
+    return '${dateOnly.day}/${dateOnly.month}/${dateOnly.year}';
+  }
+  final date = strictDateTime(raw);
   if (date == null) {
     return 'Date unavailable';
   }
@@ -139,10 +146,10 @@ String readableDate(dynamic value) {
 }
 
 String readableDateTime(dynamic value) {
-  final date = DateTime.tryParse(value?.toString() ?? '');
+  final date = strictDateTime(value);
   if (date == null) return 'Not provided';
   final manila = date.toUtc().add(const Duration(hours: 8));
-  return '${readableDate(value)} ${manila.hour.toString().padLeft(2, '0')}:${manila.minute.toString().padLeft(2, '0')} PHT';
+  return '${manila.day}/${manila.month}/${manila.year} ${manila.hour.toString().padLeft(2, '0')}:${manila.minute.toString().padLeft(2, '0')} PHT';
 }
 
 class OfferTile extends StatefulWidget {
@@ -169,6 +176,75 @@ class OfferTile extends StatefulWidget {
 
 typedef _BookmarkIntent = ({int generation, Object? revision, Object? saved});
 
+String? _eligibleProductSlug(WebSession session, Map<String, dynamic> product) {
+  final url = product['url'];
+  if (url is! String || url.trim().isEmpty || url != url.trim()) return null;
+  try {
+    final target = session.resolve(url);
+    if (target.hasQuery || target.hasFragment) return null;
+    final parts = target.pathSegments;
+    if (parts.length == 2 && parts.first == 'product' ||
+        parts.length == 3 && parts.first == 'buyer' && parts[1] == 'product') {
+      final slug = parts.last;
+      return slug.trim().isEmpty || slug != slug.trim() ? null : slug;
+    }
+  } on BackendException {
+    return null;
+  }
+  return null;
+}
+
+bool _eligibleProductsValid(Object? raw, WebSession session) {
+  if (raw is! List || raw.isEmpty || raw.length > 100) return false;
+  final ids = <int>{};
+  final slugs = <String>{};
+  for (final row in raw) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final product = Map<String, dynamic>.from(row);
+    final id = positiveInt32ResourceId(product['id']);
+    final name = product['name'];
+    final slug = _eligibleProductSlug(session, product);
+    if (id == null ||
+        !ids.add(id) ||
+        name is! String ||
+        name.trim().isEmpty ||
+        slug == null ||
+        !slugs.add(slug.toLowerCase())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _voucherTermsValid(Map<String, dynamic> offer, WebSession session) {
+  final type = offer['discount_type'];
+  final rawValue = offer['discount_value'];
+  final value = amount(rawValue);
+  final minimum = offer['min_spend'] == null
+      ? null
+      : amount(offer['min_spend']);
+  final cap = offer['max_discount'] == null
+      ? null
+      : amount(offer['max_discount']);
+  final productScopeValid = switch (offer['product_scope']) {
+    'all' =>
+      offer['eligible_products'] is List &&
+          (offer['eligible_products'] as List).isEmpty,
+    'selected' => _eligibleProductsValid(offer['eligible_products'], session),
+    _ => false,
+  };
+  final valueValid = switch (type) {
+    'percent' => value != null && value >= 0 && value <= 100,
+    'fixed' => value != null && value >= 0,
+    'free_shipping' => rawValue == null || value != null && value >= 0,
+    _ => false,
+  };
+  return valueValid &&
+      (offer['min_spend'] == null || minimum != null && minimum >= 0) &&
+      (offer['max_discount'] == null || cap != null && cap >= 0) &&
+      productScopeValid;
+}
+
 class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
   bool _busy = false;
   bool _accessEnded = false;
@@ -182,7 +258,7 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
 
   bool _sameId(Object? a, Object? b) =>
       a == b && a.runtimeType == b.runtimeType;
-  bool _validId(Object? value) => value is int && value > 0;
+  bool _validId(Object? value) => positiveInt32ResourceId(value) != null;
   _BookmarkIntent get _intent =>
       (generation: _generation, revision: _revision, saved: _saved);
 
@@ -222,22 +298,8 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
       widget.canSave &&
       intent.generation == _generation &&
       _sameId(intent.revision, widget.offer['revision_id']);
-  String? _eligibleSlug(Map<String, dynamic> product) {
-    try {
-      final url = product['url'];
-      if (url is! String) return null;
-      final parts = widget.repository.session.resolve(url).pathSegments;
-      if (parts.length == 2 && parts.first == 'product' ||
-          parts.length == 3 &&
-              parts.first == 'buyer' &&
-              parts[1] == 'product') {
-        return parts.last;
-      }
-    } on BackendException {
-      return null;
-    }
-    return null;
-  }
+  String? _eligibleSlug(Map<String, dynamic> product) =>
+      _eligibleProductSlug(widget.repository.session, product);
 
   @override
   void initState() {
@@ -294,6 +356,11 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
       );
       return;
     }
+    if (intent.saved == null &&
+        !_voucherTermsValid(widget.offer, widget.repository.session)) {
+      setState(() => _error = 'Offer terms could not be confirmed.');
+      return;
+    }
     if (widget.onSignIn != null) {
       if (ModalRoute.of(context)?.isCurrent != true) return;
       setState(() => _busy = true);
@@ -347,10 +414,13 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
     final validIds =
         _validId(_revision) && (_saved == null || _validId(_saved));
     final o = widget.offer;
+    final termsValid = _voucherTermsValid(o, widget.repository.session);
     final value = amount(o['discount_value']) ?? 0;
     final cap = amount(o['max_discount']);
     final effective = cap == null ? value : (value > cap ? cap : value);
-    final discount = o['discount_type'] == 'free_shipping'
+    final discount = !termsValid
+        ? 'Offer terms could not be confirmed'
+        : o['discount_type'] == 'free_shipping'
         ? effective > 0
               ? 'Shipping discount up to ${pesos(effective)}'
               : cap != null && cap > 0
@@ -388,14 +458,23 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
             ),
           ),
           Text(
-            'Minimum spend ${pesos(o['min_spend'])}',
+            o['min_spend'] == null ||
+                    amount(o['min_spend']) != null &&
+                        amount(o['min_spend'])! >= 0
+                ? 'Minimum spend ${pesos(o['min_spend'])}'
+                : 'Minimum spend could not be confirmed',
             style: const TextStyle(fontSize: 12, height: 1.6),
           ),
           if (o['max_discount'] != null)
             Text(
-              'Maximum discount ${pesos(o['max_discount'])}',
+              amount(o['max_discount']) != null &&
+                      amount(o['max_discount'])! >= 0
+                  ? 'Maximum discount ${pesos(o['max_discount'])}'
+                  : 'Maximum discount could not be confirmed',
               style: const TextStyle(fontSize: 12),
             ),
+          if (!termsValid)
+            const Notice('Offer terms could not be confirmed.', error: true),
           if (o['expires_at'] != null)
             Text(
               'Expires ${readableDate(o['expires_at'])} · Philippine time',
@@ -406,7 +485,7 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
               o['description'].toString(),
               style: const TextStyle(fontSize: 12, height: 1.6),
             ),
-          if (o['product_scope'] == 'selected') ...[
+          if (o['product_scope'] == 'selected' && termsValid) ...[
             const Text(
               'Selected products only',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
@@ -443,12 +522,30 @@ class _OfferTileState extends State<OfferTile> with WidgetsBindingObserver {
             children: [
               if (widget.onUse != null)
                 TextButton(
-                  onPressed: o['eligible'] == false ? null : widget.onUse,
+                  onPressed: !termsValid || o['eligible'] == false || !current
+                      ? null
+                      : () {
+                          if (!mounted ||
+                              !_voucherTermsValid(
+                                widget.offer,
+                                widget.repository.session,
+                              ) ||
+                              widget.offer['eligible'] == false) {
+                            return;
+                          }
+                          _current();
+                          widget.onUse?.call();
+                        },
                   child: const Text('Use voucher'),
                 ),
               if (o['revision_id'] != null)
                 TextButton(
-                  onPressed: _busy || !widget.canSave || !current || !validIds
+                  onPressed:
+                      _busy ||
+                          !widget.canSave ||
+                          !current ||
+                          !validIds ||
+                          !termsValid && _saved == null
                       ? null
                       : () => _save(intent),
                   child: Text(

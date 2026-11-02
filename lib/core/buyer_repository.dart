@@ -1,9 +1,24 @@
 import 'dart:async';
 
 import 'buyer_capabilities.dart';
+import 'resource_ids.dart';
 import 'web_session.dart';
 import 'uploads.dart';
 import 'catalogue_cache.dart';
+import 'strict_datetime.dart';
+
+bool _completeChatMessage(Map<String, dynamic> row) {
+  final attachment = row['attachment_url'];
+  final product = row['product'];
+  return positiveResourceId(row['id']) != null &&
+      positiveResourceId(row['sender_id']) != null &&
+      positiveResourceId(row['receiver_id']) != null &&
+      row['message'] is String &&
+      strictDateTime(row['created_at'], requireTimezone: true) != null &&
+      (attachment == null || attachment is String) &&
+      (product == null ||
+          product is Map && product.keys.every((key) => key is String));
+}
 
 class BuyerRepository {
   BuyerRepository(this.session, {CatalogueCache? catalogueCache})
@@ -181,7 +196,8 @@ class BuyerRepository {
     }
     final page = await document(target.toString());
     requireNoErrors(page);
-    if (page.user?['role'] != 'buyer' || page.user?['id'] is! num) {
+    if (page.user?['role'] != 'buyer' ||
+        positiveResourceId(page.user?['id']) == null) {
       throw const BackendException(
         'Your buyer session is no longer available.',
         status: 401,
@@ -369,9 +385,11 @@ class BuyerRepository {
       );
       requireNoErrors(result);
       if (result.component != 'Buyer/ProductDetail' ||
-          result.props['product'] is! Map) {
+          result.props['product'] is! Map ||
+          positiveResourceId(mapOf(result.props['product'])['id']) == null) {
         throw const BackendException('This product is not available.');
       }
+      _validateShopOffers(result);
       return result;
     });
   }
@@ -394,6 +412,9 @@ class BuyerRepository {
   }
 
   Future<bool> saveProduct(int id, bool saved) async {
+    if (id < 1) {
+      throw const BackendException('This product is unavailable.');
+    }
     final data = await session.jsonPost(
       '/buyer/saved-products/$id',
       {},
@@ -415,6 +436,11 @@ class BuyerRepository {
     bool buyNow = false,
     int previousQuantity = 0,
   }) async {
+    if (positiveResourceId(product['id']) == null ||
+        quantity < 1 ||
+        quantity > 99) {
+      throw const BackendException('This product selection is unavailable.');
+    }
     final page = await session.submit(
       '/cart',
       {
@@ -570,10 +596,23 @@ class BuyerRepository {
     if (data.component != 'Marketplace/ShopDetail') {
       throw const BackendException('This shop is not available.');
     }
+    _validateShopOffers(data);
     return data;
   }
 
+  void _validateShopOffers(WebPage page) {
+    if (!page.props.containsKey('shopOffers')) return;
+    requireRowsWithIds(
+      page.props['shopOffers'],
+      idKey: 'revision_id',
+      error: 'Shop offers could not be confirmed. Refresh and try again.',
+    );
+  }
+
   Future<WebPage> reminder(String slug, int id, bool subscribed) async {
+    if (id < 1) {
+      throw const BackendException('This sale reminder is unavailable.');
+    }
     final data = await session.submit(
       '/buyer/sale-reminders/$id',
       {},
@@ -589,10 +628,15 @@ class BuyerRepository {
 
   Future<List<Map<String, dynamic>>> messages(int receiver) async {
     final data = await session.jsonGet('/chat/messages/$receiver');
-    if (data['messages'] is! List) {
+    final rows = requireRowsWithIds(
+      data['messages'],
+      idKey: 'id',
+      error: 'Conversation unavailable.',
+    );
+    if (rows.any((row) => !_completeChatMessage(row))) {
       throw const BackendException('Conversation unavailable.');
     }
-    return mapsOf(data['messages']);
+    return rows;
   }
 
   Future<Map<String, dynamic>> sendMessage(
@@ -602,10 +646,17 @@ class BuyerRepository {
     final data = files != null && files.isNotEmpty
         ? await session.uploadJson('/chat/send', values, files)
         : await session.jsonPost('/chat/send', values);
-    if (data['success'] != true || mapOf(data['message'])['id'] is! num) {
+    final rawMessage = data['message'];
+    if (data['success'] != true ||
+        rawMessage is! Map ||
+        rawMessage.keys.any((key) => key is! String)) {
       throw const BackendException('Your message was not confirmed.');
     }
-    return mapOf(data['message']);
+    final message = Map<String, dynamic>.from(rawMessage);
+    if (!_completeChatMessage(message)) {
+      throw const BackendException('Your message was not confirmed.');
+    }
+    return message;
   }
 
   Future<WebPage> document(String path) => session.page(path);

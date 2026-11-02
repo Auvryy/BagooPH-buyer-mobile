@@ -4,6 +4,7 @@ import '../../core/buyer_repository.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../auth/policy_page.dart';
+import '../auth/registration_policy_contract.dart';
 import '../products/product_widgets.dart';
 
 class AboutBagooPage extends StatefulWidget {
@@ -76,7 +77,27 @@ class _AboutBagooPageState extends State<AboutBagooPage> {
                     );
                   }
                   if (!snapshot.hasData) return const LinearProgressIndicator();
-                  final policies = mapOf(snapshot.data!.props['policies']);
+                  final policies = checkedBuyerRegistrationPolicies(
+                    snapshot.data!.props['policies'],
+                    widget.repository.session,
+                  );
+                  if (policies == null) {
+                    return Column(
+                      children: [
+                        const Notice(
+                          'Account policy links could not be confirmed.',
+                          error: true,
+                        ),
+                        TextButton(
+                          onPressed: () => setState(
+                            () => _requirements = widget.repository
+                                .registration(),
+                          ),
+                          child: const Text('Retry policies'),
+                        ),
+                      ],
+                    );
+                  }
                   return Wrap(
                     spacing: 12,
                     runSpacing: 12,
@@ -85,18 +106,17 @@ class _AboutBagooPageState extends State<AboutBagooPage> {
                         'terms_url': 'Terms of Service',
                         'privacy_url': 'Privacy Policy',
                       }.entries)
-                        if (policies[entry.key] is String)
-                          OutlinedButton(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => PolicyPage(
-                                  repository: widget.repository,
-                                  path: policies[entry.key],
-                                ),
+                        OutlinedButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => PolicyPage(
+                                repository: widget.repository,
+                                path: policies[entry.key]!,
                               ),
                             ),
-                            child: Text(entry.value),
                           ),
+                          child: Text(entry.value),
+                        ),
                     ],
                   );
                 },

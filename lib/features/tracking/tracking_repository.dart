@@ -1,4 +1,5 @@
 import '../../core/buyer_repository.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 
 String normalizeTrackingNumber(String value) {
@@ -15,11 +16,7 @@ String normalizeTrackingNumber(String value) {
 }
 
 DateTime? _instant(Object? value) {
-  if (value is! String ||
-      !RegExp(r'(Z|[+-]\d{2}:\d{2})$', caseSensitive: false).hasMatch(value)) {
-    return null;
-  }
-  return DateTime.tryParse(value)?.toUtc();
+  return strictDateTime(value, requireTimezone: true)?.toUtc();
 }
 
 String trackingTime(DateTime? instant, {String missing = 'Not recorded'}) {
@@ -104,6 +101,13 @@ class TrackingRepository {
     'The tracking details could not be confirmed. Please try again.',
   );
 
+  Map<String, dynamic> _stringKeyedMap(Object? value) {
+    if (value is! Map || value.keys.any((key) => key is! String)) {
+      throw _unconfirmed;
+    }
+    return Map<String, dynamic>.from(value);
+  }
+
   Future<TrackingLookup> lookup(String input) async {
     final number = normalizeTrackingNumber(input);
     final path = Uri(
@@ -137,7 +141,7 @@ class TrackingRepository {
       );
     }
     if (props['parcel'] is! Map) throw _unconfirmed;
-    final parcel = mapOf(props['parcel']);
+    final parcel = _stringKeyedMap(props['parcel']);
     final status = parcel['status'];
     if (parcel['tracking_number'] != number ||
         status is! String ||
@@ -145,12 +149,11 @@ class TrackingRepository {
         parcel['checkpoints'] is! List) {
       throw _unconfirmed;
     }
-    final statusLabels = mapOf(props['statusLabels']);
-    final checkpointLabels = mapOf(props['checkpointLabels']);
+    final statusLabels = _stringKeyedMap(props['statusLabels']);
+    final checkpointLabels = _stringKeyedMap(props['checkpointLabels']);
     final milestones = <TrackingMilestone>[];
     for (final item in parcel['checkpoints'] as List) {
-      if (item is! Map) throw _unconfirmed;
-      final checkpoint = mapOf(item);
+      final checkpoint = _stringKeyedMap(item);
       if (checkpoint['checkpoint_type'] is! String ||
           checkpoint['location_name'] is! String ||
           checkpoint['created_at'] is! String) {
@@ -174,15 +177,9 @@ class TrackingRepository {
         number: number,
         status: status,
         statusLabel: _text(statusLabels[status], 'Status recorded'),
-        deliveryArea: _text(
-          parcel['delivery_address'],
-          'Delivery area protected',
-        ),
-        recipientName: _text(
-          parcel['delivery_recipient_name'],
-          'Recipient protected',
-        ),
-        recipientPhone: _text(parcel['delivery_phone'], 'Phone protected'),
+        deliveryArea: _deliveryArea(parcel['delivery_address']),
+        recipientName: _maskedName(parcel['delivery_recipient_name']),
+        recipientPhone: _maskedPhone(parcel['delivery_phone']),
         estimatedDeliveryAt: _instant(parcel['estimated_delivery_at']),
         deliveredAt: _instant(parcel['delivered_at']),
         milestones: List.unmodifiable(milestones.reversed),
@@ -192,4 +189,42 @@ class TrackingRepository {
 
   String _text(Object? value, String fallback) =>
       value is String && value.trim().isNotEmpty ? value.trim() : fallback;
+
+  String _maskedName(Object? value) {
+    if (value is! String || value.trim().isEmpty) return 'Recipient protected';
+    return value
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((part) {
+          final runes = part.runes;
+          if (runes.isEmpty) return '';
+          return '${String.fromCharCode(runes.first)}***';
+        })
+        .where((part) => part.isNotEmpty)
+        .join(' ');
+  }
+
+  String _maskedPhone(Object? value) {
+    if (value is! String) return 'Phone protected';
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 4) return 'Phone protected';
+    return '*** *** ${digits.substring(digits.length - 4)}';
+  }
+
+  String _deliveryArea(Object? value) {
+    if (value is! String) return 'Delivery area protected';
+    final parts = value
+        .split(RegExp(r'[,;\n]'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.length < 3) return 'Delivery area protected';
+    final area = parts.sublist(parts.length - 2);
+    final specificLocation = RegExp(
+      r'\d|\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|unit|block|blk\.?|house|lot|barangay|brgy\.?|purok|subdivision|phase)\b',
+      caseSensitive: false,
+    );
+    if (area.any(specificLocation.hasMatch)) return 'Delivery area protected';
+    return area.join(', ');
+  }
 }

@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/application_text_validation.dart';
+import '../../core/pagination_metadata.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
@@ -13,6 +17,249 @@ import '../products/product_widgets.dart';
 import 'profile_repository.dart';
 import 'profile_widgets.dart';
 import 'return_codes.dart';
+
+int? _positiveId(dynamic value) => value is int && value > 0 ? value : null;
+
+bool _completeReturnOrder(Object? value) {
+  if (value is! Map || value.keys.any((key) => key is! String)) return false;
+  final order = Map<String, dynamic>.from(value);
+  final orderNumber = order['order_number'];
+  return _positiveId(order['id']) != null &&
+      orderNumber is String &&
+      orderNumber.trim().isNotEmpty;
+}
+
+Map<String, String>? _returnReasonOptions(Object? value) {
+  if (value is! Map || value.isEmpty) return null;
+  final options = <String, String>{};
+  final labels = <String>{};
+  for (final entry in value.entries) {
+    final key = entry.key;
+    final rawLabel = entry.value;
+    if (key is! String ||
+        rawLabel is! String ||
+        key.trim().isEmpty ||
+        key != key.trim() ||
+        rawLabel.trim().isEmpty ||
+        !labels.add(rawLabel.trim().toLowerCase())) {
+      return null;
+    }
+    options[key] = rawLabel.trim();
+  }
+  return options.isEmpty ? null : options;
+}
+
+List<String> _allowedReturnActions(Object? value, Set<String> allowed) {
+  if (value is! List || value.any((action) => action is! String)) {
+    return const [];
+  }
+  final seen = <String>{};
+  return value
+      .whereType<String>()
+      .where((action) => allowed.contains(action) && seen.add(action))
+      .toList();
+}
+
+bool _completeReturnEvidence(Object? value, int caseId) {
+  if (value is! List) return false;
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final evidence = Map<String, dynamic>.from(row);
+    final id = _positiveId(evidence['id']);
+    final bytes = evidence['bytes'];
+    if (id == null ||
+        !ids.add(id) ||
+        evidence['url'] != '/buyer-returns/$caseId/evidence/$id' ||
+        !const {
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+        }.contains(evidence['mime']) ||
+        bytes is! int ||
+        bytes < 1 ||
+        bytes > 5242880 ||
+        !const {
+          'request',
+          'intake',
+          'seller-receive',
+        }.contains(evidence['purpose'])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _completeReturnItems(Object? value) {
+  if (value is! List) return false;
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final line = Map<String, dynamic>.from(row);
+    final id = _positiveId(line['id']);
+    final quantity = line['quantity'];
+    final purchase = line['purchase'];
+    if (id == null ||
+        !ids.add(id) ||
+        quantity is! int ||
+        quantity < 1 ||
+        quantity > 99 ||
+        purchase is! Map ||
+        purchase.keys.any((key) => key is! String) ||
+        purchase['name'] is! String ||
+        (purchase['name'] as String).trim().isEmpty ||
+        purchase['color'] != null && purchase['color'] is! String ||
+        purchase['size'] != null && purchase['size'] is! String) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _completeReturnHubs(Object? value, Object? position) {
+  if (value is! List || position is! int || position < 0) return false;
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final hub = Map<String, dynamic>.from(row);
+    final id = _positiveId(hub['id']);
+    if (id == null ||
+        !ids.add(id) ||
+        hub['name'] is! String ||
+        (hub['name'] as String).trim().isEmpty ||
+        hub['code'] is! String ||
+        (hub['code'] as String).trim().isEmpty ||
+        hub['address'] is! String ||
+        (hub['address'] as String).trim().isEmpty ||
+        hub['operating_hours'] != null && hub['operating_hours'] is! String) {
+      return false;
+    }
+  }
+  return value.isEmpty ? position == 0 : position < value.length;
+}
+
+bool _completeBuyerReturnCustodyActions(Object? value) {
+  if (value is! List) return false;
+  var hasPrepareLabel = false;
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final action = Map<String, dynamic>.from(row);
+    if (action['action'] != 'prepare-label' ||
+        action['hub_id'] != null ||
+        action['label'] is! String ||
+        (action['label'] as String).trim().isEmpty ||
+        hasPrepareLabel) {
+      return false;
+    }
+    hasPrepareLabel = true;
+  }
+  return true;
+}
+
+bool _completeReturnHistory(Object? value) {
+  if (value is! List) return false;
+  final references = <String>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return false;
+    final event = Map<String, dynamic>.from(row);
+    final reference = event['reference'];
+    final sourceStatus = event['source_status'];
+    if (reference is! String ||
+        reference.trim().isEmpty ||
+        !references.add(reference) ||
+        event['event_type'] is! String ||
+        (event['event_type'] as String).trim().isEmpty ||
+        event['actor_role'] is! String ||
+        (event['actor_role'] as String).trim().isEmpty ||
+        event['reason'] is! String ||
+        (event['reason'] as String).trim().isEmpty ||
+        sourceStatus != null &&
+            (sourceStatus is! String || sourceStatus.trim().isEmpty) ||
+        event['target_status'] is! String ||
+        (event['target_status'] as String).trim().isEmpty ||
+        strictDateTime(event['created_at']) == null) {
+      return false;
+    }
+  }
+  return true;
+}
+
+List<Map<String, dynamic>>? _returnIndexRows(Object? value) {
+  if (value is! List) return null;
+  final rows = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  final references = <String>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) return null;
+    final item = Map<String, dynamic>.from(row);
+    final id = _positiveId(item['id']);
+    final reference = item['reference'];
+    final orderNumber = item['order_number'];
+    final status = item['status'];
+    if (id == null ||
+        !ids.add(id) ||
+        reference is! String ||
+        reference.trim().isEmpty ||
+        !references.add(reference) ||
+        orderNumber is! String ||
+        orderNumber.trim().isEmpty ||
+        status is! String ||
+        status.trim().isEmpty ||
+        strictDateTime(item['created_at']) == null) {
+      return null;
+    }
+    rows.add(item);
+  }
+  return rows;
+}
+
+List<Map<String, dynamic>> _returnMoneyHistory(Object? value) {
+  if (value is! List) return const [];
+  final events = <Map<String, dynamic>>[];
+  final ids = <int>{};
+  for (final row in value) {
+    if (row is! Map || row.keys.any((key) => key is! String)) {
+      return const [];
+    }
+    final event = Map<String, dynamic>.from(row);
+    final type = event['event_type'];
+    final amount = event['amount_cents'];
+    final id = _positiveId(event['id']);
+    if (id == null ||
+        !ids.add(id) ||
+        type is! String ||
+        type.trim().isEmpty ||
+        amount is! int ||
+        amount < 0 ||
+        strictDateTime(event['created_at']) == null ||
+        event['reason'] is! String ||
+        event['wallet_reference'] != null &&
+            event['wallet_reference'] is! String ||
+        event['cash_reference'] != null && event['cash_reference'] is! String ||
+        event['proof_url'] != null && event['proof_url'] is! String) {
+      return const [];
+    }
+    events.add(event);
+  }
+  return events;
+}
+
+Map<String, int>? _returnAdjustment(Object? value) {
+  if (value is! Map) return null;
+  const fields = [
+    'gross_cents',
+    'shop_discount_cents',
+    'platform_discount_cents',
+    'buyer_cents',
+  ];
+  final amounts = <String, int>{};
+  for (final field in fields) {
+    final amount = value[field];
+    if (amount is! int || amount < 0) return null;
+    amounts[field] = amount;
+  }
+  return amounts;
+}
 
 class ReturnsPage extends StatefulWidget {
   const ReturnsPage({
@@ -42,14 +289,59 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
   final _selected = <int>{};
   String? _reason;
   Map<String, dynamic>? _submitted;
+  late final RetryCooldown _requestCooldown;
   int? get caseId => _createdId ?? widget.caseId;
   Map<String, dynamic> get item => mapOf(_page?.props['returnCase']);
+  PaginationMetadata? _casesPagination(
+    WebPage page, {
+    required int requestedPage,
+  }) {
+    final raw = page.props['cases'];
+    final cases = mapOf(raw);
+    final data = cases['data'];
+    if (raw is! Map || data is! List) return null;
+    final rows = _returnIndexRows(data);
+    if (rows == null) return null;
+    final basic = parsePaginationMetadata(
+      cases,
+      rowCount: rows.length,
+      requirePageNumbers: true,
+    );
+    if (basic == null) return null;
+    if (basic.currentPage > basic.lastPage) {
+      final total = cases['total'];
+      if (!isValidBuyerPageRequest(requestedPage) ||
+          total is! int ||
+          total < 0 ||
+          total > maxBuyerPaginationPage * 12 ||
+          cases['per_page'] != 12) {
+        return null;
+      }
+      final expectedLast = total == 0 ? 1 : (total + 11) ~/ 12;
+      return basic.lastPage == expectedLast &&
+              rows.isEmpty &&
+              cases['from'] == null &&
+              cases['to'] == null
+          ? basic
+          : null;
+    }
+    return parseContractPaginationMetadata(
+      cases,
+      rowCount: rows.length,
+      requestedPage: requestedPage,
+      pageSize: 12,
+    );
+  }
+
   bool get _current =>
       _account.isCurrent &&
       identical(_account.session, widget.repository.session);
   @override
   void initState() {
     super.initState();
+    _requestCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
     _account =
         widget.account?.fork() ?? BuyerAccountScope(widget.repository.session);
     WidgetsBinding.instance.addObserver(this);
@@ -77,6 +369,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
   @override
   void dispose() {
     _account.invalidate();
+    _requestCooldown.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _description.dispose();
     for (final c in _quantities.values) {
@@ -102,29 +395,91 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
         (mapOf(page.props['returnCase'])['id'] is! int ||
             (mapOf(page.props['returnCase'])['id'] as int) < 1 ||
             (caseId != null &&
-                mapOf(page.props['returnCase'])['id'] != caseId))) {
+                mapOf(page.props['returnCase'])['id'] != caseId) ||
+            !_completeReturnOrder(mapOf(page.props['returnCase'])['order']) ||
+            _positiveId(mapOf(page.props['returnCase'])['version']) == null)) {
       throw const BackendException('This return could not be confirmed.');
+    }
+    if (page.component == 'Returns/Show') {
+      final details = mapOf(page.props['returnCase']);
+      if (!_completeReturnItems(details['items'])) {
+        throw const BackendException(
+          'Returned item details could not be confirmed. Refresh and try again.',
+        );
+      }
+      if (!_completeReturnEvidence(details['evidence'], details['id'] as int)) {
+        throw const BackendException(
+          'Return evidence could not be confirmed. Refresh and try again.',
+        );
+      }
+      if (!_completeReturnHistory(details['history'])) {
+        throw const BackendException(
+          'Return history could not be confirmed. Refresh and try again.',
+        );
+      }
+      final custody = mapOf(details['custody']);
+      if (custody.isNotEmpty &&
+          (!_completeReturnHubs(custody['hubs'], custody['position']) ||
+              !_completeBuyerReturnCustodyActions(custody['actions']))) {
+        throw const BackendException(
+          'Return parcel details could not be confirmed. Refresh and try again.',
+        );
+      }
+    }
+    if (page.component == 'Returns/Index') {
+      final pagination = _casesPagination(page, requestedPage: _number);
+      if (pagination == null || pagination.currentPage > pagination.lastPage) {
+        throw const BackendException(
+          'Return history pagination could not be confirmed. Refresh and try again.',
+        );
+      }
+    }
+    if (page.component == 'Returns/Create') {
+      final rows = page.props['items'];
+      final ids = <int>{};
+      if (rows is! List ||
+          rows.any((row) {
+            if (row is! Map) return true;
+            final purchase = Map<String, dynamic>.from(row);
+            final id = _positiveId(purchase['id']);
+            final quantity = purchase['quantity'];
+            final available = purchase['available_quantity'];
+            return id == null ||
+                !ids.add(id) ||
+                quantity is! int ||
+                quantity < 1 ||
+                available is! int ||
+                available < 0 ||
+                available > quantity;
+          })) {
+        throw const BackendException(
+          'These purchased items could not be confirmed. Reload the purchase and try again.',
+        );
+      }
     }
     if (!mounted) return;
     setState(() {
       _page = page;
       _writeReady = true;
       if (page.component == 'Returns/Show') {
-        _createdId = (item['id'] as num).toInt();
+        _createdId = item['id'] as int;
       }
       if (page.component == 'Returns/Create') {
         final available = {
           for (final purchase in mapsOf(page.props['items']))
             if ((purchase['available_quantity'] as num) > 0)
-              (purchase['id'] as num).toInt(),
+              purchase['id'] as int,
         };
         _selected.retainWhere(available.contains);
-        if (!mapOf(page.props['reasons']).containsKey(_reason)) _reason = null;
+        if (_returnReasonOptions(page.props['reasons'])?.containsKey(_reason) !=
+            true) {
+          _reason = null;
+        }
       }
     });
     for (final purchase in mapsOf(page.props['items'])) {
       _quantities.putIfAbsent(
-        (purchase['id'] as num).toInt(),
+        purchase['id'] as int,
         () => TextEditingController(text: '1'),
       );
     }
@@ -154,6 +509,9 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
 
   @override
   void onFailure(BackendException error) {
+    if (error.status == 429 && _submitted != null) {
+      _requestCooldown.start(error.data, retryAt: error.retryAt, notify: false);
+    }
     if (!_current || [401, 403, 404, 419].contains(error.status)) {
       _discardPrivate();
     }
@@ -178,7 +536,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
         : widget.orderId != null
         ? '/buyer-returns/orders/${widget.orderId}/create'
         : '/buyer-returns?page=$_number';
-    final page = await widget.repository.buyer.document(path);
+    var page = await widget.repository.buyer.document(path);
     _account.check(page: page);
     final expected = caseId != null
         ? 'Returns/Show'
@@ -188,17 +546,51 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
     widget.repository.buyer.requireNoErrors(page);
     if (page.component != expected ||
         (expected == 'Returns/Create' &&
-            mapOf(page.props['order'])['id'] != widget.orderId)) {
+            (mapOf(page.props['order'])['id'] is! int ||
+                mapOf(page.props['order'])['id'] != widget.orderId))) {
       throw const BackendException(
         'These return details could not be confirmed.',
       );
+    }
+    if (expected == 'Returns/Index') {
+      var pagination = _casesPagination(page, requestedPage: _number);
+      if (pagination == null) {
+        throw const BackendException(
+          'Return history pagination could not be confirmed. Refresh and try again.',
+        );
+      }
+      if (pagination.currentPage > pagination.lastPage) {
+        page = await widget.repository.buyer.document(
+          '/buyer-returns?page=${pagination.lastPage}',
+        );
+        _account.check(page: page);
+        widget.repository.buyer.requireNoErrors(page);
+        pagination = _casesPagination(page, requestedPage: pagination.lastPage);
+        if (page.component != 'Returns/Index' ||
+            pagination == null ||
+            pagination.currentPage > pagination.lastPage) {
+          throw const BackendException(
+            'Return history pagination could not be confirmed. Refresh and try again.',
+          );
+        }
+      }
+      _number = pagination.currentPage;
     }
     _accept(page);
     return null;
   }, validate: false);
   Future<void> _request() async {
-    if (busy || !_writeReady) return;
+    if (busy || _requestCooldown.active || !_writeReady) return;
     await perform(() async {
+      final reasons = _returnReasonOptions(_page!.props['reasons']);
+      if (reasons == null) {
+        throw const BackendException(
+          'Return reasons could not be confirmed. Reload the purchase before requesting a return.',
+        );
+      }
+      if (_reason == null || !reasons.containsKey(_reason)) {
+        throw const BackendException('Choose the actual reason.');
+      }
       if (_selected.isEmpty || _photos.isEmpty) {
         throw const BackendException(
           'Select at least one purchased item and add one to five photos of the problem.',
@@ -285,7 +677,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
       _accessLost();
       return;
     }
-    if (busy) return;
+    if (busy || id < 1) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ReturnsPage(
@@ -319,141 +711,182 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
     );
   }
 
-  List<Widget> _create() => [
-    ProfileHeading(
-      'Request a return',
-      'Purchase ${mapOf(_page!.props['order'])['order_number']}. Request by ${readableDateTime(_page!.props['requestUntil'])}. Confirming receipt does not end this window. Original shipping stays separate.',
-      Icons.assignment_return_outlined,
-    ),
-    for (final purchase in mapsOf(_page!.props['items'])) ...[
-      CheckboxListTile(
-        contentPadding: EdgeInsets.zero,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(purchase['name'].toString()),
-        subtitle: Text(
-          '${[purchase['color'], purchase['size']].whereType<String>().join(' · ')}\nPurchased ${purchase['quantity']} · ${purchase['available_quantity']} available to request',
-        ),
-        value: _selected.contains(purchase['id']),
-        onChanged:
-            busy ||
-                _submitted != null ||
-                (purchase['available_quantity'] as num) < 1
-            ? null
-            : (value) => setState(() {
-                value == true
-                    ? _selected.add((purchase['id'] as num).toInt())
-                    : _selected.remove(purchase['id']);
-              }),
+  List<Widget> _create() {
+    final reasons = _returnReasonOptions(_page!.props['reasons']);
+    return [
+      ProfileHeading(
+        'Request a return',
+        'Purchase ${mapOf(_page!.props['order'])['order_number']}. Request by ${readableDateTime(_page!.props['requestUntil'])}. Confirming receipt does not end this window. Original shipping stays separate.',
+        Icons.assignment_return_outlined,
       ),
-      if (_selected.contains(purchase['id']))
-        field(
-          'quantity-${purchase['id']}',
-          'Quantity to return',
-          _quantities[purchase['id']]!,
-          enabled: _submitted == null,
-          keyboard: TextInputType.number,
-          max: 2,
-          check: (value) =>
-              RegExp(r'^[1-9][0-9]?$').hasMatch(value) &&
-                  int.parse(value) <= (purchase['available_quantity'] as num)
-              ? null
-              : 'Choose 1 to ${purchase['available_quantity']} units.',
-        ),
-      const Divider(),
-    ],
-    const SizedBox(height: 16),
-    DropdownButtonFormField<String>(
-      key: ValueKey(Object.hashAll(mapOf(_page!.props['reasons']).keys)),
-      initialValue: _reason,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Reason'),
-      items: [
-        for (final reason in mapOf(_page!.props['reasons']).entries)
-          DropdownMenuItem(
-            value: reason.key,
-            child: Text(
-              reason.value.toString(),
-              overflow: TextOverflow.ellipsis,
-            ),
+      for (final purchase in mapsOf(_page!.props['items'])) ...[
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: Text(purchase['name'].toString()),
+          subtitle: Text(
+            '${[purchase['color'], purchase['size']].whereType<String>().join(' · ')}\nPurchased ${purchase['quantity']} · ${purchase['available_quantity']} available to request',
           ),
-      ],
-      onChanged: busy || _submitted != null
-          ? null
-          : (value) => setState(() => _reason = value),
-      validator: (value) => value == null ? 'Choose the actual reason.' : null,
-    ),
-    const SizedBox(height: 20),
-    field(
-      'description',
-      'What happened?',
-      _description,
-      min: 10,
-      max: 1000,
-      lines: 5,
-      enabled: _submitted == null,
-    ),
-    OutlinedButton.icon(
-      onPressed: busy || _submitted != null || _photos.length >= 5
-          ? null
-          : () => perform(() async {
-              final photo = await pickUpload('photo', imageOnly: true);
-              if (photo != null && mounted) setState(() => _photos.add(photo));
-              return null;
-            }, validate: false),
-      icon: const Icon(Icons.add_a_photo_outlined),
-      label: const Text('Add photo of the problem'),
-    ),
-    const Padding(
-      padding: EdgeInsets.symmetric(vertical: 12),
-      child: Text(
-        'One to five JPG, PNG or WEBP photos, up to 5 MB each. Photos are private to involved account owners and authorized reviewers.',
-        style: TextStyle(fontSize: 12, height: 1.7),
-      ),
-    ),
-    for (var index = 0; index < _photos.length; index++)
-      ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Image.memory(
-          _photos[index].bytes,
-          width: 48,
-          height: 48,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const Icon(Icons.image_outlined),
-        ),
-        title: Text(_photos[index].name),
-        trailing: IconButton(
-          tooltip: 'Remove return photo',
-          onPressed: busy || _submitted != null
+          value: _selected.contains(purchase['id']),
+          onChanged:
+              busy ||
+                  _submitted != null ||
+                  _positiveId(purchase['id']) == null ||
+                  (purchase['available_quantity'] as num) < 1
               ? null
-              : () => setState(() => _photos.removeAt(index)),
-          icon: const Icon(Icons.close),
+              : (value) => setState(() {
+                  final id = _positiveId(purchase['id'])!;
+                  value == true ? _selected.add(id) : _selected.remove(id);
+                }),
+        ),
+        if (_selected.contains(purchase['id']))
+          field(
+            'quantity-${purchase['id']}',
+            'Quantity to return',
+            _quantities[purchase['id']]!,
+            enabled: _submitted == null,
+            keyboard: TextInputType.number,
+            max: 2,
+            check: (value) =>
+                RegExp(r'^[1-9][0-9]?$').hasMatch(value) &&
+                    int.parse(value) <= (purchase['available_quantity'] as num)
+                ? null
+                : 'Choose 1 to ${purchase['available_quantity']} units.',
+          ),
+        const Divider(),
+      ],
+      const SizedBox(height: 16),
+      if (reasons == null)
+        const Notice(
+          'Return reasons could not be confirmed. Reload the purchase before requesting a return.',
+          error: true,
+        ),
+      DropdownButtonFormField<String>(
+        key: ValueKey(Object.hashAll(reasons?.keys ?? const <String>[])),
+        initialValue: _reason,
+        isExpanded: true,
+        decoration: const InputDecoration(labelText: 'Reason'),
+        items: [
+          for (final reason
+              in reasons?.entries ?? const <MapEntry<String, String>>[])
+            DropdownMenuItem(
+              value: reason.key,
+              child: Text(reason.value, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: reasons == null || busy || _submitted != null
+            ? null
+            : (value) => setState(() => _reason = value),
+        validator: (value) =>
+            value == null || reasons?.containsKey(value) != true
+            ? 'Choose the actual reason.'
+            : null,
+      ),
+      const SizedBox(height: 20),
+      field(
+        'description',
+        'What happened?',
+        _description,
+        min: 10,
+        max: 1000,
+        lines: 5,
+        enabled: _submitted == null,
+        check: buyerNotesTextError,
+      ),
+      OutlinedButton.icon(
+        onPressed: busy || _submitted != null || _photos.length >= 5
+            ? null
+            : () => perform(() async {
+                final photo = await pickUpload('photo', imageOnly: true);
+                if (photo != null && mounted) {
+                  setState(() => _photos.add(photo));
+                }
+                return null;
+              }, validate: false),
+        icon: const Icon(Icons.add_a_photo_outlined),
+        label: const Text('Add photo of the problem'),
+      ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          'One to five JPG, PNG or WEBP photos, up to 5 MB each. Photos are private to involved account owners and authorized reviewers.',
+          style: TextStyle(fontSize: 12, height: 1.7),
         ),
       ),
-    if (_submitted != null)
-      const Notice(
-        'The result is uncertain. Check your existing returns before starting a different request. This retry keeps the exact original details and photos.',
-        error: true,
+      for (var index = 0; index < _photos.length; index++)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Image.memory(
+            _photos[index].bytes,
+            width: 48,
+            height: 48,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const Icon(Icons.image_outlined),
+          ),
+          title: Text(_photos[index].name),
+          trailing: IconButton(
+            tooltip: 'Remove return photo',
+            onPressed: busy || _submitted != null
+                ? null
+                : () => setState(() => _photos.removeAt(index)),
+            icon: const Icon(Icons.close),
+          ),
+        ),
+      if (_submitted != null)
+        const Notice(
+          'The result is uncertain. Check your existing returns before starting a different request. This retry keeps the exact original details and photos.',
+          error: true,
+        ),
+      const SizedBox(height: 20),
+      SubmitButton(
+        label: _requestCooldown.active
+            ? 'Retry same request in ${_requestCooldown.remainingSeconds}s'
+            : _submitted == null
+            ? 'Request a return'
+            : 'Retry same return request',
+        busy: busy,
+        onPressed: _writeReady && reasons != null && !_requestCooldown.active
+            ? _request
+            : null,
       ),
-    const SizedBox(height: 20),
-    SubmitButton(
-      label: _submitted == null
-          ? 'Request a return'
-          : 'Retry same return request',
-      busy: busy,
-      onPressed: _writeReady ? _request : null,
-    ),
-    const Padding(
-      padding: EdgeInsets.only(top: 16),
-      child: Text(
-        'The seller reviews your request first. Approval starts return instructions; repayment follows actual return and payment checks.',
-        style: TextStyle(fontSize: 12, height: 1.7),
+      const Padding(
+        padding: EdgeInsets.only(top: 16),
+        child: Text(
+          'The seller reviews your request first. Approval starts return instructions; repayment follows actual return and payment checks.',
+          style: TextStyle(fontSize: 12, height: 1.7),
+        ),
       ),
-    ),
-  ];
+    ];
+  }
+
   List<Widget> _show() {
     final custody = mapOf(item['custody']);
     final money = mapOf(item['money']);
-    final adjustment = mapOf(money['adjustment']);
+    final rawAdjustment = mapOf(money['adjustment']);
+    final adjustment = _returnAdjustment(money['adjustment']);
+    final moneyHistory = _returnMoneyHistory(money['history']);
+    final hasRecordedRepayment = moneyHistory.any(
+      (event) => event['event_type'] == 'record-repayment',
+    );
+    final dropoffDeadline = strictDateTime(item['dropoff_until']);
+    final canDropOff =
+        custody['can_dropoff'] == true &&
+        dropoffDeadline != null &&
+        dropoffDeadline.isAfter(DateTime.now());
+    final weightGrams = custody['weight_grams'] is num
+        ? amount(custody['weight_grams'])
+        : null;
+    final moneyActions = hasRecordedRepayment
+        ? _allowedReturnActions(money['actions'], const {
+            'confirm-receipt',
+            'report-nonreceipt',
+          })
+        : const <String>[];
+    final returnActions = _allowedReturnActions(item['actions'], const {
+      'withdraw',
+      'escalate',
+      'close-period',
+    });
     return [
       ProfileHeading(
         item['reference']?.toString() ?? 'Return request',
@@ -533,8 +966,8 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
           ),
         ],
         Text(
-          custody['weight_grams'] is num
-              ? 'Recorded weight: ${((custody['weight_grams'] as num) / 1000).toStringAsFixed(3)} kg'
+          weightGrams != null && weightGrams >= 0
+              ? 'Recorded weight: ${(weightGrams / 1000).toStringAsFixed(3)} kg'
               : 'Packed weight has not been recorded.',
           style: const TextStyle(height: 1.7),
         ),
@@ -545,7 +978,7 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
           ),
         if (mapOf(custody['custody'])['kind'] == 'buyer')
           Text(
-            custody['can_dropoff'] == true
+            canDropOff
                 ? 'Bring the approved items to the original destination Bayan Hub before the drop-off deadline.'
                 : 'No current drop-off authority is available. Review the saved decision and deadlines before bringing a parcel.',
             style: const TextStyle(height: 1.7),
@@ -577,16 +1010,20 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
         'Original merchandise and product discounts determine the amount. Shipping stays separate. Approval and transfer offers do not confirm money received.',
         Icons.receipt_long_outlined,
       ),
-      if (adjustment.isEmpty)
+      if (rawAdjustment.isEmpty)
         const Text(
           'The original amount can be approved after actual seller receipt and condition review.',
         ),
-      if (adjustment.isNotEmpty)
+      if (rawAdjustment.isNotEmpty && adjustment == null)
+        const Text(
+          'The recorded repayment amount could not be confirmed. Refresh this return before relying on the amount.',
+        ),
+      if (adjustment != null)
         Text(
           'Original returned merchandise: ${pesos((amount(adjustment['gross_cents']) ?? 0) / 100)}\nProduct discounts: ${pesos(((amount(adjustment['shop_discount_cents']) ?? 0) + (amount(adjustment['platform_discount_cents']) ?? 0)) / 100)}\nBuyer repayment due: ${pesos((amount(adjustment['buyer_cents']) ?? 0) / 100)}',
           style: const TextStyle(height: 1.8, fontWeight: FontWeight.w600),
         ),
-      for (final event in mapsOf(money['history']))
+      for (final event in moneyHistory)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
@@ -626,56 +1063,54 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
             ],
           ),
         ),
-      for (final action in (money['actions'] as List? ?? []))
-        if (['confirm-receipt', 'report-nonreceipt'].contains(action))
-          FilledButton(
-            onPressed: busy || !_writeReady
-                ? null
-                : () => _command(
-                    'money',
-                    action.toString(),
-                    action == 'confirm-receipt'
-                        ? 'Confirm repayment received'
-                        : 'Report repayment not received',
-                  ),
-            child: Text(
-              action == 'confirm-receipt'
-                  ? 'Confirm repayment received'
-                  : 'Report repayment not received',
-            ),
+      for (final action in moneyActions)
+        FilledButton(
+          onPressed: busy || !_writeReady
+              ? null
+              : () => _command(
+                  'money',
+                  action,
+                  action == 'confirm-receipt'
+                      ? 'Confirm repayment received'
+                      : 'Report repayment not received',
+                ),
+          child: Text(
+            action == 'confirm-receipt'
+                ? 'Confirm repayment received'
+                : 'Report repayment not received',
           ),
+        ),
       const Divider(height: 40),
       const ProfileHeading(
         'Update this return',
         'Available actions follow the current case decision and deadlines.',
         Icons.edit_note,
       ),
-      for (final action in (item['actions'] as List? ?? []))
-        if (['withdraw', 'escalate', 'close-period'].contains(action))
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: OutlinedButton(
-              onPressed: busy || !_writeReady
-                  ? null
-                  : () => _command(
-                      'actions',
-                      action.toString(),
-                      {
-                        'withdraw': 'Withdraw request',
-                        'escalate': 'Ask admin to review',
-                        'close-period': 'Close expired period',
-                      }[action]!,
-                    ),
-              child: Text(
-                {
-                  'withdraw': 'Withdraw request',
-                  'escalate': 'Ask admin to review',
-                  'close-period': 'Close expired period',
-                }[action]!,
-              ),
+      for (final action in returnActions)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: OutlinedButton(
+            onPressed: busy || !_writeReady
+                ? null
+                : () => _command(
+                    'actions',
+                    action,
+                    {
+                      'withdraw': 'Withdraw request',
+                      'escalate': 'Ask admin to review',
+                      'close-period': 'Close expired period',
+                    }[action]!,
+                  ),
+            child: Text(
+              {
+                'withdraw': 'Withdraw request',
+                'escalate': 'Ask admin to review',
+                'close-period': 'Close expired period',
+              }[action]!,
             ),
           ),
-      if ((item['actions'] as List? ?? []).isEmpty)
+        ),
+      if (returnActions.isEmpty)
         const Text('No return decision actions are currently available.'),
       const Divider(height: 40),
       const ProfileHeading('Recorded history', '', Icons.history),
@@ -754,9 +1189,9 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
                             'Purchase ${row['order_number']}\n${row['status'].toString().replaceAll('_', ' ')}\n${readableDateTime(row['created_at'])}',
                           ),
                           trailing: const Icon(Icons.chevron_right),
-                          onTap: busy
+                          onTap: busy || _positiveId(row['id']) == null
                               ? null
-                              : () => _openCase((row['id'] as num).toInt()),
+                              : () => _openCase(_positiveId(row['id'])!),
                         ),
                       ProfilePagination(mapOf(_page!.props['cases']), (number) {
                         _number = number;
@@ -800,8 +1235,17 @@ class _ReturnCommandPage extends StatefulWidget {
 class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
   final _reason = TextEditingController();
   final _token = requestId();
+  late final RetryCooldown _commandCooldown;
   Map<String, dynamic>? _submitted;
   bool _accessLost = false;
+  @override
+  void initState() {
+    super.initState();
+    _commandCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void onFailure(BackendException error) {
     if (!widget.account.isCurrent ||
@@ -813,6 +1257,9 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
       widget.onAccessLost();
       return;
     }
+    if (error.status == 429 && _submitted != null) {
+      _commandCooldown.start(error.data, retryAt: error.retryAt, notify: false);
+    }
     if (error.status == 422 || error.fields.isNotEmpty) _submitted = null;
   }
 
@@ -821,6 +1268,7 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
     Future<String?> Function() action, {
     bool validate = true,
   }) {
+    if (_commandCooldown.active) return Future.value(false);
     if (_accessLost || !widget.account.isCurrent) {
       if (mounted) {
         setState(
@@ -836,6 +1284,7 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
 
   @override
   void dispose() {
+    _commandCooldown.dispose();
     _reason.dispose();
     super.dispose();
   }
@@ -882,6 +1331,7 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
                       max: 1000,
                       lines: 4,
                       enabled: _submitted == null,
+                      check: buyerNotesTextError,
                     ),
                     if (_submitted != null)
                       const Notice(
@@ -889,61 +1339,69 @@ class _ReturnCommandPageState extends ProfileFormState<_ReturnCommandPage> {
                         error: true,
                       ),
                     SubmitButton(
-                      label: _submitted == null
+                      label: _commandCooldown.active
+                          ? 'Retry same update in ${_commandCooldown.remainingSeconds}s'
+                          : _submitted == null
                           ? widget.label
                           : 'Retry same update',
                       busy: busy,
-                      onPressed: () => perform(() async {
-                        final payment =
-                            mapsOf(mapOf(widget.item['money'])['history'])
-                                .where(
-                                  (event) =>
-                                      event['event_type'] == 'record-repayment',
-                                )
-                                .lastOrNull;
-                        final version = widget.item['version'];
-                        final source = payment?['id'];
-                        if (version is! int ||
-                            version < 1 ||
-                            widget.group == 'money' &&
-                                (source is! int || source < 1)) {
-                          throw const BackendException(
-                            'The current return version or repayment could not be confirmed. Close this update and reload its saved history.',
-                          );
-                        }
-                        _submitted ??= {
-                          'action': widget.action,
-                          'expected_version': version,
-                          'request_token': _token,
-                          'reason': _reason.text.trim(),
-                          if (widget.group == 'money')
-                            'source_event_id': source,
-                        };
-                        final id = widget.item['id'];
-                        final page = await widget.repository.session.submit(
-                          '/buyer-returns/$id/${widget.group}',
-                          _submitted!,
-                          referer: '/buyer-returns/$id',
-                        );
-                        widget.account.check(page: page);
-                        widget.repository.buyer.requireNoErrors(page);
-                        final confirmation = mapOf(
-                          page.props['flash'],
-                        )['success'];
-                        if (page.component != 'Returns/Show' ||
-                            mapOf(page.props['returnCase'])['id'] != id ||
-                            confirmation is! String ||
-                            confirmation.trim().isEmpty) {
-                          throw const BackendException(
-                            'This return update was not confirmed. Refresh its history before retrying.',
-                          );
-                        }
-                        if (context.mounted) {
-                          widget.onSaved(page);
-                          Navigator.pop(context);
-                        }
-                        return null;
-                      }),
+                      onPressed: _commandCooldown.active
+                          ? null
+                          : () => perform(() async {
+                              final payment =
+                                  _returnMoneyHistory(
+                                        mapOf(widget.item['money'])['history'],
+                                      )
+                                      .where(
+                                        (event) =>
+                                            event['event_type'] ==
+                                            'record-repayment',
+                                      )
+                                      .lastOrNull;
+                              final version = widget.item['version'];
+                              final source = payment?['id'];
+                              if (version is! int ||
+                                  version < 1 ||
+                                  widget.group == 'money' &&
+                                      (source is! int || source < 1)) {
+                                throw const BackendException(
+                                  'The current return version or repayment could not be confirmed. Close this update and reload its saved history.',
+                                );
+                              }
+                              _submitted ??= {
+                                'action': widget.action,
+                                'expected_version': version,
+                                'request_token': _token,
+                                'reason': _reason.text.trim(),
+                                if (widget.group == 'money')
+                                  'source_event_id': source,
+                              };
+                              final id = widget.item['id'];
+                              final page = await widget.repository.session
+                                  .submit(
+                                    '/buyer-returns/$id/${widget.group}',
+                                    _submitted!,
+                                    referer: '/buyer-returns/$id',
+                                  );
+                              widget.account.check(page: page);
+                              widget.repository.buyer.requireNoErrors(page);
+                              final confirmation = mapOf(
+                                page.props['flash'],
+                              )['success'];
+                              if (page.component != 'Returns/Show' ||
+                                  mapOf(page.props['returnCase'])['id'] != id ||
+                                  confirmation is! String ||
+                                  confirmation.trim().isEmpty) {
+                                throw const BackendException(
+                                  'This return update was not confirmed. Refresh its history before retrying.',
+                                );
+                              }
+                              if (context.mounted) {
+                                widget.onSaved(page);
+                                Navigator.pop(context);
+                              }
+                              return null;
+                            }),
                     ),
                   ]),
                 ),

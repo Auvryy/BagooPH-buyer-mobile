@@ -153,6 +153,29 @@ void main() {
     },
   );
 
+  testWidgets('return actions reject unsafe notes before submitting', (
+    tester,
+  ) async {
+    await command(tester);
+    final reason = find.widgetWithText(
+      TextFormField,
+      'Reason or receipt details',
+    );
+    for (final value in [
+      'Reason with <script>payload</script>',
+      'javascript:report()',
+      'Call\tme today',
+      'Hidden\u200btext is here',
+    ]) {
+      tester.widget<TextFormField>(reason).controller!.text = value;
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Withdraw request'),
+      );
+      expect(session.submissions, isEmpty, reason: value);
+    }
+  });
+
   testWidgets(
     'uncertain command retry preserves its exact token, version and reason',
     (tester) async {
@@ -172,6 +195,33 @@ void main() {
       );
       expect(session.submissions, hasLength(2));
       expect(session.submissions.last.values, original.values);
+    },
+  );
+
+  testWidgets(
+    'a return command 429 pauses retry without changing its payload',
+    (tester) async {
+      await command(tester);
+      session.onSubmit = (_) async => throw BackendException(
+        'Too many attempts. Please wait before trying again.',
+        status: 429,
+        retryAt: DateTime.now().add(const Duration(seconds: 30)),
+      );
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Withdraw request'),
+      );
+      final original = session.submissions.single;
+      final retryFinder = find.ancestor(
+        of: find.textContaining('Retry same update in'),
+        matching: find.byType(FilledButton),
+      );
+      expect(retryFinder, findsOneWidget);
+      expect(tester.widget<FilledButton>(retryFinder).onPressed, isNull);
+      expect(original.path, '/buyer-returns/4/actions');
+      expect(original.values['action'], 'withdraw');
+      expect(original.values['expected_version'], 1);
+      expect(find.textContaining('Too many attempts'), findsOneWidget);
     },
   );
 
@@ -256,6 +306,26 @@ void main() {
     },
   );
 
+  testWidgets('return description rejects unsafe notes before submitting', (
+    tester,
+  ) async {
+    await form(tester);
+    final description = find.widgetWithText(TextFormField, 'What happened?');
+    for (final value in [
+      'The damage is <script>shown</script>.',
+      'javascript:send-private-data()',
+      'The label has a\ttab in it.',
+      'The seam is hidden\u200bfrom view.',
+    ]) {
+      tester.widget<TextFormField>(description).controller!.text = value;
+      await returnPress(
+        tester,
+        find.widgetWithText(FilledButton, 'Request a return'),
+      );
+      expect(session.submissions, isEmpty, reason: value);
+    }
+  });
+
   testWidgets('a return needs selected items and at least one photo', (
     tester,
   ) async {
@@ -324,6 +394,32 @@ void main() {
     },
   );
 
+  testWidgets('a return-request 429 pauses the same draft and photo retry', (
+    tester,
+  ) async {
+    await form(tester);
+    session.onSubmit = (_) async => throw BackendException(
+      'Too many attempts. Please wait before trying again.',
+      status: 429,
+      retryAt: DateTime.now().add(const Duration(seconds: 30)),
+    );
+    await returnPress(
+      tester,
+      find.widgetWithText(FilledButton, 'Request a return'),
+    );
+    final original = session.submissions.single;
+    final retryFinder = find.ancestor(
+      of: find.textContaining('Retry same request in'),
+      matching: find.byType(FilledButton),
+    );
+    expect(retryFinder, findsOneWidget);
+    expect(tester.widget<FilledButton>(retryFinder).onPressed, isNull);
+    expect(original.path, '/buyer-returns/orders/11');
+    expect(original.values['request_token'], isA<String>());
+    expect(original.files, hasLength(1));
+    expect(find.textContaining('Too many attempts'), findsOneWidget);
+  });
+
   testWidgets('uncertain creation retry retains the same payload and photos', (
     tester,
   ) async {
@@ -387,6 +483,51 @@ void main() {
       expect(session.submissions, isEmpty);
     },
   );
+
+  for (final reasons in <Object?>[
+    {'': ' '},
+    {'damaged': ' '},
+    {'damaged': 'Item damaged', 'faulty': 'Item damaged'},
+    {'damaged': 42},
+    'damaged',
+  ]) {
+    testWidgets('malformed return reasons block creation: $reasons', (
+      tester,
+    ) async {
+      final page = returnForm();
+      page.props['reasons'] = reasons;
+      session.onPage = (_) async => page;
+      await open(tester, create: true);
+      await returnPress(
+        tester,
+        find.widgetWithText(CheckboxListTile, 'Test purchase'),
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'What happened?'),
+        'The stitching is damaged on arrival.',
+      );
+      await returnPress(tester, find.text('Add photo of the problem'));
+      expect(
+        tester
+            .widget<DropdownButton<String>>(find.byType(DropdownButton<String>))
+            .onChanged,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Request a return'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(session.submissions, isEmpty);
+      expect(
+        find.textContaining('Return reasons could not be confirmed'),
+        findsOneWidget,
+      );
+    });
+  }
 
   testWidgets('a refresh failure keeps details but disables stale decisions', (
     tester,

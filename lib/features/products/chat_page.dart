@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/foreground_refresh.dart';
+import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/file_selection.dart';
@@ -58,10 +59,9 @@ class _ChatPageState extends State<ChatPage> {
   late ForegroundRead _updates;
   late int _identityEpoch;
   int _scope = 0;
-  int get _receiver =>
-      widget.receiverId ??
-      (mapOf(widget.product['shop'])['user_id'] as num?)?.toInt() ??
-      0;
+  int? get _receiver => positiveResourceId(
+    widget.receiverId ?? mapOf(widget.product['shop'])['user_id'],
+  );
   @override
   void initState() {
     super.initState();
@@ -124,16 +124,21 @@ class _ChatPageState extends State<ChatPage> {
       );
       return ReadOutcome.stop;
     }
+    final receiver = _receiver;
+    if (receiver == null) {
+      _loseAccess('This shop conversation is unavailable.');
+      return ReadOutcome.stop;
+    }
     try {
-      final messages = await widget.repository.messages(_receiver);
+      final messages = await widget.repository.messages(receiver);
       if (!mounted || !ticket.isCurrent) return ReadOutcome.success;
       if (!_sameIdentity ||
           messages.any(
             (m) =>
-                m['id'] is! num ||
+                positiveResourceId(m['id']) == null ||
                 !((m['sender_id'] == widget.userId &&
-                        m['receiver_id'] == _receiver) ||
-                    (m['sender_id'] == _receiver &&
+                        m['receiver_id'] == receiver) ||
+                    (m['sender_id'] == receiver &&
                         m['receiver_id'] == widget.userId)),
           )) {
         throw const BackendException(
@@ -189,9 +194,14 @@ class _ChatPageState extends State<ChatPage> {
       );
       return;
     }
+    final receiver = _receiver;
+    if (receiver == null) {
+      _failure('This shop conversation is unavailable.');
+      return;
+    }
     final scope = _scope;
     final text = _text.text.trim();
-    if (text.isEmpty && _attachment == null || text.length > 1000) {
+    if (text.isEmpty && _attachment == null || text.runes.length > 1000) {
       _failure('Enter a message of up to 1,000 characters.');
       return;
     }
@@ -206,7 +216,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     try {
       final message = await widget.repository.sendMessage({
-        'receiver_id': _receiver,
+        'receiver_id': receiver,
         'shop_id':
             widget.product['shop_id'] ?? mapOf(widget.product['shop'])['id'],
         'product_id': widget.product['id'],
@@ -214,6 +224,10 @@ class _ChatPageState extends State<ChatPage> {
         'message': text,
         'request_key': _intent,
       }, files: _attachment == null ? null : [_attachment!]);
+      if (message['sender_id'] != widget.userId ||
+          message['receiver_id'] != receiver) {
+        throw const BackendException('Your message was not confirmed.');
+      }
       if (!_current(scope)) {
         return;
       }
@@ -251,15 +265,13 @@ class _ChatPageState extends State<ChatPage> {
   void _failure(String message) {
     if (!mounted) return;
     setState(() => _error = message);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _draftQuestion(String question) {
     if (_sending || _loading || _accessLost) return;
     final current = _text.text.trim();
     final draft = current.isEmpty ? question : '$current\n$question';
-    if (draft.length > 1000) {
+    if (draft.runes.length > 1000) {
       _failure('Your draft is full. Edit it before adding a question.');
       return;
     }
@@ -377,7 +389,6 @@ class _ChatPageState extends State<ChatPage> {
                         if (index == 0) {
                           return Column(
                             children: [
-                              if (_error != null) Notice(_error!, error: true),
                               if (_messages.isEmpty &&
                                   !_loading &&
                                   _updateError == null)
@@ -504,6 +515,11 @@ class _ChatPageState extends State<ChatPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (_error != null)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                              child: Notice(_error!, error: true),
+                            ),
                           if (widget.product.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.symmetric(

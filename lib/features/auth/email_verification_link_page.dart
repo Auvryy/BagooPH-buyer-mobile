@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/buyer_repository.dart';
+import '../../core/retry_cooldown.dart';
+import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 
@@ -17,40 +19,96 @@ class EmailVerificationLinkPage extends StatefulWidget {
       _EmailVerificationLinkPageState();
 }
 
-class _EmailVerificationLinkPageState extends State<EmailVerificationLinkPage> {
+class _EmailVerificationLinkPageState extends State<EmailVerificationLinkPage>
+    with WidgetsBindingObserver {
   bool _busy = true, _eligible = false, _verified = false;
+  late final RetryCooldown _verifyCooldown;
+  int _generation = 0;
+  int? _eligibleEpoch;
   String? _error;
+
+  int? get _linkedOwner {
+    final segments = widget.link.pathSegments;
+    if (segments.length != 3 || segments.first != 'verify-email') return null;
+    final id = int.tryParse(segments[1]);
+    return id != null && id > 0 ? id : null;
+  }
+
   @override
   void initState() {
     super.initState();
+    _verifyCooldown = RetryCooldown(() {
+      if (mounted) setState(() {});
+    });
+    WidgetsBinding.instance.addObserver(this);
     _check();
   }
 
+  @override
+  void didUpdateWidget(covariant EmailVerificationLinkPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.repository, widget.repository) ||
+        oldWidget.link != widget.link) {
+      _check();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_busy && !_verified) {
+      _check();
+    }
+  }
+
   Future<void> _check() async {
+    final generation = ++_generation;
+    final epoch = widget.repository.session.identityEpoch;
     setState(() {
       _busy = true;
+      _eligible = false;
+      _eligibleEpoch = null;
+      _verified = false;
       _error = null;
     });
     try {
       final page = await widget.repository.currentSession();
-      if (page?.user?['id'].toString() !=
-          (widget.link.pathSegments.length == 3
-              ? widget.link.pathSegments[1]
-              : null)) {
+      if (!mounted || generation != _generation) return;
+      if (epoch != widget.repository.session.identityEpoch) {
+        setState(() {
+          _error = 'Your buyer account changed. Check again before continuing.';
+        });
+        return;
+      }
+      if (_linkedOwner == null ||
+          page?.user?['role'] != 'buyer' ||
+          page?.user?['id'] != _linkedOwner) {
         throw const BackendException(
           'Sign in to the buyer account named by this verification link.',
         );
       }
-      if (mounted) setState(() => _eligible = true);
+      setState(() {
+        _eligible = true;
+        _eligibleEpoch = epoch;
+      });
     } on BackendException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (mounted && generation == _generation) {
+        setState(() => _error = e.message);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _generation) {
+        setState(() => _busy = false);
+      }
     }
   }
 
   Future<void> _verify() async {
-    if (_busy || !_eligible) return;
+    if (_busy || !_eligible || _verifyCooldown.active) return;
+    final epoch = widget.repository.session.identityEpoch;
+    if (_eligibleEpoch != epoch) {
+      await _check();
+      return;
+    }
+    final generation = ++_generation;
     setState(() {
       _busy = true;
       _error = null;
@@ -58,27 +116,55 @@ class _EmailVerificationLinkPageState extends State<EmailVerificationLinkPage> {
     try {
       final page = await widget.repository.document(widget.link.toString());
       widget.repository.requireNoErrors(page);
+      if (!mounted || generation != _generation) return;
+      if (epoch != widget.repository.session.identityEpoch) {
+        setState(() {
+          _eligible = false;
+          _eligibleEpoch = null;
+          _error = 'Your buyer account changed. Check again before continuing.';
+        });
+        return;
+      }
+      final verifiedAt = page.user?['email_verified_at'];
       if (page.user?['role'] != 'buyer' ||
-          page.user?['id'].toString() !=
-              (widget.link.pathSegments.length == 3
-                  ? widget.link.pathSegments[1]
-                  : null) ||
-          page.user?['email_verified_at'] == null) {
+          page.user?['id'] != _linkedOwner ||
+          verifiedAt is! String ||
+          strictDateTime(verifiedAt, requireTimezone: true) == null) {
         throw const BackendException(
           'Email verification was not confirmed. The link may have expired; request a new one from Profile.',
         );
       }
-      if (mounted) {
+      setState(() {
+        _verified = true;
+        _eligible = false;
+        _eligibleEpoch = null;
+      });
+    } on BackendException catch (e) {
+      if (mounted && generation == _generation) {
+        if (e.status == 429) {
+          _verifyCooldown.start(e.data, retryAt: e.retryAt, notify: false);
+        }
         setState(() {
-          _verified = true;
           _eligible = false;
+          _eligibleEpoch = null;
+          _error = epoch == widget.repository.session.identityEpoch
+              ? e.message
+              : 'Your buyer account changed. Check again before continuing.';
         });
       }
-    } on BackendException catch (e) {
-      if (mounted) setState(() => _error = e.message);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _generation) {
+        setState(() => _busy = false);
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _verifyCooldown.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
@@ -104,8 +190,14 @@ class _EmailVerificationLinkPageState extends State<EmailVerificationLinkPage> {
               if (_error != null) Notice(_error!, error: true),
               if (!_verified)
                 FilledButton(
-                  onPressed: _busy || !_eligible ? null : _verify,
-                  child: const Text('Verify my email'),
+                  onPressed: _busy || !_eligible || _verifyCooldown.active
+                      ? null
+                      : _verify,
+                  child: Text(
+                    _verifyCooldown.active
+                        ? 'Try again in ${_verifyCooldown.remainingSeconds}s'
+                        : 'Verify my email',
+                  ),
                 ),
               if (!_eligible && !_verified)
                 TextButton(

@@ -1,4 +1,14 @@
 import '../../core/web_session.dart';
+import '../../core/resource_ids.dart';
+
+int? _voucherResourceId(Object? value) {
+  return positiveInt32ResourceId(value);
+}
+
+int? _shopSlotId(String key) {
+  final id = int.tryParse(key);
+  return id != null && id > 0 && id <= 2147483647 && '$id' == key ? id : null;
+}
 
 class VoucherSelection {
   const VoucherSelection({
@@ -17,15 +27,13 @@ class VoucherSelection {
   factory VoucherSelection.checked(dynamic value) {
     final data = mapOf(value);
     final platform = data['platform_voucher_revision_id'];
+    final platformId = platform == null ? null : _voucherResourceId(platform);
     final shops = data['shop_voucher_revision_ids'];
     // PHP emits [] for an empty map; populated slot maps are JSON objects.
     if (!data.containsKey('voucher_code') ||
         !data.containsKey('platform_voucher_revision_id') ||
         (data['voucher_code'] != null && data['voucher_code'] is! String) ||
-        platform != null &&
-            (platform is! num ||
-                platform <= 0 ||
-                platform != platform.toInt()) ||
+        platform != null && platformId == null ||
         !(shops is Map || shops is List && shops.isEmpty)) {
       throw const BackendException(
         'The voucher selection could not be confirmed. Refresh checkout.',
@@ -34,21 +42,22 @@ class VoucherSelection {
     final slots = mapOf(shops);
     final result = <String, int>{};
     for (final entry in slots.entries) {
-      if (int.tryParse(entry.key) == null ||
-          int.parse(entry.key) <= 0 ||
-          entry.value != null &&
-              (entry.value is! num ||
-                  entry.value <= 0 ||
-                  entry.value != entry.value.toInt())) {
+      final shopId = _shopSlotId(entry.key);
+      final revisionId = entry.value == null
+          ? null
+          : _voucherResourceId(entry.value);
+      if (shopId == null || entry.value != null && revisionId == null) {
         throw const BackendException(
           'The shop voucher selection could not be confirmed.',
         );
       }
-      if (entry.value != null) result[entry.key] = (entry.value as num).toInt();
+      if (entry.value != null) {
+        result['$shopId'] = revisionId!;
+      }
     }
     return VoucherSelection(
       code: data['voucher_code']?.toString() ?? '',
-      platform: (platform as num?)?.toInt(),
+      platform: platformId,
       shops: result,
     );
   }
@@ -57,12 +66,13 @@ class VoucherSelection {
     final shopIds = Map.of(shops);
     if (code.isNotEmpty) {
       for (final offer in applied) {
-        final revision = (offer['revision_id'] as num?)?.toInt();
+        final revision = _voucherResourceId(offer['revision_id']);
         if (revision == null) continue;
         if (offer['issuer'] == 'platform') {
           platformId = revision;
-        } else if (offer['shop_id'] != null) {
-          shopIds[offer['shop_id'].toString()] = revision;
+        } else if (offer['issuer'] == 'shop') {
+          final shopId = _voucherResourceId(offer['shop_id']);
+          if (shopId != null) shopIds['$shopId'] = revision;
         }
       }
     }
@@ -74,14 +84,20 @@ class VoucherSelection {
     List<Map<String, dynamic>> applied,
   ) {
     final current = _materialize(applied);
-    final revision = (offer['revision_id'] as num?)?.toInt();
+    final revision = _voucherResourceId(offer['revision_id']);
     if (revision == null) return current;
     return offer['issuer'] == 'platform'
         ? VoucherSelection(platform: revision, shops: current.shops)
-        : VoucherSelection(
+        : offer['issuer'] == 'shop' &&
+              _voucherResourceId(offer['shop_id']) != null
+        ? VoucherSelection(
             platform: current.platform,
-            shops: {...current.shops, offer['shop_id'].toString(): revision},
-          );
+            shops: {
+              ...current.shops,
+              '${_voucherResourceId(offer['shop_id'])}': revision,
+            },
+          )
+        : current;
   }
 
   VoucherSelection remove(String? shop, List<Map<String, dynamic>> applied) {

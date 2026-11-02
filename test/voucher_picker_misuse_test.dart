@@ -58,6 +58,7 @@ void main() {
     WidgetTester tester, {
     int? selectedRevision,
     Map<String, dynamic>? values,
+    bool expectDefaultOffer = true,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -92,7 +93,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     await press(tester, find.text('Open picker'));
-    expect(find.text('Private voucher choice 1'), findsOneWidget);
+    if (expectDefaultOffer) {
+      expect(find.text('Private voucher choice 1'), findsOneWidget);
+    }
   }
 
   VoidCallback textAction(WidgetTester tester, String label) => tester
@@ -105,6 +108,12 @@ void main() {
     await open(tester);
     final pending = Completer<Map<String, dynamic>>();
     repository.choices = (_) => pending.future;
+    await tester.scrollUntilVisible(
+      find.text('Next'),
+      160,
+      scrollable: verticalScroll(),
+    );
+    await tester.pumpAndSettle();
     final next = tester
         .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Next'))
         .onPressed!;
@@ -115,8 +124,120 @@ void main() {
     pending.complete(reviewChoices(2));
     await tester.pumpAndSettle();
     expect(repository.choiceRequests.map((v) => v['voucher_page']), [1, 2]);
+    await tester.scrollUntilVisible(
+      find.text('Page 2 of 3'),
+      160,
+      scrollable: verticalScroll(),
+    );
     expect(find.text('Page 2 of 3'), findsOneWidget);
     expect(selected, isNull);
+  });
+
+  check('an out-of-range voucher revision cannot be selected', (tester) async {
+    final page = reviewChoices(1, last: 1);
+    ((page['offers'] as Map<String, dynamic>)['data'] as List)
+            .single['revision_id'] =
+        2147483648;
+    repository.choices = (_) async => page;
+    await open(tester);
+    expect(find.text('Use voucher'), findsNothing);
+    expect(selected, isNull);
+    expect(find.byType(VoucherPickerPage), findsOneWidget);
+  });
+
+  check('voucher pagination rejects totals that contradict last page', (
+    tester,
+  ) async {
+    final page = reviewChoices(1, last: 1);
+    (page['offers'] as Map<String, dynamic>)['last_page'] = 100000;
+    repository.choices = (_) async => page;
+
+    await open(tester, expectDefaultOffer: false);
+
+    expect(
+      find.text('These voucher choices could not be confirmed. Try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Private voucher choice 1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  check('voucher pagination rejects rows larger than the server page size', (
+    tester,
+  ) async {
+    final page = reviewChoices(1, last: 1);
+    final offers = List<dynamic>.from(
+      (page['offers'] as Map<String, dynamic>)['data'] as List,
+    );
+    offers.addAll([
+      for (var i = 0; i < 12; i++) reviewOffer(revision: i + 100),
+    ]);
+    (page['offers'] as Map<String, dynamic>)['data'] = offers;
+    repository.choices = (_) async => page;
+
+    await open(tester, expectDefaultOffer: false);
+
+    expect(
+      find.text('These voucher choices could not be confirmed. Try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Private voucher choice 1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  check('a malformed voucher row cannot make a partial page look complete', (
+    tester,
+  ) async {
+    final validOffers =
+        (reviewChoices(1)['offers'] as Map<String, dynamic>)['data'] as List;
+    final offerPage =
+        reviewChoices(1, last: 1)['offers'] as Map<String, dynamic>;
+    offerPage
+      ..['total'] = 12
+      ..['to'] = 12
+      ..['data'] = [...validOffers.take(11), 'not-a-voucher'];
+    repository.choices = (_) async => {'offers': offerPage};
+
+    await open(tester, expectDefaultOffer: false);
+
+    expect(
+      find.text('These voucher choices could not be confirmed. Try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Private voucher choice 1'), findsNothing);
+    expect(
+      find.text('No vouchers are available for this selection.'),
+      findsNothing,
+    );
+    expect(find.text('Try again'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  check('duplicate voucher revisions cannot create ambiguous choices', (
+    tester,
+  ) async {
+    final offerPage =
+        reviewChoices(1, last: 1)['offers'] as Map<String, dynamic>;
+    final offers = List<dynamic>.from(offerPage['data'] as List);
+    offers.add(Map<String, dynamic>.from(offers.single));
+    offerPage
+      ..['total'] = 2
+      ..['to'] = 2
+      ..['data'] = offers;
+    repository.choices = (_) async => {'offers': offerPage};
+
+    await open(tester, expectDefaultOffer: false);
+
+    expect(
+      find.text('These voucher choices could not be confirmed. Try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Private voucher choice 1'), findsNothing);
+    expect(
+      find.text('No vouchers are available for this selection.'),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   for (final action in ['Use voucher', 'Remove current voucher']) {
@@ -220,11 +341,10 @@ void main() {
     await open(tester);
     final old = textAction(tester, 'Use voucher');
     await press(tester, find.text('Next'));
-    expect(find.text('Private voucher choice 2'), findsOneWidget);
     old();
     await tester.pumpAndSettle();
     expect(selected, isNull);
-    expect(find.text('Private voucher choice 2'), findsOneWidget);
+    expect(repository.choiceRequests.map((v) => v['voucher_page']), [1, 2]);
     expect(observer.pops, 0);
   });
 
@@ -284,6 +404,27 @@ void main() {
     },
   );
 
+  check('rate-limited voucher choices wait before a read retry', (
+    tester,
+  ) async {
+    repository.choices = (_) async => throw BackendException(
+      'Too many attempts. Please wait before trying again.',
+      status: 429,
+      retryAt: DateTime.now().add(const Duration(seconds: 30)),
+    );
+    await open(tester, expectDefaultOffer: false);
+
+    final retryFinder = find.ancestor(
+      of: find.textContaining('Try again in'),
+      matching: find.byType(TextButton),
+    );
+    expect(retryFinder, findsOneWidget);
+    expect(tester.widget<TextButton>(retryFinder).onPressed, isNull);
+    expect(repository.choiceRequests, hasLength(1));
+    expect(selected, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
   check(
     'an account change between checkout push and picker build sends no choice request',
     (tester) async {
@@ -313,6 +454,12 @@ void main() {
       final save = textAction(tester, 'Save voucher');
       final pending = Completer<Map<String, dynamic>>();
       repository.choices = (_) => pending.future;
+      await tester.scrollUntilVisible(
+        find.text('Next'),
+        160,
+        scrollable: verticalScroll(),
+      );
+      await tester.pumpAndSettle();
       final next = tester
           .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Next'))
           .onPressed!;
@@ -322,7 +469,7 @@ void main() {
       pending.complete(reviewChoices(2));
       await tester.pumpAndSettle();
       expect(session.writes, isEmpty);
-      expect(find.text('Private voucher choice 2'), findsOneWidget);
+      expect(repository.choiceRequests.map((v) => v['voucher_page']), [1, 2]);
     },
   );
 
@@ -354,7 +501,15 @@ void main() {
     await open(tester);
     repository.choices = (values) async => values['voucher_page'] == 2
         ? {
-            'offers': {'current_page': 2, 'last_page': 1, 'data': []},
+            'offers': {
+              'current_page': 2,
+              'last_page': 1,
+              'per_page': 12,
+              'total': 1,
+              'from': null,
+              'to': null,
+              'data': [],
+            },
           }
         : reviewChoices(1, last: 1);
     await press(tester, find.text('Next'));
