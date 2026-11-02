@@ -311,8 +311,16 @@ Widget reviewScreen(String name, ReviewRepository repo) => switch (name) {
     onOpenDestination: (_) async {},
     onProfileSection: (_) {},
   ),
-  'saved-products' => SavedProductsPage(repository: repo, ownerId: 7),
-  'followed-shops' => FollowedShopsPage(repository: repo, ownerId: 7),
+  'saved-products' => SavedProductsPage(
+    repository: repo,
+    ownerId: 7,
+    onSearch: (_) {},
+  ),
+  'followed-shops' => FollowedShopsPage(
+    repository: repo,
+    ownerId: 7,
+    onSearch: (_) {},
+  ),
   'verification' => verificationReview(),
   'bag' => BagPage(repository: repo),
   'checkout' => CheckoutPage(repository: repo, initial: checkoutPage()),
@@ -551,6 +559,26 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
+          if (name == 'saved-products') {
+            expect(
+              tester
+                  .widget<TextButton>(
+                    find.widgetWithText(TextButton, 'Continue shopping'),
+                  )
+                  .onPressed,
+              isNotNull,
+            );
+          }
+          if (name == 'followed-shops') {
+            expect(
+              tester
+                  .widget<TextButton>(
+                    find.widgetWithText(TextButton, 'Browse shops'),
+                  )
+                  .onPressed,
+              isNotNull,
+            );
+          }
           if (name == 'shell-search' || name == 'signed-search') {
             final search = find.byKey(const ValueKey('buyer-header-search'));
             await tester.tap(search);
