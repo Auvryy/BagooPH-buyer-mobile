@@ -297,6 +297,15 @@ void main() {
             await tester.pumpAndSettle();
             expect(find.text('Verification needed'), findsOneWidget);
           }
+          if (name == 'login' && scene.$1.width == 320 && scene.$2 == 1) {
+            final label = find.text('Remember this device');
+            expect(label, findsOneWidget);
+            expect(tester.getSize(label).height, lessThan(30));
+            expect(
+              tester.getSize(find.byType(CheckboxListTile)).height,
+              greaterThanOrEqualTo(48),
+            );
+          }
           expect(tester.takeException(), isNull);
           expect(find.byType(Scaffold), findsWidgets);
           if (name == 'home' &&

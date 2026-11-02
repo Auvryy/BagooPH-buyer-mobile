@@ -237,7 +237,7 @@ class _LoginPageState extends State<LoginPage> {
             value: _remember,
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
-            title: const Text('Remember me on this device'),
+            title: const Text('Remember this device'),
             onChanged: _busy
                 ? null
                 : (value) => setState(() => _remember = value ?? false),
