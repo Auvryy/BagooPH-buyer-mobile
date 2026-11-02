@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/application_text_validation.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -455,6 +456,7 @@ class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
                 min: 2,
                 max: 100,
                 autofill: const [AutofillHints.name],
+                check: buyerNameTextError,
               ),
               field(
                 'phone',
@@ -493,6 +495,7 @@ class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
                 lines: 3,
                 autofill: const [AutofillHints.streetAddressLine1],
                 onChanged: (_) => _keepCoordinates = false,
+                check: buyerAddressTextError,
               ),
               field(
                 'postal_code',
@@ -514,6 +517,7 @@ class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
                 required: false,
                 min: 5,
                 max: 255,
+                check: buyerAddressTextError,
               ),
               DropdownButtonFormField<String>(
                 initialValue: _type,

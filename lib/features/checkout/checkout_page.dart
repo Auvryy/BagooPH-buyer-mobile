@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/application_text_validation.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/buyer_repository.dart';
 import '../../core/contact_input.dart';
@@ -962,10 +963,22 @@ class _CheckoutPageState extends State<CheckoutPage>
         }
         if (required && value.isEmpty) return 'Enter ${label.toLowerCase()}.';
         if (value.isEmpty) return null;
+        final maximum = {
+          'recipient_name': 100,
+          'shipping_address': 500,
+          'landmark': 255,
+          'notes': 500,
+          'voucher_code': 50,
+        }[key];
+        if (maximum != null && value.runes.length > maximum) {
+          return 'Use at most $maximum characters.';
+        }
         final minimum =
             {'recipient_name': 2, 'shipping_address': 5, 'landmark': 5}[key] ??
             1;
-        if (value.length < minimum) return 'Use at least $minimum characters.';
+        if (value.runes.length < minimum) {
+          return 'Use at least $minimum characters.';
+        }
         if (key == 'shipping_postal_code' &&
             !RegExp(r'^[0-9]{4}$').hasMatch(value)) {
           return 'Enter a four-digit postal code.';
@@ -973,6 +986,11 @@ class _CheckoutPageState extends State<CheckoutPage>
         if (key == 'recipient_phone') {
           return mobileNumberValidator(v);
         }
+        if (key == 'recipient_name') return buyerNameTextError(value);
+        if (key == 'shipping_address' || key == 'landmark') {
+          return buyerAddressTextError(value);
+        }
+        if (key == 'notes') return buyerNotesTextError(value);
         if (key == 'voucher_code' &&
             !RegExp(r'^[A-Z0-9_-]+$').hasMatch(value.toUpperCase())) {
           return 'Use letters, numbers, underscores or hyphens.';

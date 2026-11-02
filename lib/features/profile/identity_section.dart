@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/application_text_validation.dart';
 import '../../core/web_session.dart';
 import '../../core/buyer_account_scope.dart';
 import '../../core/uploads.dart';
@@ -204,6 +205,24 @@ class _IdentitySectionState extends BuyerProfileFormState<IdentitySection> {
     });
   }
 
+  int _minimumLength(String key) => switch (key) {
+    'name' || 'first_name' || 'last_name' => 2,
+    'middle_name' => 1,
+    'address' => 5,
+    'city' || 'province' || 'municipality' || 'barangay' => 2,
+    'postal_code' => 4,
+    _ => 1,
+  };
+
+  int _maximumLength(String key) => switch (key) {
+    'first_name' || 'middle_name' || 'last_name' => 50,
+    'name' => 100,
+    'address' => 500,
+    'city' || 'province' || 'municipality' || 'barangay' => 255,
+    'postal_code' => 4,
+    _ => 100,
+  };
+
   @override
   Widget build(BuildContext context) => content([
     const ProfileHeading(
@@ -346,7 +365,18 @@ class _IdentitySectionState extends BuyerProfileFormState<IdentitySection> {
           _value,
           required: selected['required'] == true,
           enabled: !_conflict,
-          max: 100,
+          min:
+              (selected['min_length'] as num?)?.toInt() ??
+              _minimumLength(_field),
+          max:
+              (selected['max_length'] as num?)?.toInt() ??
+              _maximumLength(_field),
+          keyboard: selected['type'] == 'tel'
+              ? TextInputType.phone
+              : selected['input_mode'] == 'numeric' || _field == 'postal_code'
+              ? TextInputType.number
+              : TextInputType.text,
+          check: (value) => buyerApplicationFieldError(_field, value),
         ),
       const SizedBox(height: 12),
       Text(
@@ -362,6 +392,7 @@ class _IdentitySectionState extends BuyerProfileFormState<IdentitySection> {
         max: 1000,
         lines: 3,
         enabled: !_conflict,
+        check: buyerNotesTextError,
       ),
       for (final kind in (subject['required_documents'] as List? ?? [])) ...[
         OutlinedButton.icon(
@@ -656,7 +687,14 @@ class _ApplicationEditorState
                     max: (input['max_length'] as num?)?.toInt() ?? 100,
                     keyboard: input['type'] == 'tel'
                         ? TextInputType.phone
+                        : input['input_mode'] == 'numeric' ||
+                              input['key'] == 'postal_code'
+                        ? TextInputType.number
                         : TextInputType.text,
+                    check: (value) => buyerApplicationFieldError(
+                      input['key'].toString(),
+                      value,
+                    ),
                   ),
               OutlinedButton.icon(
                 onPressed: busy ? null : _date,

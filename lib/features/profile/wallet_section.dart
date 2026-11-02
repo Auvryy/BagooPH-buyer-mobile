@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/application_text_validation.dart';
 import '../../core/request_id.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
@@ -163,6 +164,7 @@ class _WalletSectionState extends BuyerProfileFormState<WalletSection> {
         min: 5,
         max: 500,
         lines: 3,
+        check: buyerNotesTextError,
       ),
       if (_submitted != null)
         const Padding(

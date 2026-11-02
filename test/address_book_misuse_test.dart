@@ -452,4 +452,20 @@ void main() {
       }
     });
   }
+
+  for (final entry in {
+    'Recipient name': 'Recipient2',
+    'Street / house / unit number': '123 <script>road</script>',
+  }.entries) {
+    check('address form rejects unsafe ${entry.key}', (tester) async {
+      await open(tester, edit: true);
+      tester
+          .widget<TextFormField>(find.widgetWithText(TextFormField, entry.key))
+          .controller!
+          .text = entry
+          .value;
+      await returnPress(tester, save());
+      expect(repository.calls, isEmpty);
+    });
+  }
 }

@@ -211,6 +211,21 @@ void main() {
     expect(repository.orderCalls, 0);
   });
 
+  for (final entry in {
+    'Recipient name': 'Recipient2',
+    'Street / house / unit': '123 <script>road</script>',
+    'Delivery notes (optional)': 'javascript:alert(1)',
+  }.entries) {
+    check('checkout rejects unsafe ${entry.key} before review', (tester) async {
+      await open(tester);
+      tester.widget<TextFormField>(coordinate(entry.key)).controller!.text =
+          entry.value;
+      await press(tester, find.widgetWithText(FilledButton, 'Review order'));
+      expect(find.text('Confirm your order'), findsNothing);
+      expect(repository.orderCalls, 0);
+    });
+  }
+
   check('a queued review activation cannot confirm while GPS is pending', (
     tester,
   ) async {

@@ -170,6 +170,39 @@ void main() {
     expect(find.text('Currently recorded: Synthetic'), findsOneWidget);
   });
 
+  for (final invalid in ['Revised2', '<script>', 'Жанна', 'Hidden\u200bName']) {
+    check('identity correction rejects invalid name text: $invalid', (
+      tester,
+    ) async {
+      await correction(tester);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Corrected First name'),
+        invalid,
+      );
+      await returnPress(tester, find.text('Submit correction request'));
+      expect(repository.calls, isEmpty);
+    });
+  }
+
+  for (final invalid in [
+    '<script>change</script>',
+    'javascript:change()',
+    'Reason\twith tab',
+    'Hidden\u034ftext',
+  ]) {
+    check('identity correction rejects unsafe reason text: $invalid', (
+      tester,
+    ) async {
+      await correction(tester);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Reason'),
+        invalid,
+      );
+      await returnPress(tester, find.text('Submit correction request'));
+      expect(repository.calls, isEmpty);
+    });
+  }
+
   check('email resend respects the server fifteen-minute cooldown', (
     tester,
   ) async {
@@ -457,6 +490,20 @@ void main() {
     await returnPress(tester, find.text('Submit application for review'));
     expect(repository.calls, isEmpty);
     expect(find.widgetWithText(TextFormField, 'First name'), findsNothing);
+  });
+
+  check('buyer application rejects a name the server would refuse', (
+    tester,
+  ) async {
+    page = applicationPage();
+    await open(tester, 'identity');
+    await returnPress(tester, find.text('Update application details'));
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'First name'),
+      'Revised2',
+    );
+    await returnPress(tester, find.text('Submit application for review'));
+    expect(repository.calls, isEmpty);
   });
 
   for (final beforeNavigation in [true, false]) {

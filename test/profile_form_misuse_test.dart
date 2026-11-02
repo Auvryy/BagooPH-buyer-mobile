@@ -181,6 +181,33 @@ void main() {
     }
   });
 
+  testWidgets('wallet credit reasons reject backend-unsafe notes', (
+    tester,
+  ) async {
+    await open(tester, wallet: true);
+    tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Amount (PHP)'),
+            )
+            .controller!
+            .text =
+        '25.50';
+    final reason = find.widgetWithText(TextFormField, 'Reason');
+    final submit = find.widgetWithText(FilledButton, 'Request credits');
+    for (final value in [
+      '<script>credit request</script>',
+      'javascript:credit()',
+      'Reason\twith tab',
+      'Hidden\u200bcharacter',
+    ]) {
+      tester.widget<TextFormField>(reason).controller!.text = value;
+      await reveal(tester, submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(repository.credits, isEmpty, reason: value);
+    }
+  });
+
   testWidgets(
     'repeated credit taps send once and uncertain retry reuses intent',
     (tester) async {
