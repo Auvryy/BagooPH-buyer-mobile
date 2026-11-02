@@ -495,43 +495,105 @@ class _ShopPageState extends State<ShopPage> {
     String value,
     Map<String, String> choices,
     ValueChanged<String> change,
-  ) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: DropdownButtonFormField<String>(
-      key: ValueKey('$label-$value-${choices.keys.join(',')}'),
-      initialValue: choices.containsKey(value) ? value : null,
-      isExpanded: true,
-      itemHeight: null,
-      decoration: InputDecoration(labelText: label),
-      selectedItemBuilder: (context) => [
-        for (final row in choices.entries)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              row.value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+  ) => LayoutBuilder(
+    builder: (context, constraints) {
+      final media = MediaQuery.of(context);
+      final narrow = constraints.maxWidth <= 400;
+      final compactSelection = narrow && media.textScaler.scale(14) >= 21;
+      final selectedLabel = (choices[value] ?? '').trim();
+      final compactedLabel = _compactShopFilterValue(label, selectedLabel);
+      final hasKnownCompactLabel =
+          compactSelection && compactedLabel != selectedLabel;
+      final availableSelectionWidth = (constraints.maxWidth - 72).clamp(
+        0.0,
+        constraints.maxWidth,
+      );
+      final discloseSelection =
+          narrow &&
+          !hasKnownCompactLabel &&
+          _shopFilterValueExceedsWidth(
+            context,
+            selectedLabel,
+            availableSelectionWidth,
+          );
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey('$label-$value-${choices.keys.join(',')}'),
+          initialValue: choices.containsKey(value) ? value : null,
+          isExpanded: true,
+          itemHeight: null,
+          decoration: InputDecoration(
+            labelText: label,
+            helper: discloseSelection ? Text('Selected: $selectedLabel') : null,
           ),
-      ],
-      items: [
-        for (final row in choices.entries)
-          DropdownMenuItem(
-            value: row.key,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(row.value),
-            ),
-          ),
-      ],
-      onChanged: _busy
-          ? null
-          : (value) {
-              if (value != null) {
-                change(value);
-                _load();
-              }
-            },
-    ),
+          selectedItemBuilder: (_) => [
+            for (final row in choices.entries)
+              Semantics(
+                label: row.value.trim(),
+                child: ExcludeSemantics(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      row.value.trim() == selectedLabel && discloseSelection
+                          ? 'Selected'
+                          : compactSelection
+                          ? _compactShopFilterValue(label, row.value.trim())
+                          : row.value.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+          items: [
+            for (final row in choices.entries)
+              DropdownMenuItem(
+                value: row.key,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(row.value),
+                ),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) {
+                  if (value != null) {
+                    change(value);
+                    _load();
+                  }
+                },
+        ),
+      );
+    },
   );
+}
+
+String _compactShopFilterValue(String label, String value) =>
+    switch ((label, value)) {
+      ('Department', 'All departments') => 'All',
+      ('Store category', 'All products') => 'All',
+      ('Sort products', 'Recommended') => 'Suggested',
+      ('Sort products', 'Price: low to high') => 'Low price',
+      ('Sort products', 'Price: high to low') => 'High price',
+      _ => value,
+    };
+
+bool _shopFilterValueExceedsWidth(
+  BuildContext context,
+  String value,
+  double width,
+) {
+  if (value.isEmpty || width <= 0) return false;
+  final painter = TextPainter(
+    text: TextSpan(text: value, style: Theme.of(context).textTheme.titleMedium),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout(maxWidth: width);
+  final overflow = painter.didExceedMaxLines;
+  painter.dispose();
+  return overflow;
 }

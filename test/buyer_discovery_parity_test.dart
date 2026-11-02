@@ -164,6 +164,7 @@ void main() {
           .last;
       sorts.onChanged!('price_desc');
       await tester.pumpAndSettle();
+      expect(find.text('High price'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.byTooltip('Next page'),
         400,

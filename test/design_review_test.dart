@@ -156,7 +156,11 @@ class ReviewRepository extends FakeBuyerRepository {
     ],
     'storeCategories': [
       {'id': 10, 'name': 'Bags', 'parent_id': null},
-      {'id': 11, 'name': 'Travel', 'parent_id': 10},
+      {
+        'id': 11,
+        'name': 'Travel bags, hiking packs, and everyday carry gear',
+        'parent_id': 10,
+      },
     ],
     'savedProductIds': <int>[],
     'isFollowing': false,
@@ -674,17 +678,97 @@ void main() {
               expect(find.text('Store category'), findsOneWidget);
               final dropdowns = find.byType(DropdownButtonFormField<String>);
               expect(dropdowns, findsNWidgets(3));
-              for (final (index, value) in [
+              final displayedValues = scene.$2 >= 1.5
+                  ? ['All', 'All', 'Suggested']
+                  : ['All departments', 'All products', 'Recommended'];
+              final semanticsValues = [
                 'All departments',
                 'All products',
                 'Recommended',
-              ].indexed) {
+              ];
+              for (final index in [0, 1, 2]) {
                 final field = tester.getRect(dropdowns.at(index));
-                final selected = tester.getRect(find.text(value));
+                final selectedText = find.descendant(
+                  of: dropdowns.at(index),
+                  matching: find.text(displayedValues[index]),
+                );
+                final selected = tester.getRect(selectedText);
                 expect(selected.top, greaterThanOrEqualTo(field.top));
                 expect(selected.bottom, lessThanOrEqualTo(field.bottom));
+                expect(
+                  tester
+                      .renderObject<RenderParagraph>(selectedText)
+                      .didExceedMaxLines,
+                  isFalse,
+                );
+                expect(
+                  find.descendant(
+                    of: dropdowns.at(index),
+                    matching: find.byWidgetPredicate(
+                      (widget) =>
+                          widget is Semantics &&
+                          widget.properties.label == semanticsValues[index],
+                    ),
+                  ),
+                  findsOneWidget,
+                );
               }
               await saveRender('shop-filters_320_${scene.$2}');
+
+              final storeFilter = tester.widget<DropdownButton<String>>(
+                find.descendant(
+                  of: dropdowns.at(1),
+                  matching: find.byType(DropdownButton<String>),
+                ),
+              );
+              storeFilter.onChanged!('11');
+              await tester.pumpAndSettle();
+              final selectedStoreFilter = find
+                  .byType(DropdownButtonFormField<String>)
+                  .at(1);
+              final selectedSummary = find.descendant(
+                of: selectedStoreFilter,
+                matching: find.text('Selected'),
+              );
+              final fullSelection =
+                  'Selected: Travel bags, hiking packs, and everyday carry gear';
+              final selectionDetail = find.text(fullSelection);
+              expect(selectedSummary, findsOneWidget);
+              expect(selectionDetail, findsOneWidget);
+              expect(
+                tester
+                    .renderObject<RenderParagraph>(selectionDetail)
+                    .didExceedMaxLines,
+                isFalse,
+              );
+              expect(
+                find.descendant(
+                  of: selectedStoreFilter,
+                  matching: find.byWidgetPredicate(
+                    (widget) =>
+                        widget is Semantics && widget.properties.label == 'Travel bags, hiking packs, and everyday carry gear',
+                  ),
+                ),
+                findsOneWidget,
+              );
+              await Scrollable.ensureVisible(
+                tester.element(selectedStoreFilter),
+                alignment: .2,
+              );
+              await tester.pumpAndSettle();
+              final selectionRect = tester.getRect(selectionDetail);
+              final filterViewport = tester.getRect(
+                find.byType(CustomScrollView),
+              );
+              expect(
+                selectionRect.top,
+                greaterThanOrEqualTo(filterViewport.top),
+              );
+              expect(
+                selectionRect.bottom,
+                lessThanOrEqualTo(filterViewport.bottom),
+              );
+              await saveRender('shop-category-selected_320_${scene.$2}');
             }
           }
           await tester.pumpWidget(const SizedBox.shrink());
