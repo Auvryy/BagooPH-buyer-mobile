@@ -8,6 +8,7 @@ import '../../core/widgets.dart';
 import '../engagement/engagement_repository.dart';
 import '../home/product_card.dart';
 import '../home/search_controller.dart';
+import 'collection_pagination.dart';
 import '../products/shop_page.dart';
 
 class FollowedShopsPage extends StatefulWidget {
@@ -241,7 +242,7 @@ class _FollowedShopsPageState extends State<FollowedShopsPage> {
                           );
                         },
                       ),
-                      _Paginator(
+                      CollectionPagination(
                         current: _number,
                         last: (_entries['last_page'] as num?)?.toInt() ?? 1,
                         busy: _loading,
@@ -525,42 +526,6 @@ class _EmptyFollowedShops extends StatelessWidget {
             label: const Text('Browse shops'),
           ),
         ],
-      ],
-    ),
-  );
-}
-
-class _Paginator extends StatelessWidget {
-  const _Paginator({
-    required this.current,
-    required this.last,
-    required this.busy,
-    required this.onPage,
-  });
-
-  final int current, last;
-  final bool busy;
-  final ValueChanged<int> onPage;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 24),
-    child: Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      children: [
-        OutlinedButton.icon(
-          onPressed: busy || current <= 1 ? null : () => onPage(current - 1),
-          icon: const Icon(Icons.chevron_left),
-          label: const Text('Previous'),
-        ),
-        Text('Page $current of $last'),
-        OutlinedButton.icon(
-          onPressed: busy || current >= last ? null : () => onPage(current + 1),
-          icon: const Icon(Icons.chevron_right),
-          label: const Text('Next'),
-        ),
       ],
     ),
   );

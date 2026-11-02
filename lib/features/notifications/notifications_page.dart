@@ -638,23 +638,85 @@ class _Paginator extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 24),
-    child: Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      children: [
-        OutlinedButton.icon(
-          onPressed: busy || current <= 1 ? null : () => onPage(current - 1),
-          icon: const Icon(Icons.chevron_left),
-          label: const Text('Previous'),
-        ),
-        Text('Page $current of $last'),
-        OutlinedButton.icon(
-          onPressed: busy || current >= last ? null : () => onPage(current + 1),
-          icon: const Icon(Icons.chevron_right),
-          label: const Text('Next'),
-        ),
-      ],
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact =
+            constraints.maxWidth < 400 ||
+            MediaQuery.textScalerOf(context).scale(1) > 1.3;
+        final previousEnabled = !busy && current > 1;
+        final nextEnabled = !busy && current < last;
+        if (compact) {
+          IconButton action({
+            required String label,
+            required IconData icon,
+            required bool enabled,
+            required VoidCallback onPressed,
+          }) => IconButton(
+            tooltip: label,
+            onPressed: enabled ? onPressed : null,
+            constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              foregroundColor: enabled ? BagooTheme.strong : BagooTheme.muted,
+              backgroundColor: Colors.white,
+              side: BorderSide(
+                color: enabled ? BagooTheme.border : BagooTheme.line,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(BagooTheme.controlRadius),
+              ),
+            ),
+            icon: Icon(icon),
+          );
+
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              action(
+                label: 'Previous notifications page',
+                icon: Icons.chevron_left,
+                enabled: previousEnabled,
+                onPressed: () => onPage(current - 1),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  'Page $current of $last',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 12),
+              action(
+                label: 'Next notifications page',
+                icon: Icons.chevron_right,
+                enabled: nextEnabled,
+                onPressed: () => onPage(current + 1),
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            OutlinedButton.icon(
+              onPressed: previousEnabled ? () => onPage(current - 1) : null,
+              icon: const Icon(Icons.chevron_left),
+              label: const Text('Previous'),
+            ),
+            const SizedBox(width: 12),
+            Text('Page $current of $last'),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: nextEnabled ? () => onPage(current + 1) : null,
+              icon: const Icon(Icons.chevron_right),
+              label: const Text('Next'),
+            ),
+          ],
+        );
+      },
     ),
   );
 }

@@ -31,6 +31,7 @@ class AuthShell extends StatelessWidget {
     body: SafeArea(
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final compact = constraints.maxHeight < 480;
           final wide =
               constraints.maxWidth >= 900 &&
               constraints.maxHeight >= 600 &&
@@ -39,7 +40,7 @@ class AuthShell extends StatelessWidget {
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: EdgeInsets.symmetric(
               horizontal: wide ? 48 : 24,
-              vertical: 24,
+              vertical: compact ? 12 : 24,
             ),
             child: Center(
               child: ConstrainedBox(
@@ -60,7 +61,13 @@ class AuthShell extends StatelessWidget {
                           ),
                         ],
                       ),
-                      SizedBox(height: wide ? 64 : 36),
+                      SizedBox(
+                        height: wide
+                            ? 64
+                            : compact
+                            ? 12
+                            : 36,
+                      ),
                       if (onBack != null)
                         Align(
                           alignment: Alignment.centerLeft,
@@ -82,17 +89,17 @@ class AuthShell extends StatelessWidget {
                           color: BagooTheme.strong,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: compact ? 8 : 12),
                       Text(
                         title,
-                        style: const TextStyle(
-                          fontSize: 32,
+                        style: TextStyle(
+                          fontSize: compact ? 24 : 32,
                           height: 1.2,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -1,
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      SizedBox(height: compact ? 6 : 10),
                       Text(
                         subtitle,
                         style: const TextStyle(
@@ -101,9 +108,9 @@ class AuthShell extends StatelessWidget {
                           height: 1.6,
                         ),
                       ),
-                      const SizedBox(height: 28),
+                      SizedBox(height: compact ? 16 : 28),
                       child,
-                      const SizedBox(height: 32),
+                      SizedBox(height: compact ? 20 : 32),
                       const Divider(),
                       const Padding(
                         padding: EdgeInsets.only(top: 16),

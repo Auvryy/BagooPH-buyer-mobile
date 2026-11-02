@@ -106,6 +106,51 @@ abstract final class BagooTheme {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return states.contains(WidgetState.selected) ? muted : canvas;
+          }
+          return states.contains(WidgetState.selected) ? crimson : Colors.white;
+        }),
+        checkColor: const WidgetStatePropertyAll(Colors.white),
+        side: WidgetStateBorderSide.resolveWith(
+          (states) => BorderSide(
+            color: states.contains(WidgetState.disabled)
+                ? border
+                : states.contains(WidgetState.selected)
+                ? crimson
+                : muted,
+            width: 1.5,
+          ),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        materialTapTargetSize: MaterialTapTargetSize.padded,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return muted;
+          return states.contains(WidgetState.selected) ? Colors.white : muted;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return canvas;
+          return states.contains(WidgetState.selected) ? crimson : Colors.white;
+        }),
+        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return border;
+          return states.contains(WidgetState.selected) ? crimson : muted;
+        }),
+        trackOutlineWidth: const WidgetStatePropertyAll(1.5),
+        overlayColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.pressed) ||
+              states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.focused)) {
+            return rose.withValues(alpha: .24);
+          }
+          return null;
+        }),
+        materialTapTargetSize: MaterialTapTargetSize.padded,
+      ),
       dividerTheme: const DividerThemeData(color: border, thickness: 1),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white,

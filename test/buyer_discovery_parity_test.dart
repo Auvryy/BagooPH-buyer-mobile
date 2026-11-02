@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
+import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart';
@@ -136,6 +137,26 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Filter & sort (1)'), findsOneWidget);
+      final filterToggle = find.byKey(const ValueKey('shop-filter-toggle'));
+      final scrollable = find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final position = tester.state<ScrollableState>(scrollable).position;
+      await tester.dragUntilVisible(
+        filterToggle,
+        find.byType(CustomScrollView),
+        const Offset(0, -250),
+      );
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+      await tester.tap(filterToggle);
+      await tester.pumpAndSettle();
+      expect(find.text('Department'), findsOneWidget);
+      expect(find.text('Store category'), findsOneWidget);
       final sorts = tester
           .widgetList<DropdownButton<String>>(
             find.byType(DropdownButton<String>),
@@ -143,6 +164,7 @@ void main() {
           .last;
       sorts.onChanged!('price_desc');
       await tester.pumpAndSettle();
+      expect(find.text('High price'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.byTooltip('Next page'),
         400,
@@ -164,6 +186,33 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('phone shop shows products before its advanced filters', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final repo = ShopRepository();
+    addTearDown(repo.session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ShopPage(repository: repo, slug: 'test'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Department'), findsNothing);
+    final toggle = find.byKey(const ValueKey('shop-filter-toggle'));
+    expect(tester.getRect(toggle).bottom, lessThan(740));
+    expect(tester.getRect(find.byType(ProductCard).first).top, lessThan(740));
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Department'), findsOneWidget);
+    expect(find.text('Store category'), findsOneWidget);
+    expect(find.text('Sort products'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'voucher product URLs open native product detail with the capped benefit',

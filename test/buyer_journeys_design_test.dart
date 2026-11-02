@@ -168,7 +168,7 @@ void main() {
     for (final scene in [
       (const Size(320, 740), 1.0, 0.0),
       (const Size(375, 812), 1.0, 0.0),
-      (const Size(700, 375), 2.0, 120.0),
+      (const Size(700, 375), 2.0, 0.0),
       (const Size(1024, 768), 1.0, 0.0),
     ]) {
       testWidgets(
@@ -209,9 +209,11 @@ void main() {
               160,
               scrollable: find.byType(Scrollable).first,
             );
-            await tester.pumpAndSettle();
           }
+          await tester.ensureVisible(intended);
+          await tester.pumpAndSettle();
           expect(intended, findsOneWidget);
+          expect(intended.hitTestable(), findsOneWidget);
           if (entry.key == 'tracking' && scene.$1.width == 375) {
             expect(tester.getRect(intended).bottom, lessThan(500));
           }

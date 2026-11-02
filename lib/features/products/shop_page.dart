@@ -34,6 +34,7 @@ class _ShopPageState extends State<ShopPage> {
   final _saving = <int>{};
   bool _busy = false;
   bool _following = false;
+  bool? _filtersExpanded;
   String? _error;
   int _number = 1;
   int _last = 1;
@@ -159,6 +160,12 @@ class _ShopPageState extends State<ShopPage> {
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
             final columns = productColumns(box.maxWidth, scale);
             final width = (box.maxWidth - 32 - (columns - 1) * 14) / columns;
+            final filtersExpanded = _filtersExpanded ?? box.maxWidth >= 760;
+            final activeFilters = [
+              _category.isNotEmpty,
+              _storeCategory != 'all',
+              _sort != 'relevance',
+            ].where((active) => active).length;
             return CustomScrollView(
               slivers: [
                 SliverPadding(
@@ -289,48 +296,87 @@ class _ShopPageState extends State<ShopPage> {
                         ),
                         const SizedBox(height: 16),
                         if (_page != null) ...[
-                          _filter('Department', _category, {
-                            '': 'All departments',
-                            for (final row in mapsOf(
-                              _page?.props['categories'],
-                            ))
-                              row['slug'].toString(): row['name'].toString(),
-                          }, (value) => _category = value),
-                          _filter('Store category', _storeCategory, {
-                            'all': 'All products',
-                            'uncategorized': 'Uncategorized',
-                            for (final root in mapsOf(
-                              _page?.props['storeCategories'],
-                            ).where((row) => row['parent_id'] == null)) ...{
-                              root['id'].toString(): root['name'].toString(),
-                              for (final child in mapsOf(
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                '$_total products',
+                                style: const TextStyle(
+                                  color: BagooTheme.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                key: const ValueKey('shop-filter-toggle'),
+                                onPressed: () => setState(
+                                  () => _filtersExpanded = !filtersExpanded,
+                                ),
+                                icon: Icon(
+                                  filtersExpanded
+                                      ? Icons.expand_less_rounded
+                                      : Icons.tune_rounded,
+                                ),
+                                label: Text(
+                                  filtersExpanded
+                                      ? 'Hide filters'
+                                      : activeFilters == 0
+                                      ? 'Filter & sort'
+                                      : 'Filter & sort ($activeFilters)',
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (filtersExpanded) ...[
+                            const SizedBox(height: 12),
+                            _filter('Department', _category, {
+                              '': 'All departments',
+                              for (final row in mapsOf(
+                                _page?.props['categories'],
+                              ))
+                                row['slug'].toString(): row['name'].toString(),
+                            }, (value) => _category = value),
+                            _filter('Store category', _storeCategory, {
+                              'all': 'All products',
+                              'uncategorized': 'Uncategorized',
+                              for (final root in mapsOf(
                                 _page?.props['storeCategories'],
-                              ).where((row) => row['parent_id'] == root['id']))
-                                child['id'].toString(): '  ${child['name']}',
-                            },
-                          }, (value) => _storeCategory = value),
-                          _filter(
-                            'Sort products',
-                            _sort,
-                            searchSorts,
-                            (value) => _sort = value,
-                          ),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () {
-                                _search.clear();
-                                _category = '';
-                                _storeCategory = 'all';
-                                _sort = 'relevance';
-                                _load();
+                              ).where((row) => row['parent_id'] == null)) ...{
+                                root['id'].toString(): root['name'].toString(),
+                                for (final child
+                                    in mapsOf(_page?.props['storeCategories'])
+                                        .where(
+                                          (row) =>
+                                              row['parent_id'] == root['id'],
+                                        ))
+                                  child['id'].toString(): '  ${child['name']}',
                               },
-                              child: const Text('Reset shop filters'),
+                            }, (value) => _storeCategory = value),
+                            _filter(
+                              'Sort products',
+                              _sort,
+                              searchSorts,
+                              (value) => _sort = value,
                             ),
-                          ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: () {
+                                  _search.clear();
+                                  _category = '';
+                                  _storeCategory = 'all';
+                                  _sort = 'relevance';
+                                  _load();
+                                },
+                                child: const Text('Reset shop filters'),
+                              ),
+                            ),
+                          ],
+                          if (!_busy && _page != null && _products.isEmpty)
+                            const Text('No products match your search.'),
                         ],
-                        if (!_busy && _page != null && _products.isEmpty)
-                          const Text('No products match your search.'),
                       ],
                     ),
                   ),
@@ -449,32 +495,105 @@ class _ShopPageState extends State<ShopPage> {
     String value,
     Map<String, String> choices,
     ValueChanged<String> change,
-  ) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: DropdownButtonFormField<String>(
-      key: ValueKey('$label-$value-${choices.keys.join(',')}'),
-      initialValue: choices.containsKey(value) ? value : null,
-      isExpanded: true,
-      itemHeight: null,
-      decoration: InputDecoration(labelText: label),
-      items: [
-        for (final row in choices.entries)
-          DropdownMenuItem(
-            value: row.key,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(row.value),
-            ),
+  ) => LayoutBuilder(
+    builder: (context, constraints) {
+      final media = MediaQuery.of(context);
+      final narrow = constraints.maxWidth <= 400;
+      final compactSelection = narrow && media.textScaler.scale(14) >= 21;
+      final selectedLabel = (choices[value] ?? '').trim();
+      final compactedLabel = _compactShopFilterValue(label, selectedLabel);
+      final hasKnownCompactLabel =
+          compactSelection && compactedLabel != selectedLabel;
+      final availableSelectionWidth = (constraints.maxWidth - 72).clamp(
+        0.0,
+        constraints.maxWidth,
+      );
+      final discloseSelection =
+          narrow &&
+          !hasKnownCompactLabel &&
+          _shopFilterValueExceedsWidth(
+            context,
+            selectedLabel,
+            availableSelectionWidth,
+          );
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey('$label-$value-${choices.keys.join(',')}'),
+          initialValue: choices.containsKey(value) ? value : null,
+          isExpanded: true,
+          itemHeight: null,
+          decoration: InputDecoration(
+            labelText: label,
+            helper: discloseSelection ? Text('Selected: $selectedLabel') : null,
           ),
-      ],
-      onChanged: _busy
-          ? null
-          : (value) {
-              if (value != null) {
-                change(value);
-                _load();
-              }
-            },
-    ),
+          selectedItemBuilder: (_) => [
+            for (final row in choices.entries)
+              Semantics(
+                label: row.value.trim(),
+                child: ExcludeSemantics(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      row.value.trim() == selectedLabel && discloseSelection
+                          ? 'Selected'
+                          : compactSelection
+                          ? _compactShopFilterValue(label, row.value.trim())
+                          : row.value.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+          items: [
+            for (final row in choices.entries)
+              DropdownMenuItem(
+                value: row.key,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(row.value),
+                ),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) {
+                  if (value != null) {
+                    change(value);
+                    _load();
+                  }
+                },
+        ),
+      );
+    },
   );
+}
+
+String _compactShopFilterValue(String label, String value) =>
+    switch ((label, value)) {
+      ('Department', 'All departments') => 'All',
+      ('Store category', 'All products') => 'All',
+      ('Sort products', 'Recommended') => 'Suggested',
+      ('Sort products', 'Price: low to high') => 'Low price',
+      ('Sort products', 'Price: high to low') => 'High price',
+      _ => value,
+    };
+
+bool _shopFilterValueExceedsWidth(
+  BuildContext context,
+  String value,
+  double width,
+) {
+  if (value.isEmpty || width <= 0) return false;
+  final painter = TextPainter(
+    text: TextSpan(text: value, style: Theme.of(context).textTheme.titleMedium),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout(maxWidth: width);
+  final overflow = painter.didExceedMaxLines;
+  painter.dispose();
+  return overflow;
 }

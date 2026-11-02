@@ -343,7 +343,7 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) => AuthShell(
     title: 'Create an Account',
-    subtitle: 'Join BagooPH in two quick steps to start shopping local Filipino brands.',
+    subtitle: 'Join BagooPH to shop local in two quick steps.',
     registration: true,
     onBack: widget.onBack,
     onBrowse: widget.onBrowse,
