@@ -77,3 +77,11 @@ A signed-in 320-pixel preview showed that the three header actions left too litt
 ## Current narrow-search Android build
 
 After the narrow search editing change, 91 discovery, app, search and responsive layout cases passed with one worker, the signed-in 320-pixel preview was inspected, and whole-project analysis was clean. The configured debug APK was rebuilt with a 1.5 GB Gradle heap cap and one worker; package inspection confirmed the buyer label and adaptive launcher icon resource. The build succeeded with the existing SDK XML version warning. The earlier full isolated run passed 861 cases before this change. Bagoo was not confirmed in the phone foreground, so this APK has not been installed for the device review.
+
+## Code verification and handoff
+
+The complete isolated Flutter suite passed 876 tests with one worker on the narrow-search implementation. The user chose to focus on code and defer phone review. The Android build and whole-project analysis reported above apply to the same app source; the only later change is documentation. Device presentation and live product imagery have not been checked for this redesign.
+
+Proposed pull request title: Refresh buyer shopping and messaging design
+
+Proposed pull request description: Refresh product discovery and detail, the Bag, purchase status tabs, and seller messaging with compact Bagoo styling. Add a branded search header and guide buyers who need verification to the existing identity submission flow. Preserve existing shopping and account rules. The full Flutter suite passed 876 tests with one worker; whole-project analysis and a constrained Android debug build also passed. Phone review and live product imagery remain unverified.
