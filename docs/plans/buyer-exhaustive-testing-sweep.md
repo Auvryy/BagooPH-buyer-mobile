@@ -41,8 +41,9 @@ This section will be updated as each test slice finishes. Passing isolated tests
 | Area | Evidence | Remaining work |
 | --- | --- | --- |
 | Branch coverage | Fresh baseline 4,307/5,942 (72.484%); reproducible complete inventory via `tool/testing/coverage_report.dart` | 1,635 uncovered counters, unmeasured tooling/native source, and source-line counter precision still keep 100% open |
-| Core inputs/models | 51 new core cases pass within the 205-test combined post-fix run; detailed evidence in `../testing/buyer-core-sweep.md` | Continue uncovered helper branches and callback reentrancy |
-| API contracts | 95 new local HTTP cases pass within the 205-test combined post-fix run; route inventory in `../testing/buyer-api-flow-matrix.md` | Close remaining per-route HTTP gaps and keep actual DB prerequisites explicit |
+| Core inputs/models | 54 new core cases; combined 205-test run plus final 11-case retry rerun passed; evidence in `../testing/buyer-core-sweep.md` | Continue uncovered helper branches and refreshed coverage measurement |
+| API contracts | 95 first-slice and 123 extended local HTTP cases passed; route inventory in `../testing/buyer-api-flow-matrix.md` | Per-widget complete schema, interrupted/malformed transport and actual DB prerequisites remain open |
+| Navigation | 56 new cases and 48 existing link cases passed after fixing source loss on invalid search | Continue uncovered Home/Profile destination branches |
 | Database behavior | Mobile has no database owner identified yet | Verify ownership and isolate any required backend acceptance |
 | Critical journeys | Existing Flutter integration suites | Add requested browser automation against a valid supported target |
 | Native Linux | Archived isolated QA snapshot rendered through loopback GTK Broadway + software rendering in headless Chromium | Build current-source fixture and run repeatable native/browser journeys |
@@ -57,7 +58,9 @@ This section will be updated as each test slice finishes. Passing isolated tests
 | B04 | In progress | Flutter reports branch hit/miss counters by source line; default report omits `tool/` and uninstrumented sources | Keep exact counter inventory and missing source list; do not equate the percentage to every boolean alternative |
 | B05 | In progress | Native app imports `dart:io` and has no web target | Drive the real native canvas through Broadway using Playwright; no replacement mock website |
 | B06 | Open prerequisite | The mobile workspace owns HTTP adapters, while SQL/transactions belong to the read-only backend | Keep actual database acceptance distinct from synthetic loopback HTTP tests |
-| B07 | Adversarial reproduction pending | A retry countdown's notification callback restarts its own timer | Verify there is only one active timer and disposal leaves no orphan |
+| B07 | Fixed; targeted retry suite passed 11 tests | A retry countdown's notification callback restarted its own timer, leaving an orphan after disposal | Cancel the existing timer before every reschedule |
+| B08 | Fixed; targeted retry suite passed 11 tests | `startFor` discarded submillisecond duration precision | Preserve bounded microseconds and keep positive future deadlines active |
+| B09 | Fixed; new and existing navigation suites passed 104 tests | An invalid search link closed its source before filter validation failed | Validate linked filters before popping the source route |
 
 The initial baseline uses an explicit manifest of the original tracked test files. Agents may author new tests during that run, but production and existing test sources stay unchanged until the baseline terminates. This keeps baseline evidence tied to the pulled base rather than a moving collection of new cases.
 
@@ -66,6 +69,24 @@ The initial baseline uses an explicit manifest of the original tracked test file
 The first new suite run finished with 159 passes and 11 failures. Seven failure cases established two production defects (two timer precision cases and five XSRF cookie cases). Four failures were new-test setup errors: zero-duration timers were not advanced, or active timers were disposed after the widget invariant check. Those fixtures were corrected. The next run finished with 76 passes and one failure, confirming the third production defect: synchronous foreground reads did not retry. No passing full-suite claim applies to the changed source until the post-fix full run finishes.
 
 After the three fixes, the combined new core/API/coverage-reporter cases and existing foreground, retry, verification, web-session and native-auth transport suites passed **205 tests**. The new browser-runner safety/provenance unit suite also passed **20 Python tests** without opening an app or browser. A post-fix full Flutter coverage run and actual current-source browser/native journeys remain open.
+
+The later core slice reproduced two duration-precision failures and an orphan timer under a reentrant notification callback. All **11 retry tests** passed after those fixes. The next API/navigation run passed **178 cases** and failed one navigation case: invalid search input discarded its source screen. Its fix passed **104 new/existing navigation and buyer-link tests**. All **123 extended API cases** passed in the first run. Browser-runner unit coverage is now **21 passing Python tests**, including the private-cache/browser-cache regression.
+
+Targeted analysis across the changed production files and verified Dart suites reports no issues. The initial full analysis found one missing brace in a new HTTP test; it was corrected. Current-source native fixture compilation passed. Actual Playwright journeys are still being debugged: browser-cache relocation and OCR/remote modifier-key targeting have been harness issues, with no passing three-journey claim yet.
+
+The detailed baseline source backlog is in `../testing/buyer-coverage-baseline.md`. The database execution plan in `../testing/buyer-backend-acceptance-plan.md` lists 40 existing command paths checked read-only; none has been executed. The sibling product and shared database remain untouched.
+
+## Local commits so far
+
+| Commit | Subject |
+| --- | --- |
+| `c22b4c7` | test: inventory buyer workspace branch coverage gaps |
+| `38b4461` | fix(core): preserve retry precision and recover foreground reads |
+| `7b2fd2f` | fix(session): reject malformed XSRF cookies without replaying writes |
+| `8cc587d` | test: extend buyer HTTP flow contracts and database acceptance inventory |
+| `0b88380` | fix(navigation): preserve source screens when linked search is invalid |
+
+These are local checkpoints. The full objective remains open, including the 100% coverage requirement and actual database acceptance. Nothing from this new branch has been published.
 
 ## Coverage commands and interpretation
 
