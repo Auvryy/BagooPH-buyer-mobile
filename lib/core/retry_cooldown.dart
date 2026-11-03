@@ -30,13 +30,13 @@ class RetryCooldown {
   }
 
   void startFor(Duration duration, {bool notify = true}) {
-    final milliseconds = duration.inMilliseconds;
-    final bounded = milliseconds < 0
+    final microseconds = duration.inMicroseconds;
+    final bounded = microseconds < 0
         ? 0
-        : milliseconds > 315360000000
-        ? 315360000000
-        : milliseconds;
-    _setUntil(_now().add(Duration(milliseconds: bounded)), notify: notify);
+        : microseconds > 315360000000000
+        ? 315360000000000
+        : microseconds;
+    _setUntil(_now().add(Duration(microseconds: bounded)), notify: notify);
   }
 
   void clear({bool notify = true}) {
@@ -55,10 +55,10 @@ class RetryCooldown {
   }
 
   void _schedule() {
+    _timer?.cancel();
+    _timer = null;
     final until = _until;
     if (until == null || !until.isAfter(_now())) {
-      _timer?.cancel();
-      _timer = null;
       return;
     }
 

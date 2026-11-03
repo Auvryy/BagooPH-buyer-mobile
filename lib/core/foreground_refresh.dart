@@ -65,7 +65,8 @@ class ForegroundRead {
   Future<void> _perform(ReadTicket ticket) async {
     var outcome = ReadOutcome.retry;
     try {
-      outcome = await read(ticket);
+      // Keep cleanup asynchronous if the callback throws before returning.
+      outcome = await Future<ReadOutcome>.sync(() => read(ticket));
     } catch (_) {
       // Screens provide feedback; an unexpected read failure must not create
       // an unhandled timer error or start a tight retry loop.
