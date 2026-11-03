@@ -554,8 +554,9 @@ class BuyerDestinationRouter {
         'Search is unavailable from this screen. Return to Home and try again.',
       );
     }
+    final filters = _filters(uri);
     if (close) Navigator.of(context).pop();
-    onSearch(_filters(uri));
+    onSearch(filters);
   }
 
   static void _openProfile(

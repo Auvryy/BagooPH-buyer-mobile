@@ -32,8 +32,8 @@ int verificationCooldownRemainingSeconds(
 
 int verificationCooldownSecondsUntil(DateTime deadline, {DateTime? now}) {
   final instant = now ?? DateTime.now();
-  final milliseconds = deadline.difference(instant).inMilliseconds;
-  if (milliseconds <= 0) return 0;
-  final seconds = (milliseconds + 999) ~/ 1000;
+  final microseconds = deadline.difference(instant).inMicroseconds;
+  if (microseconds <= 0) return 0;
+  final seconds = (microseconds + 999999) ~/ 1000000;
   return seconds > 3600 ? 3600 : seconds;
 }

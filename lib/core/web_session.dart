@@ -419,7 +419,13 @@ class WebSession {
       if (values != null) {
         final cookie = _cookies['XSRF-TOKEN|/']?.cookie.value;
         if (cookie != null) {
-          request.headers.set('X-XSRF-TOKEN', Uri.decodeComponent(cookie));
+          try {
+            request.headers.set('X-XSRF-TOKEN', Uri.decodeComponent(cookie));
+          } on ArgumentError {
+            _rejectInvalidXsrf(request);
+          } on FormatException {
+            _rejectInvalidXsrf(request);
+          }
         } else if (_csrf != null) {
           request.headers.set('X-CSRF-TOKEN', _csrf!);
         }
@@ -578,6 +584,19 @@ class WebSession {
         connectionFailure: true,
       );
     }
+  }
+
+  Never _rejectInvalidXsrf(HttpClientRequest request) {
+    // Aborting completes done with an error even before close has been called.
+    unawaited(
+      request.done.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+    );
+    request.abort();
+    clear();
+    throw const BackendException(
+      'Your session expired. Please try again.',
+      status: 419,
+    );
   }
 
   WebPage _readPage(_Reply response) {
