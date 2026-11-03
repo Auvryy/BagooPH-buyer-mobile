@@ -7,7 +7,9 @@ import 'package:bagoo_buyer_mobile/features/checkout/bag_page.dart';
 import 'package:bagoo_buyer_mobile/features/auth/login_page.dart';
 import 'package:bagoo_buyer_mobile/features/auth/password_link_page.dart';
 import 'package:bagoo_buyer_mobile/features/engagement/buyer_link.dart';
+import 'package:bagoo_buyer_mobile/features/engagement/buyer_destination_router.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
+import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/profile/profile_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
@@ -118,6 +120,37 @@ Uri verification(int owner) => Uri.parse(
 
 void main() {
   final origin = Uri.parse('https://buyer.example.test');
+  test('buyer links enforce their URL and reset-token size boundaries', () {
+    final prefix = '${origin.origin}/buyer/search?x=';
+    final maximumLink = Uri.parse('$prefix${'a' * (4096 - prefix.length)}');
+    expect(maximumLink.toString().length, 4096);
+    expect(
+      BuyerLink.parse(maximumLink, origin).kind,
+      BuyerLinkKind.destination,
+    );
+    expect(
+      () => BuyerLink.parse(Uri.parse('${maximumLink}a'), origin),
+      throwsA(isA<BackendException>()),
+    );
+
+    for (final length in [10, 512]) {
+      final link = BuyerLink.parse(
+        origin.resolve('/reset-password/${'a' * length}?role=buyer'),
+        origin,
+      );
+      expect(link.kind, BuyerLinkKind.passwordReset);
+    }
+    for (final length in [9, 513]) {
+      expect(
+        () => BuyerLink.parse(
+          origin.resolve('/reset-password/${'a' * length}?role=buyer'),
+          origin,
+        ),
+        throwsA(isA<BackendException>()),
+      );
+    }
+  });
+
   for (final value in [
     'https://foreign.example.test/product/bag',
     'https://user:password@buyer.example.test/product/bag',
@@ -129,6 +162,10 @@ void main() {
     'https://buyer.example.test/buyer/orders/0',
     'https://buyer.example.test/product/%2Fadmin',
     'https://buyer.example.test/reset-password/token123456?role=admin',
+    'https://buyer.example.test/reset-password/token123456?role=buyer&role=admin',
+    'https://buyer.example.test/reset-password/token123456?role=buyer&role=buyer',
+    'https://buyer.example.test/verify-email/7/${List.filled(40, 'a').join()}?expires=1999999999&expires=1&signature=${List.filled(64, 'b').join()}',
+    'https://buyer.example.test/verify-email/7/${List.filled(40, 'a').join()}?expires=1999999999&signature=${List.filled(64, 'b').join()}&signature=${List.filled(64, 'c').join()}',
   ]) {
     test('rejects unsafe or non-buyer incoming destination $value', () {
       expect(
@@ -157,6 +194,253 @@ void main() {
       },
     );
   }
+
+  for (final query in [
+    'min_price=15oops',
+    'max_price=-1',
+    'min_price=100000000',
+  ]) {
+    testWidgets('incoming search links reject invalid price $query', (
+      tester,
+    ) async {
+      final repo = LinkRepository();
+      addTearDown(repo.session.close);
+      BackendException? rejection;
+      Object? selectedFilters;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  try {
+                    await BuyerDestinationRouter.openHref(
+                      context,
+                      repo,
+                      'http://backend.test/buyer/search?$query',
+                      onSearch: (filters) => selectedFilters = filters,
+                      onProfileSection: (_) {},
+                    );
+                  } on BackendException catch (error) {
+                    rejection = error;
+                  }
+                },
+                child: const Text('Open search link'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open search link'));
+      await tester.pumpAndSettle();
+
+      expect(
+        rejection?.message,
+        'This search link has an invalid price filter.',
+      );
+      expect(selectedFilters, isNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('incoming search links normalize unknown optional filters', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    SearchFilters? selectedFilters;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => BuyerDestinationRouter.openHref(
+                context,
+                repo,
+                'http://backend.test/buyer/search?rating=6&sort=unknown&in_stock=yes',
+                onSearch: (filters) => selectedFilters = filters,
+                onProfileSection: (_) {},
+              ),
+              child: const Text('Open search link'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open search link'));
+    await tester.pumpAndSettle();
+
+    expect(selectedFilters?.rating, '');
+    expect(selectedFilters?.sort, 'relevance');
+    expect(selectedFilters?.inStock, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('incoming search price filters trim control whitespace', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    SearchFilters? selectedFilters;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => BuyerDestinationRouter.openHref(
+                context,
+                repo,
+                'http://backend.test/buyer/search?min_price=%0A1%0A&max_price=%092.50%09',
+                onSearch: (filters) => selectedFilters = filters,
+                onProfileSection: (_) {},
+              ),
+              child: const Text('Open padded search link'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open padded search link'));
+    await tester.pumpAndSettle();
+
+    expect(selectedFilters?.minimum, '1');
+    expect(selectedFilters?.maximum, '2.50');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('incoming search links reject overlong search text', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    BackendException? rejection;
+    Object? selectedFilters;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                try {
+                  await BuyerDestinationRouter.openHref(
+                    context,
+                    repo,
+                    'http://backend.test/buyer/search?search=${'a' * 101}',
+                    onSearch: (filters) => selectedFilters = filters,
+                    onProfileSection: (_) {},
+                  );
+                } on BackendException catch (error) {
+                  rejection = error;
+                }
+              },
+              child: const Text('Open search link'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open search link'));
+    await tester.pumpAndSettle();
+
+    expect(
+      rejection?.message,
+      'Use no more than 100 characters for your search.',
+    );
+    expect(selectedFilters, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final value in [
+    'boots%0Awater',
+    'boots%00water',
+    'boots%E2%80%A8water',
+  ]) {
+    testWidgets('incoming search links reject line controls: $value', (
+      tester,
+    ) async {
+      final repo = LinkRepository();
+      addTearDown(repo.session.close);
+      BackendException? rejection;
+      Object? selectedFilters;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  try {
+                    await BuyerDestinationRouter.openHref(
+                      context,
+                      repo,
+                      'http://backend.test/buyer/search?search=$value',
+                      onSearch: (filters) => selectedFilters = filters,
+                      onProfileSection: (_) {},
+                    );
+                  } on BackendException catch (error) {
+                    rejection = error;
+                  }
+                },
+                child: const Text('Open search link'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open search link'));
+      await tester.pumpAndSettle();
+
+      expect(rejection?.message, 'This search link has an invalid query.');
+      expect(selectedFilters, isNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('incoming search links accept 100 Unicode characters', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    final query = '😀' * 100;
+    String? selectedQuery;
+    Object? rejection;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                try {
+                  await BuyerDestinationRouter.openHref(
+                    context,
+                    repo,
+                    'http://backend.test/buyer/search?search=${Uri.encodeQueryComponent(query)}',
+                    onSearch: (filters) => selectedQuery = filters.query,
+                    onProfileSection: (_) {},
+                  );
+                } on BackendException catch (error) {
+                  rejection = error;
+                }
+              },
+              child: const Text('Open search link'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open search link'));
+    await tester.pumpAndSettle();
+
+    expect(rejection, isNull);
+    expect(selectedQuery, query);
+    expect(selectedQuery!.runes.length, 100);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('incoming website Bag alias opens the guest native Bag', (
     tester,
@@ -471,6 +755,44 @@ void main() {
       expect(find.byType(HomePage), findsNothing);
     },
   );
+
+  testWidgets('pasted recovery rejects duplicate email or role parameters', (
+    tester,
+  ) async {
+    final repo = LinkRepository();
+    addTearDown(repo.session.close);
+    final links = [
+      Uri.parse(
+        'http://backend.test/reset-password/reset-token-123456?email=buyer%40example.test&role=admin&role=buyer',
+      ),
+      Uri.parse(
+        'http://backend.test/reset-password/reset-token-123456?email=other%40example.test&email=buyer%40example.test&role=buyer',
+      ),
+    ];
+
+    for (var index = 0; index < links.length; index++) {
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey(index),
+          theme: BagooTheme.light,
+          home: PasswordLinkPage(
+            repository: repo,
+            initialLink: links[index],
+            onComplete: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Use the complete buyer password reset link'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(TextFormField, 'New password'), findsNothing);
+      expect(tester.takeException(), isNull);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'a late recovery session check cannot display the prior account after sign-out',

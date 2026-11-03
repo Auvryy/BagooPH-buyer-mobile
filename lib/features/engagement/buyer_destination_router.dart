@@ -482,19 +482,30 @@ class BuyerDestinationRouter {
   }
 
   static SearchFilters _filters(Uri uri) {
-    for (final key in ['min_price', 'max_price']) {
-      if (SearchFilters.priceError(uri.queryParameters[key]) != null) {
-        throw const BackendException(
-          'This search link has an invalid price filter.',
-        );
-      }
+    final rawQuery = uri.queryParameters['search'] ?? '';
+    if (RegExp(r'[\p{Cc}\p{Zl}\p{Zp}]', unicode: true).hasMatch(rawQuery)) {
+      throw const BackendException('This search link has an invalid query.');
+    }
+    final query = rawQuery.trim();
+    final minimum = uri.queryParameters['min_price']?.trim() ?? '';
+    final maximum = uri.queryParameters['max_price']?.trim() ?? '';
+    if (query.runes.length > 100) {
+      throw const BackendException(
+        'Use no more than 100 characters for your search.',
+      );
+    }
+    if (SearchFilters.priceError(minimum) != null ||
+        SearchFilters.priceError(maximum) != null) {
+      throw const BackendException(
+        'This search link has an invalid price filter.',
+      );
     }
     return SearchFilters(
-      query: uri.queryParameters['search'] ?? '',
+      query: query,
       category: uri.queryParameters['category'] ?? '',
       location: uri.queryParameters['location'] ?? '',
-      minimum: uri.queryParameters['min_price'] ?? '',
-      maximum: uri.queryParameters['max_price'] ?? '',
+      minimum: minimum,
+      maximum: maximum,
       rating:
           [
             '',

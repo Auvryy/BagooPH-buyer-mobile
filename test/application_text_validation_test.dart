@@ -42,8 +42,16 @@ void main() {
 
   test('notes permit ordinary newlines and reject markup and unsafe text', () {
     expect(buyerNotesTextError('Leave at the gate\nCall on arrival.'), isNull);
+    expect(
+      buyerNotesTextError('Leave at the gate\r\nCall on arrival.'),
+      isNull,
+    );
     expect(buyerNotesTextError('Please call at 3pm.'), isNull);
     expect(buyerNotesTextError('   '), isNotNull);
+    expect(
+      buyerNotesTextError('Leave at the gate\rCall on arrival.'),
+      isNotNull,
+    );
     expect(buyerNotesTextError('<script>alert(1)</script>'), isNotNull);
     expect(buyerNotesTextError('javascript:alert(1)'), isNotNull);
     expect(buyerNotesTextError('onerror = run()'), isNotNull);

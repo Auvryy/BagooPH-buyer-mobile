@@ -35,21 +35,28 @@ class BuyerLink {
     }[uri.path];
     if (canonical != null) uri = uri.replace(path: canonical);
     final parts = uri.pathSegments;
+    final queryValues = uri.queryParametersAll;
+    final resetRoles = queryValues['role'];
+    final hasSingleBuyerRole =
+        resetRoles == null ||
+        resetRoles.length == 1 && resetRoles.single == 'buyer';
     if (parts.length == 2 &&
         parts.first == 'reset-password' &&
         RegExp(r'^[a-zA-Z0-9_-]{10,512}$').hasMatch(parts.last) &&
-        (uri.queryParameters['role'] == null ||
-            uri.queryParameters['role'] == 'buyer')) {
+        hasSingleBuyerRole) {
       return BuyerLink._(uri, BuyerLinkKind.passwordReset, false);
     }
+    final expiryValues = queryValues['expires'];
+    final signatureValues = queryValues['signature'];
     if (parts.length == 3 &&
         parts.first == 'verify-email' &&
         buyerLinkId(parts[1]) != null &&
         RegExp(r'^[a-fA-F0-9]{40}$').hasMatch(parts[2]) &&
         RegExp(r'^[0-9]{1,11}$')
-            .hasMatch(uri.queryParameters['expires'] ?? '') &&
-        RegExp(r'^[a-fA-F0-9]{64}$')
-            .hasMatch(uri.queryParameters['signature'] ?? '')) {
+            .hasMatch(expiryValues?.length == 1 ? expiryValues!.single : '') &&
+        RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(
+          signatureValues?.length == 1 ? signatureValues!.single : '',
+        )) {
       return BuyerLink._(uri, BuyerLinkKind.emailVerification, true);
     }
     final public =

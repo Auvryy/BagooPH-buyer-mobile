@@ -63,9 +63,13 @@ WebPage results({
 
 class SearchRepository extends FakeBuyerRepository {
   Future<WebPage> Function(Map<String, String>, int)? searchHandler;
+  int searchCalls = 0;
   @override
-  Future<WebPage> search(Map<String, String> filters, {int page = 1}) =>
-      searchHandler?.call(Map.of(filters), page) ?? Future.value(results());
+  Future<WebPage> search(Map<String, String> filters, {int page = 1}) {
+    searchCalls++;
+    return searchHandler?.call(Map.of(filters), page) ??
+        Future.value(results());
+  }
 }
 
 void main() {
@@ -79,7 +83,27 @@ void main() {
         SearchFilters(query: List.filled(101, 'x').join()),
       );
 
-      expect(repository.searchRequests, isEmpty);
+      expect(repository.searchCalls, 0);
+      expect(
+        controller.error,
+        'Use no more than 100 characters for your search.',
+      );
+      controller.dispose();
+      repository.session.close();
+    },
+  );
+
+  test(
+    'search rejects a long composed Unicode query before requesting the server',
+    () async {
+      final repository = SearchRepository();
+      final controller = CatalogueSearchController(repository);
+      final query = '👨‍👩‍👧‍👦' * 15;
+
+      expect(query.runes.length, 105);
+      await controller.apply(SearchFilters(query: query));
+
+      expect(repository.searchCalls, 0);
       expect(
         controller.error,
         'Use no more than 100 characters for your search.',
