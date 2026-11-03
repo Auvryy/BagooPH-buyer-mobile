@@ -23,7 +23,8 @@ class MultipartPayload {
         'bagoo${List.generate(24, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
     final body = BytesBuilder(copy: false);
     void text(String value) => body.add(utf8.encode(value));
-    String safe(String value) => value.replaceAll(RegExp(r'[\r\n"\\]'), '_');
+    String safe(String value) =>
+        value.replaceAll(RegExp(r'[\x00-\x1f\x7f"\\]'), '_');
     void value(String key, dynamic item) {
       if (item is Map) {
         for (final entry in item.entries) {
