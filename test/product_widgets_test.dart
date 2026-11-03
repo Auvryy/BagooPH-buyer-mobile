@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:bagoo_buyer_mobile/core/buyer_actions.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
 import 'package:bagoo_buyer_mobile/app/theme.dart';
@@ -9,10 +11,27 @@ import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/checkout/checkout_page.dart';
 import 'package:bagoo_buyer_mobile/main.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_buyer_repository.dart';
 import 'support/widget_helpers.dart';
+
+Future<void> openReviewsSection(WidgetTester tester) async {
+  final reviewsTab = find.widgetWithText(ActionChip, 'Reviews & photos');
+  await tester.scrollUntilVisible(
+    reviewsTab,
+    300,
+    scrollable: find
+        .descendant(
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.tap(reviewsTab);
+  await tester.pumpAndSettle();
+}
 
 void main() {
   late FakeBuyerRepository repo;
@@ -37,6 +56,53 @@ void main() {
     expect(find.text('-2 sold'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Linux sharing offers a working copy-link fallback', (
+    tester,
+  ) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    repo.productResponse = productPage();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag/blue'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Share product'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'System sharing is unavailable in this preview. Use Copy link.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Copy product link'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(copied, 'http://backend.test/product/everyday-bag%2Fblue');
+    expect(find.text('Product link copied.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, skip: !Platform.isLinux);
 
   for (final malformedSlug in ['', '   ', 12]) {
     testWidgets(
@@ -270,6 +336,213 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Review with malformed'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('complete verified reviews render nested details and photos', (
+    tester,
+  ) async {
+    repo.productResponse = productPage(
+      override: {
+        'verified_review_count': 1,
+        'reviews': [
+          {
+            'id': 31,
+            'rating': 5,
+            'images': ['/review-photo.jpg', '', 42, '   '],
+            'comment': 'Useful product.',
+            'created_at': '2026-11-02T00:00:00Z',
+            'verified_purchase': true,
+            'buyer': {'name': 'A***'},
+            'purchased_options': {'Color': 'Blue'},
+            'reply': {
+              'text': 'Thank you for sharing your feedback.',
+              'created_at': '2026-11-02T01:00:00Z',
+              'updated_at': '2026-11-02T02:00:00Z',
+              'shop_name': 'Everyday Goods',
+            },
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openReviewsSection(tester);
+
+    expect(find.text('Customer photo gallery'), findsOneWidget);
+    expect(find.text('A***'), findsOneWidget);
+    expect(find.text('Verified Purchase'), findsOneWidget);
+    expect(find.text('Purchased option: Blue'), findsOneWidget);
+    expect(find.text('Useful product.'), findsOneWidget);
+    expect(find.text('Seller reply · Everyday Goods'), findsOneWidget);
+    expect(find.text('Thank you for sharing your feedback.'), findsOneWidget);
+    final photo = find.bySemanticsLabel('Open customer photo 1');
+    await tester.ensureVisible(photo);
+    await tester.tap(photo);
+    await tester.pumpAndSettle();
+    expect(find.byType(ImageViewer), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'legacy reviews use safe labels when optional fields are absent',
+    (tester) async {
+      repo.productResponse = productPage(
+        override: {
+          'reviews': [
+            {
+              'id': 32,
+              'rating': 4,
+              'created_at': '2026-11-02T00:00:00Z',
+              'verified_purchase': false,
+            },
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openReviewsSection(tester);
+
+      expect(find.text('Shopper'), findsOneWidget);
+      expect(find.text('Unverified legacy review'), findsOneWidget);
+      expect(find.text('Customer photo gallery'), findsNothing);
+      expect(find.text('No customer reviews yet'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('duplicate review IDs do not render a partial review list', (
+    tester,
+  ) async {
+    final review = {
+      'id': 31,
+      'rating': 5,
+      'images': [],
+      'created_at': '2026-11-02T00:00:00Z',
+      'verified_purchase': true,
+    };
+    repo.productResponse = productPage(
+      override: {
+        'reviews': [
+          {...review, 'comment': 'First review.'},
+          {...review, 'comment': 'Duplicate review.'},
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openReviewsSection(tester);
+
+    expect(
+      find.text(
+        'Customer reviews could not be confirmed. Refresh this product.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('First review.'), findsNothing);
+    expect(find.text('Duplicate review.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final (label, field, value) in [
+    ('zero ID', 'id', 0),
+    ('fractional ID', 'id', 31.5),
+    ('string ID', 'id', '31'),
+    ('non-text comment', 'comment', 9),
+    ('non-text review date', 'created_at', 20261102),
+    ('buyer row type', 'buyer', 'malformed buyer'),
+    ('buyer key type', 'buyer', {1: 'malformed key'}),
+    ('buyer name type', 'buyer', {'name': 7}),
+    ('option row type', 'purchased_options', 'Blue'),
+    ('option key type', 'purchased_options', {1: 'Blue'}),
+    ('option value type', 'purchased_options', {'Color': 7}),
+    ('reply row type', 'reply', 'malformed reply'),
+    ('reply key type', 'reply', {1: 'malformed key'}),
+    ('reply text type', 'reply', {'text': 7}),
+    ('blank reply text', 'reply', {'text': '   '}),
+    (
+      'impossible reply date',
+      'reply',
+      {'text': 'Thanks', 'created_at': '2026-02-30T12:00:00Z'},
+    ),
+    (
+      'impossible reply update date',
+      'reply',
+      {
+        'text': 'Thanks',
+        'created_at': '2026-11-02T00:00:00Z',
+        'updated_at': '2026-02-30T12:00:00Z',
+      },
+    ),
+    (
+      'non-text reply update date',
+      'reply',
+      {
+        'text': 'Thanks',
+        'created_at': '2026-11-02T00:00:00Z',
+        'updated_at': 20261102,
+      },
+    ),
+    (
+      'shop name type',
+      'reply',
+      {'text': 'Thanks', 'created_at': '2026-11-02T00:00:00Z', 'shop_name': 9},
+    ),
+  ]) {
+    testWidgets('product reviews reject malformed $label data', (tester) async {
+      repo.productResponse = productPage(
+        override: {
+          'reviews': [
+            {
+              'id': 31,
+              'rating': 5,
+              'images': [],
+              'comment': 'Do not show a partial review.',
+              'created_at': '2026-11-02T00:00:00Z',
+              'verified_purchase': true,
+              'buyer': {'name': 'A***'},
+              field: value,
+            },
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openReviewsSection(tester);
+
+      expect(
+        find.text(
+          'Customer reviews could not be confirmed. Refresh this product.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Do not show a partial review.'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     });

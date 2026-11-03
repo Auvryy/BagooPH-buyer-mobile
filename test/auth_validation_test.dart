@@ -2,7 +2,12 @@ import 'package:bagoo_buyer_mobile/core/auth_validation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  for (final value in ['Example!123', 'Éñgel!١٢٣', 'Aa1!${'x' * 124}']) {
+  for (final value in [
+    'Aa1!bcde',
+    'Example!123',
+    'Éñgel!١٢٣',
+    'Aa1!${'x' * 124}',
+  ]) {
     test('allows server-compatible password: $value', () {
       expect(passwordValidator(value), isNull);
     });
@@ -26,8 +31,19 @@ void main() {
   test('bounds email before availability checks or authentication', () {
     expect(emailValidator(''), isNotNull);
     expect(emailValidator('bad-email'), isNotNull);
-    expect(emailValidator('${'x' * 256}@example.test'), isNotNull);
+    final maximumEmail = '${'a' * 242}@example.test';
+    final overMaximumEmail = '${'a' * 243}@example.test';
+    expect(maximumEmail.runes.length, 255);
+    expect(overMaximumEmail.runes.length, 256);
+    expect(emailValidator(maximumEmail), isNull);
+    expect(emailValidator(overMaximumEmail), isNotNull);
     expect(emailValidator('buyer@example.test'), isNull);
+  });
+
+  test('registration names enforce exact minimum and maximum lengths', () {
+    expect(registrationNameValidator('Al', label: 'first name'), isNull);
+    expect(registrationNameValidator('A' * 50, label: 'first name'), isNull);
+    expect(registrationNameValidator('A' * 51, label: 'first name'), isNotNull);
   });
 
   test('registration names follow the backend plain-name contract', () {
@@ -58,8 +74,11 @@ void main() {
         reason: value,
       );
     }
+    expect(registrationAddressValidator('A' * 5), isNull);
+    expect(registrationAddressValidator('A' * 4), isNotNull);
+    expect(registrationAddressValidator('A' * 500), isNull);
+    expect(registrationAddressValidator('A' * 501), isNotNull);
     expect(registrationAddressValidator("Unit #4, St. John's Road"), isNull);
     expect(registrationAddressValidator('123 <script>'), isNotNull);
-    expect(registrationAddressValidator('A' * 501), isNotNull);
   });
 }

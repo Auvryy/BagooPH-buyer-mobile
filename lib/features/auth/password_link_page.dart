@@ -156,13 +156,17 @@ class _PasswordLinkPageState extends State<PasswordLinkPage>
   void _accept(Uri link) {
     final target = widget.repository.session.resolve(link.toString());
     final parts = target.pathSegments;
-    final email = target.queryParameters['email'] ?? '';
+    final queryValues = target.queryParametersAll;
+    final emails = queryValues['email'];
+    final email = emails?.length == 1 ? emails!.single : '';
+    final roles = queryValues['role'];
+    final hasSingleBuyerRole =
+        roles == null || roles.length == 1 && roles.single == 'buyer';
     if (parts.length != 2 ||
         parts.first != 'reset-password' ||
         !RegExp(r'^[a-zA-Z0-9_-]{10,512}$').hasMatch(parts.last) ||
         emailValidator(email) != null ||
-        target.queryParameters['role'] != null &&
-            target.queryParameters['role'] != 'buyer') {
+        !hasSingleBuyerRole) {
       throw const BackendException(
         'Use the complete buyer password reset link from your email.',
       );

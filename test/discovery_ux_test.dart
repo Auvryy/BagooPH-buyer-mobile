@@ -10,6 +10,7 @@ import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
+import 'package:bagoo_buyer_mobile/features/profile/order_detail_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +56,62 @@ class NavigationSession extends FakeSession {
       return const WebPage('Buyer/Messages', {
         'auth': {'user': buyer},
         'conversations': [],
+      });
+    }
+    return super.page(path, bootstrap: bootstrap);
+  }
+}
+
+class HomeShipmentSession extends FakeSession {
+  int orderDetailReads = 0;
+
+  @override
+  Future<WebPage> page(String path, {bool bootstrap = false}) async {
+    if (path == '/buyer/orders/42') {
+      orderDetailReads++;
+      return WebPage('Buyer/OrderDetail', {
+        'auth': {'user': buyer},
+        'order': {
+          'id': 42,
+          'order_number': 'BG-42',
+          'status': 'in_transit',
+          'created_at': '2026-11-02T00:00:00Z',
+          'items': [
+            {
+              'id': 101,
+              'quantity': 1,
+              'unit_price': '1200.00',
+              'subtotal': '1200.00',
+              'product': {'name': 'Everyday bag'},
+            },
+          ],
+          'subtotal': '1200.00',
+          'shipping_fee': '0.00',
+          'voucher_discount': '0.00',
+          'total_amount': '1200.00',
+          'payment_method': 'wallet',
+          'payment_status': 'paid',
+          'recipient_name': 'Buyer Sample',
+          'shipping_address': '42 Sampaguita Street',
+          'shipping_city': 'San Pablo City',
+          'shipping_province': 'Laguna',
+          'shipping_postal_code': '4000',
+          'delivery': {
+            'tracking_number': 'PH-TRACK-42',
+            'logistics_partner': 'Bagoo Express',
+            'delivery_recipient_name': 'Buyer Sample',
+            'delivery_address': '42 Sampaguita Street',
+            'courier': {'name': 'Liza'},
+          },
+          'tracking': {
+            'status_label': 'In transit',
+            'stage_label': 'Out for delivery',
+            'history': [],
+          },
+        },
+        'canConfirmReceipt': false,
+        'canUsePortal': true,
+        'orderNotices': [],
       });
     }
     return super.page(path, bootstrap: bootstrap);
@@ -607,6 +664,228 @@ void main() {
     await refresh;
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Home delivery opens its confirmed buyer order', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 812);
+    addTearDown(tester.view.reset);
+    final session = HomeShipmentSession();
+    final repo = BuyerRepository(session);
+    addTearDown(session.close);
+
+    final validPage = homePage(signedIn: true);
+    validPage.props['buyerApplication'] = {
+      'can_use_portal': false,
+      'user': {
+        'kyc_status': 'pending',
+        'kyc_feedback': 'We are reviewing your documents.',
+      },
+    };
+    validPage.props['activeShipment'] = {
+      'order_id': 42,
+      'order_number': 'BG-42',
+      'item_name': 'Everyday bag',
+      'status': 'in_transit',
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: validPage,
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Your delivery'));
+    expect(find.text('Application: pending'), findsOneWidget);
+    expect(find.text('We are reviewing your documents.'), findsOneWidget);
+    expect(find.text('Order BG-42 · Everyday bag'), findsOneWidget);
+    expect(find.text('in transit · Courier to be assigned'), findsOneWidget);
+    expect(find.text('Estimated arrival: Not yet available'), findsOneWidget);
+    expect(find.text('View delivery'), findsOneWidget);
+    final delivery = find.widgetWithText(TextButton, 'View delivery');
+    await tester.ensureVisible(delivery);
+    await tester.pumpAndSettle();
+    await tester.tap(delivery);
+    await tester.pumpAndSettle();
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+    expect(find.text('Order #BG-42'), findsOneWidget);
+    expect(find.text('In transit'), findsWidgets);
+    await tester.ensureVisible(find.text('Everyday bag'));
+    expect(find.text('Everyday bag'), findsOneWidget);
+    final orderScrollable = find
+        .descendant(
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    for (final detail in [
+      'Tracking number: PH-TRACK-42',
+      'Recipient: Buyer Sample',
+      'Courier: Liza',
+      'Delivery address: 42 Sampaguita Street',
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(detail),
+        280,
+        scrollable: orderScrollable,
+      );
+      expect(find.text(detail), findsOneWidget);
+    }
+    expect(session.orderDetailReads, 1);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    final malformedShipments = <Map<dynamic, dynamic>>[
+      {
+        'order_id': 0,
+        'order_number': 'BG-42',
+        'item_name': 'Everyday bag',
+        'status': 'in_transit',
+      },
+      {
+        'order_id': 42.5,
+        'order_number': 'BG-42',
+        'item_name': 'Everyday bag',
+        'status': 'in_transit',
+      },
+      {
+        'order_id': '42',
+        'order_number': 'BG-42',
+        'item_name': 'Everyday bag',
+        'status': 'in_transit',
+      },
+      {42: 'invalid non-text key'},
+    ];
+    for (var index = 0; index < malformedShipments.length; index++) {
+      final page = homePage(signedIn: true);
+      page.props['activeShipment'] = malformedShipments[index];
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey(index),
+          theme: BagooTheme.light,
+          home: HomePage(
+            repository: repo,
+            initial: page,
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Your delivery'), findsNothing);
+      expect(find.text('View delivery'), findsNothing);
+      expect(session.orderDetailReads, 1);
+      expect(tester.takeException(), isNull);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Home shipment labels stay safe when metadata is malformed', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 812);
+    addTearDown(tester.view.reset);
+    final session = FakeSession();
+    final repo = BuyerRepository(session);
+    addTearDown(session.close);
+    final page = homePage(signedIn: true);
+    page.props['activeShipment'] = {
+      'order_id': 42,
+      'order_number': null,
+      'item_name': 7,
+      'status': {'unexpected': 'value'},
+      'courier_name': '',
+      'estimated_delivery': 8,
+    };
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BagooTheme.light,
+        home: HomePage(
+          repository: repo,
+          initial: page,
+          onLogin: () {},
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Your delivery'));
+
+    expect(find.text('Order #42 · Item details unavailable'), findsOneWidget);
+    expect(
+      find.text('Status not available · Courier to be assigned'),
+      findsOneWidget,
+    );
+    expect(find.text('Estimated arrival: Not yet available'), findsOneWidget);
+    expect(find.textContaining('null'), findsNothing);
+    expect(find.textContaining('unexpected'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Home application labels stay safe when metadata is malformed', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 812);
+    addTearDown(tester.view.reset);
+    final session = FakeSession();
+    final repo = BuyerRepository(session);
+    addTearDown(session.close);
+    final malformedApplications = <Map<dynamic, dynamic>>[
+      {
+        'can_use_portal': false,
+        'user': {1: 'invalid key'},
+      },
+      {
+        'can_use_portal': false,
+        'user': {
+          'kyc_status': {'unexpected': 'status'},
+          'kyc_feedback': ['unexpected feedback'],
+        },
+      },
+      {42: 'invalid application key'},
+    ];
+
+    for (var index = 0; index < malformedApplications.length; index++) {
+      final page = homePage();
+      page.props['buyerApplication'] = malformedApplications[index];
+      await tester.pumpWidget(
+        MaterialApp(
+          key: ValueKey(index),
+          theme: BagooTheme.light,
+          home: HomePage(
+            repository: repo,
+            initial: page,
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      if (index < 2) {
+        expect(find.text('Application: Under review'), findsOneWidget);
+        expect(
+          find.text(
+            'Browse and use your Bag while approval is pending. Checkout requires approval.',
+          ),
+          findsOneWidget,
+        );
+      } else {
+        expect(find.textContaining('Application:'), findsNothing);
+      }
+      expect(find.textContaining('unexpected'), findsNothing);
+      expect(tester.takeException(), isNull);
+    }
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

@@ -123,6 +123,7 @@ void main() {
 
   for (final value in [
     '-1',
+    '-0',
     '+1',
     'NaN',
     'Infinity',
@@ -133,6 +134,9 @@ void main() {
     '100000000.00',
     '₱500',
     '1,000',
+    '١٢',
+    '１２.３４',
+    '12．50',
     '500\u200b',
   ]) {
     test('price filter rejects invalid amount $value', () {
