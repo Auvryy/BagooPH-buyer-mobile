@@ -405,7 +405,7 @@ void main() {
   ) async {
     final repo = LinkRepository();
     addTearDown(repo.session.close);
-    final query = '😀' * 100;
+    final query = '\u{1f600}' * 100;
     String? selectedQuery;
     Object? rejection;
 

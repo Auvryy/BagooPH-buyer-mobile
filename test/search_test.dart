@@ -98,7 +98,8 @@ void main() {
     () async {
       final repository = SearchRepository();
       final controller = CatalogueSearchController(repository);
-      final query = '👨‍👩‍👧‍👦' * 15;
+      final query =
+          '\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}' * 15;
 
       expect(query.runes.length, 105);
       await controller.apply(SearchFilters(query: query));
