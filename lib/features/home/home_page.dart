@@ -77,6 +77,68 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _profileSectionRequest = 0;
   bool _openingTracking = false;
   bool _openingFilters = false;
+  Map<String, dynamic>? get _buyerApplication {
+    final raw = _home.data?.props['buyerApplication'];
+    if (raw is! Map || raw.keys.any((key) => key is! String)) return null;
+    return Map<String, dynamic>.from(raw);
+  }
+
+  Map<String, dynamic>? get _activeShipment {
+    final raw = _home.data?.props['activeShipment'];
+    if (raw is! Map || raw.keys.any((key) => key is! String)) return null;
+    final shipment = Map<String, dynamic>.from(raw);
+    final orderId = positiveResourceId(shipment['order_id']);
+    if (orderId == null) return null;
+    return {
+      ...shipment,
+      'order_number': _shipmentText(shipment['order_number']) ?? '#$orderId',
+      'item_name':
+          _shipmentText(shipment['item_name']) ?? 'Item details unavailable',
+      'status': _shipmentText(shipment['status']) ?? 'Status not available',
+      'courier_name':
+          _shipmentText(shipment['courier_name']) ?? 'Courier to be assigned',
+      'estimated_delivery':
+          _shipmentText(shipment['estimated_delivery']) ?? 'Not yet available',
+    };
+  }
+
+  String? _shipmentText(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
+
+  Widget _buyerApplicationPanel(Map<String, dynamic> application) {
+    if (application['can_use_portal'] == true) return const SizedBox.shrink();
+    final rawUser = application['user'];
+    final user = rawUser is Map && rawUser.keys.every((key) => key is String)
+        ? Map<String, dynamic>.from(rawUser)
+        : const <String, dynamic>{};
+    final status =
+        _shipmentText(user['kyc_status'])?.replaceAll('_', ' ') ??
+        'Under review';
+    final feedback =
+        _shipmentText(user['kyc_feedback']) ??
+        'Browse and use your Bag while approval is pending. Checkout requires approval.';
+    return ProductPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Application: $status',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          Text(feedback),
+          TextButton(
+            onPressed: () => _openProfileSection('identity'),
+            child: const Text('Review or correct application'),
+          ),
+          TextButton(
+            onPressed: () => _openBuyerHref('/account/status'),
+            child: const Text('View account status'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _selectTab(int tab) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -904,67 +966,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         _departments(inline: roomy),
                         const SizedBox(height: 24),
                       ],
-                      if (_home.data!.props['buyerApplication'] != null) ...[
-                        if (mapOf(
-                              _home.data!.props['buyerApplication'],
-                            )['can_use_portal'] !=
-                            true)
-                          ProductPanel(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Application: ${mapOf(mapOf(_home.data!.props['buyerApplication'])['user'])['kyc_status']?.toString().replaceAll('_', ' ') ?? 'Under review'}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                Text(
-                                  mapOf(
-                                        mapOf(
-                                          _home.data!.props['buyerApplication'],
-                                        )['user'],
-                                      )['kyc_feedback']?.toString() ??
-                                      'Browse and use your Bag while approval is pending. Checkout requires approval.',
-                                ),
-                                TextButton(
-                                  onPressed: () =>
-                                      _openProfileSection('identity'),
-                                  child: const Text(
-                                    'Review or correct application',
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () =>
-                                      _openBuyerHref('/account/status'),
-                                  child: const Text('View account status'),
-                                ),
-                              ],
-                            ),
-                          ),
+                      if (_buyerApplication case final application?) ...[
+                        _buyerApplicationPanel(application),
                         const SizedBox(height: 20),
                       ],
-                      if (mapOf(_home.data!.props['activeShipment']).isNotEmpty)
+                      if (_activeShipment case final shipment?)
                         ProductPanel(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const ProductHeading('Your delivery'),
                               Text(
-                                'Order ${mapOf(_home.data!.props['activeShipment'])['order_number']} · ${mapOf(_home.data!.props['activeShipment'])['item_name']}',
+                                'Order ${shipment['order_number']} · ${shipment['item_name']}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
                               Text(
-                                '${mapOf(_home.data!.props['activeShipment'])['status']?.toString().replaceAll('_', ' ')} · ${mapOf(_home.data!.props['activeShipment'])['courier_name'] ?? 'Courier to be assigned'}',
+                                '${shipment['status']?.toString().replaceAll('_', ' ')} · ${shipment['courier_name'] ?? 'Courier to be assigned'}',
                               ),
                               Text(
-                                'Estimated arrival: ${mapOf(_home.data!.props['activeShipment'])['estimated_delivery'] ?? 'Not yet available'}',
+                                'Estimated arrival: ${shipment['estimated_delivery'] ?? 'Not yet available'}',
                               ),
                               TextButton(
                                 onPressed: () => _openBuyerHref(
-                                  '/buyer/orders/${mapOf(_home.data!.props['activeShipment'])['order_id']}',
+                                  '/buyer/orders/${shipment['order_id']}',
                                 ),
                                 child: const Text('View delivery'),
                               ),
