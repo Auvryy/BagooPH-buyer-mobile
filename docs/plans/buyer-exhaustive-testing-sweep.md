@@ -1,5 +1,9 @@
 # Buyer workspace testing sweep
 
+## Presentation scope change
+
+The user subsequently requested only necessary presentation-impacting work and a final result to reduce token use. The exhaustive sweep is paused. See `buyer-presentation-priority.md` for the final verified test manifest, configured Linux build, deferred experiments and remaining acceptance limits. The unchecked original requirements below remain open.
+
 ## Scope and acceptance
 
 User request: exhaustively test the buyer mobile workspace with subagents, target 100% branch coverage, add adversarial/null/invalid/boundary cases, exercise API/database integrations and critical journeys through an automated Playwright or Cypress suite, fix reproduced bugs, and keep a durable build backlog.
