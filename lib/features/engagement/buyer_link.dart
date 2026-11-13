@@ -61,12 +61,14 @@ class BuyerLink {
     }
     final public =
         parts.isEmpty ||
-        parts.length == 1 && ['track', 'cart'].contains(parts.first) ||
+        parts.length == 1 &&
+            ['track', 'cart', 'top-products'].contains(parts.first) ||
         parts.length == 2 &&
             [
               'product',
               'shop',
               'promotions',
+              'campaign',
               'advertisement',
               'track',
             ].contains(parts.first) &&

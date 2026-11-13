@@ -860,6 +860,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               category['name'].toString(),
               categoryIcon(category),
             ),
+          _featureShortcutChip(
+            label: 'Top Products',
+            icon: Icons.workspace_premium_outlined,
+            onPressed: () => _openBuyerHref('/top-products'),
+          ),
+          _sortShortcutChip('popular', 'Best Selling', Icons.trending_up),
+          _sortShortcutChip('rating', 'Top Rated', Icons.star_outline_rounded),
+          _sortShortcutChip('latest', 'Newest', Icons.new_releases_outlined),
         ],
       ),
     );
@@ -1135,15 +1143,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ],
                       ),
                       if (_home.hasFilters)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: () {
-                              _home.reset();
-                            },
-                            icon: const Icon(Icons.close, size: 18),
-                            label: const Text('Clear filters'),
-                          ),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (_home.search.isNotEmpty)
+                              InputChip(
+                                label: Text('Search: ${_home.search}'),
+                                onDeleted: () => _home.filter(query: ''),
+                              ),
+                            if (_home.category.isNotEmpty)
+                              InputChip(
+                                label: Text('Department: ${_home.category}'),
+                                onDeleted: () => _home.filter(department: ''),
+                              ),
+                            if (_home.sort != 'relevance')
+                              InputChip(
+                                label: Text(
+                                  'Sort: ${searchSorts[_home.sort] ?? _home.sort}',
+                                ),
+                                onDeleted: () =>
+                                    _home.filter(order: 'relevance'),
+                              ),
+                            TextButton.icon(
+                              onPressed: () {
+                                _home.reset();
+                              },
+                              icon: const Icon(Icons.close, size: 18),
+                              label: const Text('Clear filters'),
+                            ),
+                          ],
                         ),
                       const SizedBox(height: 16),
                       if (_home.products.isEmpty && !_home.loading)
@@ -1429,6 +1459,47 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  Widget _featureShortcutChip({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) => Padding(
+    padding: const EdgeInsets.only(right: 8),
+    child: ActionChip(
+      avatar: ExcludeSemantics(
+        child: Icon(icon, size: 17, color: BagooTheme.crimson),
+      ),
+      label: Text(label),
+      backgroundColor: BagooTheme.rose,
+      side: const BorderSide(color: Color(0xFFFECDD3)),
+      onPressed: onPressed,
+    ),
+  );
+
+  Widget _sortShortcutChip(String sortKey, String label, IconData icon) {
+    final selected = _home.sort == sortKey;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        avatar: ExcludeSemantics(
+          child: Icon(
+            icon,
+            size: 17,
+            color: selected ? BagooTheme.crimson : const Color(0xFF475569),
+          ),
+        ),
+        label: Text(label),
+        selected: selected,
+        selectedColor: BagooTheme.rose,
+        side: BorderSide(
+          color: selected ? BagooTheme.crimson : BagooTheme.line,
+        ),
+        onSelected: (_) =>
+            _home.filter(order: selected ? 'relevance' : sortKey),
+      ),
+    );
+  }
+
   Widget _subcategoryStrip() => SingleChildScrollView(
     scrollDirection: Axis.horizontal,
     child: Row(
@@ -1546,22 +1617,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.workspace_premium_outlined,
                 size: 18,
                 color: BagooTheme.crimson,
               ),
-              SizedBox(width: 6),
-              Text(
-                'TOP PRODUCTS',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.3,
-                  color: BagooTheme.ink,
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'TOP PRODUCTS',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
+                    color: BagooTheme.ink,
+                  ),
                 ),
+              ),
+              TextButton(
+                onPressed: () => _openBuyerHref('/top-products'),
+                child: const Text('See All'),
               ),
             ],
           ),
