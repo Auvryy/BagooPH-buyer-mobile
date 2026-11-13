@@ -96,6 +96,47 @@ class HomeController extends ChangeNotifier {
   List<Map<String, dynamic>> get relatedProducts =>
       completeRelatedProducts(data?.props['relatedProducts']) ?? const [];
 
+  List<Map<String, dynamic>> get flashSaleProducts =>
+      completeRelatedProducts(data?.props['flashSaleProducts']) ?? const [];
+
+  List<Map<String, dynamic>> get subcategories {
+    final rows = _completeMapRows(data?.props['subcategories']);
+    final ids = <int>{};
+    final slugs = <String>{};
+    if (rows.any((row) {
+      final id = positiveResourceId(row['id']);
+      final name = row['name'];
+      final slug = row['slug'];
+      return id == null ||
+          name is! String ||
+          name.trim().isEmpty ||
+          slug is! String ||
+          slug.trim().isEmpty ||
+          !ids.add(id) ||
+          !slugs.add(slug);
+    })) {
+      return const [];
+    }
+    return rows;
+  }
+
+  List<Map<String, dynamic>> get topCuratedCollections {
+    final rows = _completeMapRows(data?.props['topCuratedCollections']);
+    final slugs = <String>{};
+    if (rows.any((row) {
+      final name = row['name'];
+      final slug = row['slug'];
+      return name is! String ||
+          name.trim().isEmpty ||
+          slug is! String ||
+          slug.trim().isEmpty ||
+          !slugs.add(slug);
+    })) {
+      return const [];
+    }
+    return rows;
+  }
+
   Map<String, dynamic>? get user =>
       _knownEpoch == repository.session.identityEpoch
       ? data?.user ?? (data?.isCached == true ? _knownUser : null)

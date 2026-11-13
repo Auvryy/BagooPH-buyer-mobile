@@ -1770,7 +1770,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     ].map((k) => amount(p[k])).toList();
     final rows = {
       'Department': mapOf(p['category'])['name'] ?? 'Not provided',
-      'Store categories': mapsOf(p['store_categories'])
+      'Store categories': mapsOf(p['store_categories'] ?? p['store_tags'])
           .map((c) => c['name'])
           .join(', '),
       'Brand': p['brand'] ?? 'Not provided',

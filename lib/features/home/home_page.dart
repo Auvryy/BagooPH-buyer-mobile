@@ -964,6 +964,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ],
                       if (_home.categories.isNotEmpty) ...[
                         _departments(inline: roomy),
+                        if (_home.subcategories.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          _subcategoryStrip(),
+                        ],
                         const SizedBox(height: 24),
                       ],
                       if (_buyerApplication case final application?) ...[
@@ -971,24 +975,96 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         const SizedBox(height: 20),
                       ],
                       if (_activeShipment case final shipment?)
-                        ProductPanel(
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 20),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: const Color(0xFFFECDD3),
+                              width: 1.5,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x12E00D42),
+                                blurRadius: 12,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const ProductHeading('Your delivery'),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: BagooTheme.crimson,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.local_shipping_outlined,
+                                      size: 18,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  const Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'LIVE DISPATCH TELEMETRY',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 0.6,
+                                            color: BagooTheme.crimson,
+                                          ),
+                                        ),
+                                        ProductHeading('Your delivery'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
                               Text(
                                 'Order ${shipment['order_number']} · ${shipment['item_name']}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
+                                  color: BagooTheme.ink,
                                 ),
                               ),
+                              const SizedBox(height: 2),
                               Text(
                                 '${shipment['status']?.toString().replaceAll('_', ' ')} · ${shipment['courier_name'] ?? 'Courier to be assigned'}',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: Color(0xFF475569),
+                                ),
                               ),
+                              const SizedBox(height: 2),
                               Text(
                                 'Estimated arrival: ${shipment['estimated_delivery'] ?? 'Not yet available'}',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: BagooTheme.muted,
+                                ),
                               ),
+                              const SizedBox(height: 6),
                               TextButton(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: BagooTheme.crimson,
+                                  backgroundColor: BagooTheme.rose,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
                                 onPressed: () => _openBuyerHref(
                                   '/buyer/orders/${shipment['order_id']}',
                                 ),
@@ -997,6 +1073,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             ],
                           ),
                         ),
+                      if (!_home.hasFilters &&
+                          _home.flashSaleProducts.isNotEmpty) ...[
+                        _flashDealsSection(scaled),
+                        const SizedBox(height: 20),
+                      ],
+                      if (!_home.hasFilters &&
+                          _home.topCuratedCollections.isNotEmpty) ...[
+                        _topCollectionsSection(),
+                        const SizedBox(height: 20),
+                      ],
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1320,16 +1406,274 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  Widget _categoryChip(String slug, String title, IconData icon) => Padding(
-    padding: const EdgeInsets.only(right: 8),
-    child: ChoiceChip(
-      avatar: ExcludeSemantics(child: Icon(icon, size: 18)),
-      label: Text(title),
-      selected: _home.category == slug,
-      selectedColor: BagooTheme.rose,
-      onSelected: (_) => _selectCategory(slug),
+  Widget _categoryChip(String slug, String title, IconData icon) {
+    final selected = _home.category == slug;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        avatar: ExcludeSemantics(
+          child: Icon(
+            icon,
+            size: 18,
+            color: selected ? BagooTheme.crimson : const Color(0xFF475569),
+          ),
+        ),
+        label: Text(title),
+        selected: selected,
+        selectedColor: BagooTheme.rose,
+        side: BorderSide(
+          color: selected ? BagooTheme.crimson : BagooTheme.line,
+        ),
+        onSelected: (_) => _selectCategory(slug),
+      ),
+    );
+  }
+
+  Widget _subcategoryStrip() => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final sub in _home.subcategories)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: const Icon(
+                Icons.subdirectory_arrow_right_rounded,
+                size: 16,
+                color: BagooTheme.crimson,
+              ),
+              label: Text(sub['name'].toString()),
+              backgroundColor: Colors.white,
+              side: const BorderSide(color: Color(0xFFFECDD3)),
+              onPressed: () => _selectCategory(sub['slug'].toString()),
+            ),
+          ),
+      ],
     ),
   );
+
+  Widget _flashDealsSection(double scaled) {
+    final items = _home.flashSaleProducts;
+    final cardWidth = 152.0 * scaled.clamp(1.0, 1.4);
+    final cardHeight = cardWidth + 96.0 * scaled;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFECDD3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.bolt_rounded,
+                size: 20,
+                color: BagooTheme.crimson,
+              ),
+              const SizedBox(width: 4),
+              const Expanded(
+                child: Text(
+                  'FLASH DEALS',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
+                    color: BagooTheme.crimson,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: BagooTheme.ink,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'LIMITED TIME',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: cardHeight,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final product = items[index];
+                final id = product['id'] as int;
+                final saved = positiveResourceIds(
+                  _home.data?.props['savedProductIds'],
+                ).contains(id);
+                return SizedBox(
+                  width: cardWidth,
+                  child: FlashDealCard(
+                    product: product,
+                    session: widget.repository.session,
+                    onTap: () => _openProduct(product),
+                    saved: saved,
+                    saving: _saving.contains(id),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _topCollectionsSection() {
+    final collections = _home.topCuratedCollections;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: BagooTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.workspace_premium_outlined,
+                size: 18,
+                color: BagooTheme.crimson,
+              ),
+              SizedBox(width: 6),
+              Text(
+                'TOP PRODUCTS',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                  color: BagooTheme.ink,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 164,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: collections.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final item = collections[index];
+                final title = item['name']?.toString() ?? 'Collection';
+                final slug = item['slug']?.toString() ?? '';
+                final ribbon = item['ribbon_text']?.toString() ?? 'TOP';
+                final sold = item['sold_display']?.toString() ?? 'Popular';
+                return SizedBox(
+                  width: 148,
+                  child: Material(
+                    color: BagooTheme.ink,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => _selectCategory(slug),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ExcludeSemantics(
+                            child: RemoteImage(
+                              uri: imageUri(
+                                widget.repository.session,
+                                item['image'],
+                              ),
+                              thumbnail: true,
+                            ),
+                          ),
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Color(0x140F172A), Color(0xD90F172A)],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: BagooTheme.crimson,
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text(
+                                ribbon,
+                                style: const TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 10,
+                            right: 10,
+                            bottom: 10,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  sold,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 IconData categoryIcon(Map<String, dynamic> category) {

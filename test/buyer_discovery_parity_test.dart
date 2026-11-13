@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
@@ -308,6 +309,55 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       expect(calls, 1);
       await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'home page renders flash deals, top curated collections, and subcategories when provided',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(430, 1200);
+      addTearDown(tester.view.reset);
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+      final page = homePage(signedIn: true);
+      page.props['subcategories'] = [
+        {'id': 21, 'name': 'Smart Audio', 'slug': 'smart-audio'},
+      ];
+      page.props['flashSaleProducts'] = [
+        {...product(1), 'compare_at_price': 1500, 'stock': 5},
+      ];
+      page.props['topCuratedCollections'] = [
+        {
+          'name': 'Wireless Audio Picks',
+          'slug': 'wireless-audio',
+          'ribbon_text': 'TOP 1',
+          'sold_display': '2.4k+ Sold',
+        },
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: HomePage(
+            repository: repo,
+            initial: page,
+            onLogin: () {},
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Smart Audio'), findsOneWidget);
+      expect(find.text('FLASH DEALS'), findsOneWidget);
+      expect(find.text('LIMITED TIME'), findsOneWidget);
+      expect(find.text('ONLY 5 LEFT'), findsOneWidget);
+      expect(find.text('TOP PRODUCTS'), findsOneWidget);
+      expect(find.text('Wireless Audio Picks'), findsOneWidget);
+      expect(find.text('TOP 1'), findsOneWidget);
+      expect(find.text('2.4k+ Sold'), findsOneWidget);
     },
   );
 }

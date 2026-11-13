@@ -290,7 +290,9 @@ class _ShopPageState extends State<ShopPage> {
       labelKey: 'name',
     );
     final storeCategoryChoices = _completeStoreCategoryChoices(
-      _page?.props['storeCategories'],
+      _page?.props.containsKey('storeCategories') == true
+          ? _page?.props['storeCategories']
+          : _page?.props['storeTags'],
     );
     final productCount = nonNegativeCount(shop['products_count']) ?? _total;
     final followerCount = nonNegativeCount(_page?.props['followerCount']);
