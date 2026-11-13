@@ -348,12 +348,36 @@ class _ShopPageState extends State<ShopPage> {
                                     ),
                                   ),
                                 const SizedBox(height: 12),
-                                Text(
-                                  shop['name']?.toString() ?? '',
-                                  style: const TextStyle(
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                                Row(
+                                  children: [
+                                    if (shop['logo'] != null) ...[
+                                      SizedBox.square(
+                                        dimension: 40,
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          child: RemoteImage(
+                                            uri: imageUri(
+                                              widget.repository.session,
+                                              shop['logo'],
+                                            ),
+                                            thumbnail: true,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                    ],
+                                    Expanded(
+                                      child: Text(
+                                        shop['name']?.toString() ?? '',
+                                        style: const TextStyle(
+                                          fontSize: 26,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 Text(
                                   shop['description']?.toString() ?? '',
@@ -397,20 +421,71 @@ class _ShopPageState extends State<ShopPage> {
                                   'Reply rate: ${stats['response_rate'] ?? 'Not available'} · Opened: ${stats['joined'] == null ? 'Not available' : readableDate(stats['joined'])}',
                                   style: const TextStyle(height: 1.7),
                                 ),
-                                TextButton.icon(
-                                  onPressed:
-                                      _following ||
-                                          (_page?.user != null && !_eligible)
-                                      ? null
-                                      : _follow,
-                                  icon: const Icon(Icons.storefront_outlined),
-                                  label: Text(
-                                    _following
-                                        ? 'Saving…'
-                                        : _page?.props['isFollowing'] == true
-                                        ? 'Unfollow shop'
-                                        : 'Follow shop',
-                                  ),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    TextButton.icon(
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: BagooTheme.crimson,
+                                        backgroundColor: BagooTheme.rose,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                      ),
+                                      onPressed:
+                                          _following ||
+                                              (_page?.user != null &&
+                                                  !_eligible)
+                                          ? null
+                                          : _follow,
+                                      icon: const Icon(
+                                        Icons.storefront_outlined,
+                                      ),
+                                      label: Text(
+                                        _following
+                                            ? 'Saving…'
+                                            : _page?.props['isFollowing'] ==
+                                                  true
+                                            ? 'Unfollow shop'
+                                            : 'Follow shop',
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: BagooTheme.rose,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: const Color(0xFFFECDD3),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.verified_outlined,
+                                            size: 13,
+                                            color: BagooTheme.crimson,
+                                          ),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Verified',
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: BagooTheme.crimson,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),

@@ -18,6 +18,7 @@ import 'profile_widgets.dart';
 import 'profile_repository.dart';
 import 'purchases_section.dart';
 import 'returns_page.dart';
+import 'shipment_finance_page.dart';
 import 'order_journey.dart';
 import '../checkout/commerce_details.dart';
 import '../engagement/engagement_repository.dart';
@@ -597,6 +598,20 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                 'Delivery attempt: ${mapOf(tracking['failure'])['reason']}\n${readableDateTime(mapOf(tracking['failure'])['attempted_at'])}${mapOf(tracking['failure'])['retry_at'] == null ? '' : '\nApproved retry: ${readableDateTime(mapOf(tracking['failure'])['retry_at'])}'}',
                                 style: const TextStyle(height: 1.7),
                               ),
+                            if ((amount(order['logistics_flow_version']) ??
+                                    1) >=
+                                2)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 12),
+                                child: Text(
+                                  'Automatic completion: Orders under Logistics Flow v2 complete automatically after verified doorstep POD or Bayan Hub collection.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: BagooTheme.muted,
+                                    height: 1.6,
+                                  ),
+                                ),
+                              ),
                             const SizedBox(height: 16),
                             Wrap(
                               spacing: 8,
@@ -641,6 +656,24 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                           )
                                         : null,
                                     child: const Text('Cancel order'),
+                                  )
+                                else if (_page!.props['cancellationRequestUrl']
+                                    is String)
+                                  OutlinedButton(
+                                    onPressed: canAct
+                                        ? () => Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => _CancelOrderPage(
+                                                repository: widget.repository,
+                                                page: _page!,
+                                                account: _account,
+                                                onSaved: _accept,
+                                                isRequest: true,
+                                              ),
+                                            ),
+                                          )
+                                        : null,
+                                    child: const Text('Request cancellation'),
                                   ),
                                 if (canRequestReturn)
                                   OutlinedButton(
@@ -656,6 +689,49 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                           )
                                         : null,
                                     child: const Text('Request return/refund'),
+                                  ),
+                                if (positiveResourceId(
+                                      mapOf(
+                                        _page!.props['shipmentFinance'],
+                                      )['id'],
+                                    )
+                                    case final financeId?)
+                                  OutlinedButton(
+                                    onPressed: canAct
+                                        ? () => perform(() async {
+                                            final financePage = await widget
+                                                .repository
+                                                .buyer
+                                                .document(
+                                                  '/shipment-finances/$financeId',
+                                                );
+                                            widget.repository.buyer
+                                                .requireNoErrors(financePage);
+                                            _account.check(page: financePage);
+                                            if (context.mounted) {
+                                              await Navigator.of(context).push(
+                                                MaterialPageRoute<void>(
+                                                  builder: (_) =>
+                                                      ShipmentFinancePage(
+                                                        repository:
+                                                            widget.repository,
+                                                        initial: financePage,
+                                                        account: _account,
+                                                      ),
+                                                ),
+                                              );
+                                              _accept(
+                                                await widget.repository.order(
+                                                  widget.orderId,
+                                                ),
+                                              );
+                                            }
+                                            return null;
+                                          }, validate: false)
+                                        : null,
+                                    child: const Text(
+                                      'Review shipping balance',
+                                    ),
                                   ),
                                 if (positiveResourceId(
                                       mapOf(order['wallet_payment'])['id'],
@@ -686,6 +762,10 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                               Text(
                                 'Cancellation reason: ${_page!.props['cancellationReason']}',
                                 style: const TextStyle(height: 1.7),
+                              ),
+                            if (_page!.props['cancellationFeedback'] is Map)
+                              _cancellationFeedbackSection(
+                                mapOf(_page!.props['cancellationFeedback']),
                               ),
                           ],
                         ),
@@ -952,6 +1032,80 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
       ),
     );
   }
+
+  Widget _cancellationFeedbackSection(Map<String, dynamic> feedback) {
+    final request = mapOf(feedback['request']);
+    final refund = mapOf(feedback['refund']);
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: BagooTheme.canvas,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: BagooTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Cancellation update',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: BagooTheme.strong,
+              ),
+            ),
+            if (feedback['message'] != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                feedback['message'].toString(),
+                style: const TextStyle(height: 1.6),
+              ),
+            ],
+            if (request.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${request['reference'] ?? 'Request'} · ${request['status'] ?? 'pending'}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  height: 1.5,
+                ),
+              ),
+              if (request['respond_by'] != null)
+                Text(
+                  'Seller response due ${readableDateTime(request['respond_by'])}',
+                  style: const TextStyle(fontSize: 12, height: 1.5),
+                ),
+              if (request['decision_reason'] != null)
+                Text(
+                  'Review outcome: ${request['decision_reason']}',
+                  style: const TextStyle(fontSize: 12, height: 1.5),
+                ),
+            ],
+            if (feedback['payment_message'] != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                feedback['payment_message'].toString(),
+                style: const TextStyle(fontSize: 12, height: 1.5),
+              ),
+            ],
+            if (refund.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Wallet refund: ${pesos((amount(refund['amount_cents']) ?? 0) / 100)}${refund['reference'] == null ? '' : ' · ${refund['reference']}'}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 abstract class _OrderAccountFormState<T extends StatefulWidget>
@@ -1043,11 +1197,13 @@ class _CancelOrderPage extends StatefulWidget {
     required this.page,
     required this.account,
     required this.onSaved,
+    this.isRequest = false,
   });
   final ProfileRepository repository;
   final WebPage page;
   final BuyerAccountScope account;
   final ValueChanged<WebPage> onSaved;
+  final bool isRequest;
   @override
   State<_CancelOrderPage> createState() => _CancelOrderPageState();
 }
@@ -1081,15 +1237,23 @@ class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
     return PopScope(
       canPop: !busy,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Cancel this order?')),
+        appBar: AppBar(
+          title: Text(
+            widget.isRequest
+                ? 'Request order cancellation'
+                : 'Cancel this order?',
+          ),
+        ),
         body: SafeArea(
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 680),
               child: orderContent([
-                const ProfileHeading(
-                  'Cancel order',
-                  'You can cancel before the seller marks it ready for pickup. Your other orders will continue.',
+                ProfileHeading(
+                  widget.isRequest ? 'Request cancellation' : 'Cancel order',
+                  widget.isRequest
+                      ? 'Ask the seller to cancel this order. If the seller does not respond before the deadline, the order cancels automatically.'
+                      : 'You can cancel before the seller marks it ready for pickup. Your other orders will continue.',
                   Icons.cancel_outlined,
                 ),
                 if (cancellationReasons == null)
@@ -1128,7 +1292,9 @@ class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
                   check: buyerNotesTextError,
                 ),
                 SubmitButton(
-                  label: 'Cancel order',
+                  label: widget.isRequest
+                      ? 'Submit cancellation request'
+                      : 'Cancel order',
                   busy: busy,
                   onPressed: () => perform(() async {
                     final reasons = _cancellationReasons;
@@ -1140,15 +1306,22 @@ class _CancelOrderPageState extends _OrderAccountFormState<_CancelOrderPage> {
                       );
                     }
                     final id = mapOf(widget.page.props['order'])['id'];
+                    final targetUrl = widget.isRequest
+                        ? (widget.page.props['cancellationRequestUrl']
+                                  as String? ??
+                              '/buyer/orders/$id/cancellation-requests')
+                        : '/buyer/orders/$id/cancel';
                     final page = await widget.repository.session.submit(
-                      '/buyer/orders/$id/cancel',
+                      targetUrl,
                       {'reason': _reason, 'notes': _notes.text.trim()},
                       referer: '/buyer/orders/$id',
                     );
                     widget.repository.buyer.requireNoErrors(page);
                     accountScope.check(page: page);
                     if (mapOf(page.props['order'])['id'] != id ||
-                        mapOf(page.props['order'])['status'] != 'cancelled') {
+                        (!widget.isRequest &&
+                            mapOf(page.props['order'])['status'] !=
+                                'cancelled')) {
                       throw const BackendException(
                         'Cancellation was not confirmed. Refresh the order before retrying.',
                       );

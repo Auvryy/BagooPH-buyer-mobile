@@ -39,9 +39,12 @@
                 <data android:pathPrefix="/product/" />
                 <data android:pathPrefix="/shop/" />
                 <data android:pathPrefix="/promotions/" />
+                <data android:pathPrefix="/campaign/" />
+                <data android:path="/top-products" />
                 <data android:pathPrefix="/advertisement/" />
                 <data android:pathPrefix="/track" />
                 <data android:pathPrefix="/buyer-returns" />
+                <data android:pathPrefix="/shipment-finances/" />
                 <data android:pathPrefix="/wallet/payments" />
                 <data android:path="/cart" />
                 <data android:path="/checkout" />

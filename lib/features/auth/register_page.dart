@@ -49,6 +49,8 @@ class _RegisterPageState extends State<RegisterPage> {
       'phone',
       'address',
       'postal_code',
+      'delivery_latitude',
+      'delivery_longitude',
     ])
       key: TextEditingController(),
   };
@@ -119,7 +121,15 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Map<String, dynamic> get _values => {
     for (final entry in _fields.entries)
-      if (_addAddress || !['address', 'postal_code'].contains(entry.key))
+      if ((_addAddress ||
+              ![
+                'address',
+                'postal_code',
+                'delivery_latitude',
+                'delivery_longitude',
+              ].contains(entry.key)) &&
+          (!['delivery_latitude', 'delivery_longitude'].contains(entry.key) ||
+              entry.value.text.trim().isNotEmpty))
         entry.key: entry.key.startsWith('password')
             ? entry.value.text
             : entry.value.text.trim(),
@@ -594,6 +604,40 @@ class _RegisterPageState extends State<RegisterPage> {
                           RegExp(r'^[0-9]{4}$').hasMatch(value?.trim() ?? '')
                           ? null
                           : 'Enter a four-digit postal code.',
+                    ),
+                    _field(
+                      'delivery_latitude',
+                      'Delivery latitude (optional)',
+                      keyboard: const TextInputType.numberWithOptions(
+                        signed: true,
+                        decimal: true,
+                      ),
+                      maxLength: 20,
+                      validator: (value) {
+                        final text = value?.trim() ?? '';
+                        if (text.isEmpty) return null;
+                        final parsed = double.tryParse(text);
+                        return parsed != null && parsed >= -90 && parsed <= 90
+                            ? null
+                            : 'Enter a latitude between -90 and 90.';
+                      },
+                    ),
+                    _field(
+                      'delivery_longitude',
+                      'Delivery longitude (optional)',
+                      keyboard: const TextInputType.numberWithOptions(
+                        signed: true,
+                        decimal: true,
+                      ),
+                      maxLength: 20,
+                      validator: (value) {
+                        final text = value?.trim() ?? '';
+                        if (text.isEmpty) return null;
+                        final parsed = double.tryParse(text);
+                        return parsed != null && parsed >= -180 && parsed <= 180
+                            ? null
+                            : 'Enter a longitude between -180 and 180.';
+                      },
                     ),
                   ],
                   OutlinedButton.icon(

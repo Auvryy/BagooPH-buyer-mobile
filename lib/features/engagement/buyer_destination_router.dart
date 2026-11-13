@@ -5,6 +5,7 @@ import '../../core/buyer_account_scope.dart';
 import '../../core/resource_ids.dart';
 import '../../core/web_session.dart';
 import '../home/search_controller.dart';
+import '../home/top_products_page.dart';
 import '../products/product_page.dart';
 import '../products/product_model.dart';
 import '../products/shop_page.dart';
@@ -13,6 +14,8 @@ import '../profile/profile_repository.dart';
 import '../profile/account_status_page.dart';
 import '../profile/purchases_section.dart';
 import '../profile/returns_page.dart';
+import '../profile/shipment_finance_page.dart';
+import '../promotions/campaign_page.dart';
 import '../promotions/promotion_page.dart';
 import '../tracking/parcel_tracking_page.dart';
 import 'engagement_repository.dart';
@@ -215,7 +218,11 @@ class BuyerDestinationRouter {
       return;
     }
 
-    if (segments.first == 'advertisement' || segments.first == 'promotions') {
+    if (segments.first == 'advertisement' ||
+        segments.first == 'promotions' ||
+        segments.first == 'campaign' ||
+        segments.first == 'shipment-finances' ||
+        target.path == '/top-products') {
       final page = await repository.document(target.toString());
       repository.requireNoErrors(page);
       if (!context.mounted) return;
@@ -429,6 +436,28 @@ class BuyerDestinationRouter {
           ),
         );
         return;
+      case 'Buyer/Campaign':
+        if (page.props['campaign'] is! Map ||
+            completeRelatedProducts(page.props['products']) == null) {
+          throw const BackendException('This campaign event is unavailable.');
+        }
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => CampaignPage(repository: repository, initial: page),
+          ),
+        );
+        return;
+      case 'Buyer/TopProducts':
+        if (completeRelatedProducts(page.props['products']) == null) {
+          throw const BackendException('Top products are unavailable.');
+        }
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                TopProductsPage(repository: repository, initial: page),
+          ),
+        );
+        return;
       case 'Buyer/ProductDetail':
         final slug = mapOf(page.props['product'])['slug']?.toString();
         if (slug == null || slug.isEmpty) {
@@ -473,6 +502,24 @@ class BuyerDestinationRouter {
           throw const BackendException('This return is unavailable.');
         }
         await _openReturn(context, repository, '$id');
+        return;
+      case 'Finance/ShipmentOutcome':
+        if (page.props['financialPlan'] is! Map && page.props['plan'] is! Map) {
+          throw const BackendException(
+            'This shipping balance outcome is unavailable.',
+          );
+        }
+        final account = BuyerAccountScope(repository.session);
+        account.check(page: page);
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ShipmentFinancePage(
+              repository: ProfileRepository(repository),
+              initial: page,
+              account: account,
+            ),
+          ),
+        );
         return;
       default:
         throw const BackendException(

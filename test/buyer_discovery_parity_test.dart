@@ -2,14 +2,19 @@ import 'dart:async';
 
 import 'package:bagoo_buyer_mobile/app/theme.dart';
 import 'package:bagoo_buyer_mobile/core/web_session.dart';
+import 'package:bagoo_buyer_mobile/features/engagement/buyer_link.dart';
 import 'package:bagoo_buyer_mobile/features/home/home_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_controller.dart';
+import 'package:bagoo_buyer_mobile/features/home/top_products_page.dart';
 import 'package:bagoo_buyer_mobile/features/home/product_card.dart';
 import 'package:bagoo_buyer_mobile/features/home/search_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart';
 import 'package:bagoo_buyer_mobile/features/products/sale_clock.dart';
 import 'package:bagoo_buyer_mobile/features/products/shop_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
+import 'package:bagoo_buyer_mobile/features/profile/shipment_finance_page.dart';
+import 'package:bagoo_buyer_mobile/features/promotions/campaign_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -358,6 +363,171 @@ void main() {
       expect(find.text('Wireless Audio Picks'), findsOneWidget);
       expect(find.text('TOP 1'), findsOneWidget);
       expect(find.text('2.4k+ Sold'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'campaign and top products pages render native storefront experiences and parse links',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(430, 1200);
+      addTearDown(tester.view.reset);
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+
+      final origin = repo.session.origin;
+      expect(
+        BuyerLink.parse(
+          origin.resolve('/campaign/christmas-gala'),
+          origin,
+        ).kind,
+        BuyerLinkKind.destination,
+      );
+      expect(
+        BuyerLink.parse(origin.resolve('/top-products'), origin).kind,
+        BuyerLinkKind.destination,
+      );
+
+      final campaignWebPage = WebPage('Buyer/Campaign', {
+        'auth': {'user': buyer},
+        'campaign': {
+          'slug': 'christmas-gala',
+          'title': 'Christmas Gala Deals',
+          'badge': 'HOLIDAY SPECIAL',
+          'vouchers': [
+            {
+              'code': 'XMAS100',
+              'title': 'Holiday Voucher',
+              'discount': '₱100 OFF',
+              'min_spend': 'Min. spend ₱500',
+              'badge': 'EVENT VOUCHER',
+              'is_saved': false,
+            },
+          ],
+        },
+        'products': [
+          {
+            ...product(1),
+            'price': '399.00',
+            'discount_pct': 25,
+            'event_badge': 'MEGA DEAL',
+          },
+        ],
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: CampaignPage(repository: repo, initial: campaignWebPage),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Christmas Gala Deals'), findsWidgets);
+      expect(find.text('HOLIDAY SPECIAL'), findsOneWidget);
+      expect(find.text('XMAS100'), findsOneWidget);
+      expect(find.text('MEGA DEAL'), findsOneWidget);
+
+      await tester.tap(find.text('Claim voucher'));
+      await tester.pumpAndSettle();
+      expect(find.text('Claimed'), findsOneWidget);
+
+      final topProductsWebPage = WebPage('Buyer/TopProducts', {
+        'auth': {'user': buyer},
+        'activeCollection': {
+          'title': 'Best Selling Audio',
+          'category_name': 'Electronics',
+          'sub_slug': 'best-audio',
+        },
+        'collections': [
+          {
+            'id': 1,
+            'title': 'Best Selling Audio',
+            'sub_slug': 'best-audio',
+            'target_url': '/top-products?sub=best-audio',
+          },
+        ],
+        'products': [product(1), product(2)],
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: TopProductsPage(repository: repo, initial: topProductsWebPage),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('TOP PRODUCTS'), findsOneWidget);
+      expect(find.text('ALGORITHMIC PICKS'), findsOneWidget);
+      expect(find.text('#1'), findsOneWidget);
+      expect(find.text('#2'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'shipment finance outcome page renders shipping balance and parses link',
+    (tester) async {
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+      final origin = repo.session.origin;
+      final link = BuyerLink.parse(
+        origin.resolve('/shipment-finances/42'),
+        origin,
+      );
+      expect(link.kind, BuyerLinkKind.destination);
+      expect(link.requiresLogin, isTrue);
+
+      final financePage = WebPage('Finance/ShipmentOutcome', {
+        'auth': {'user': buyer},
+        'financialPlan': {
+          'id': 42,
+          'version': 1,
+          'reference': 'SFP-2026-0042',
+          'status': 'open',
+          'mode': 'wallet',
+          'amounts': {
+            'buyer_merchandise_refund_cents': 120000,
+            'buyer_shipping_due_cents': 18500,
+          },
+          'state': {
+            'due_cents': 18500,
+            'received_cents': 0,
+            'remaining_cents': 18500,
+          },
+          'actions': ['pay-wallet-shipping'],
+          'order': {'id': 91, 'order_number': 'BGO-91'},
+          'wallet_balance_cents': 50000,
+          'history': [
+            {
+              'id': 1,
+              'event_type': 'shipping-assessed',
+              'amount_cents': 18500,
+              'created_at': '2026-11-10T10:00:00Z',
+              'reason': 'Outbound and return shipping assessed to buyer.',
+            },
+          ],
+        },
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ShipmentFinancePage(
+            repository: ProfileRepository(repo),
+            initial: financePage,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Shipping and refund · BGO-91'), findsOneWidget);
+      expect(find.text('SFP-2026-0042 · Status: open'), findsOneWidget);
+      expect(find.text('Pay shipping from Bagoo Wallet'), findsOneWidget);
+      expect(find.text('Pay shipping from my Wallet'), findsOneWidget);
     },
   );
 }

@@ -1549,6 +1549,23 @@ class _CheckoutPageState extends State<CheckoutPage>
     ),
   );
 
+  String? get _selectedCompanyRateSummary {
+    if (_company == null) return null;
+    final company = _companies
+        .where((row) => row['id'] == _company)
+        .firstOrNull;
+    if (company == null) return null;
+    final baseCents = amount(
+      company['base_shipping_cents'] ?? company['base_fee_cents'],
+    );
+    final includedGrams = amount(company['included_weight_grams']);
+    final additionalCents = amount(company['additional_kg_cents']);
+    if (baseCents == null || includedGrams == null || additionalCents == null) {
+      return null;
+    }
+    return 'Published rate: Base ${pesos(baseCents / 100)} (includes ${(includedGrams / 1000).toStringAsFixed(1)} kg) + ${pesos(additionalCents / 100)}/kg';
+  }
+
   Widget _deliveryPanel() => ProductPanel(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1615,6 +1632,19 @@ class _CheckoutPageState extends State<CheckoutPage>
               style: const TextStyle(fontSize: 12, height: 1.7),
             ),
           ),
+          if (_selectedCompanyRateSummary case final rateSummary?)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                rateSummary,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: BagooTheme.crimson,
+                  height: 1.5,
+                ),
+              ),
+            ),
         ] else
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
