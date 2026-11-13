@@ -42,6 +42,8 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
       'phone',
       'address',
       'postal_code',
+      'delivery_latitude',
+      'delivery_longitude',
     ])
       key: TextEditingController(),
   };
@@ -108,7 +110,15 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
     FocusScope.of(context).unfocus();
     await widget.onSubmit({
       for (final entry in _fields.entries)
-        if (_address || !['address', 'postal_code'].contains(entry.key))
+        if ((_address ||
+                ![
+                  'address',
+                  'postal_code',
+                  'delivery_latitude',
+                  'delivery_longitude',
+                ].contains(entry.key)) &&
+            (!['delivery_latitude', 'delivery_longitude'].contains(entry.key) ||
+                entry.value.text.trim().isNotEmpty))
           entry.key: entry.value.text.trim(),
       'sex': _sex,
       'policy_accepted': _accepted,
@@ -299,6 +309,40 @@ class _GoogleRegistrationFormState extends State<GoogleRegistrationForm> {
             validator: (v) => RegExp(r'^[0-9]{4}$').hasMatch(v?.trim() ?? '')
                 ? null
                 : 'Enter a four-digit postal code.',
+          ),
+          _field(
+            'delivery_latitude',
+            'Delivery latitude (optional)',
+            keyboard: const TextInputType.numberWithOptions(
+              signed: true,
+              decimal: true,
+            ),
+            maxLength: 20,
+            validator: (v) {
+              final text = v?.trim() ?? '';
+              if (text.isEmpty) return null;
+              final parsed = double.tryParse(text);
+              return parsed != null && parsed >= -90 && parsed <= 90
+                  ? null
+                  : 'Enter a latitude between -90 and 90.';
+            },
+          ),
+          _field(
+            'delivery_longitude',
+            'Delivery longitude (optional)',
+            keyboard: const TextInputType.numberWithOptions(
+              signed: true,
+              decimal: true,
+            ),
+            maxLength: 20,
+            validator: (v) {
+              final text = v?.trim() ?? '';
+              if (text.isEmpty) return null;
+              final parsed = double.tryParse(text);
+              return parsed != null && parsed >= -180 && parsed <= 180
+                  ? null
+                  : 'Enter a longitude between -180 and 180.';
+            },
           ),
         ],
         const SizedBox(height: 12),

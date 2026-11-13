@@ -1005,11 +1005,57 @@ class _ReturnsPageState extends ProfileFormState<ReturnsPage>
             ),
       ],
       const Divider(height: 40),
+      if (mapOf(item['fault_review']) case final faultReview
+          when faultReview.isNotEmpty) ...[
+        const ProfileHeading(
+          'Recorded fault review',
+          'Return Policy v2 fault determination for merchandise and shipping settlement.',
+          Icons.fact_check_outlined,
+        ),
+        Text(switch (faultReview['party']) {
+          'seller' => 'Seller / item fault',
+          'courier' => 'Courier-company fault',
+          _ => 'Fault not determined under the original policy',
+        }, style: const TextStyle(fontWeight: FontWeight.w800, height: 1.7)),
+        if (faultReview['reason'] != null)
+          Text(
+            faultReview['reason'].toString(),
+            style: const TextStyle(height: 1.7),
+          ),
+        if (faultReview['evidence'] != null)
+          Text(
+            'Evidence: ${faultReview['evidence']}',
+            style: const TextStyle(fontSize: 12, height: 1.7),
+          ),
+        if (faultReview['event_reference'] != null)
+          Text(
+            '${faultReview['event_reference']} · ${readableDateTime(faultReview['decided_at'])}',
+            style: const TextStyle(fontSize: 12, height: 1.7),
+          ),
+        const Divider(height: 40),
+      ],
       ProfileHeading(
         money['mode'] == 'wallet' ? 'Wallet return refund' : 'Return repayment',
         'Original merchandise and product discounts determine the amount. Shipping stays separate. Approval and transfer offers do not confirm money received.',
         Icons.receipt_long_outlined,
       ),
+      if (mapOf(money['plan']) case final plan when plan.isNotEmpty) ...[
+        if (plan['is_preview'] == true)
+          const Text(
+            'Review preview · No amount has been approved or transferred.',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF475569),
+              height: 1.7,
+            ),
+          ),
+        Text(
+          'Returned items after original discounts: ${pesos((amount(plan['original_buyer_merchandise_cents']) ?? 0) / 100)}\nOriginal paid shipping to refund: ${pesos((amount(plan['outbound_shipping_refund_cents']) ?? 0) / 100)}\nBuyer repayment due: ${pesos((amount(plan['buyer_refund_cents']) ?? 0) / 100)}',
+          style: const TextStyle(height: 1.8, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+      ],
       if (rawAdjustment.isEmpty)
         const Text(
           'The original amount can be approved after actual seller receipt and condition review.',

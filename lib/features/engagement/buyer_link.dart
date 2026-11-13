@@ -111,6 +111,9 @@ class BuyerLink {
         parts.length == 2 &&
             parts.first == 'buyer-returns' &&
             buyerLinkId(parts[1]) != null ||
+        parts.length == 2 &&
+            parts.first == 'shipment-finances' &&
+            buyerLinkId(parts[1]) != null ||
         parts.length == 3 &&
             parts.first == 'buyer' &&
             parts[1] == 'orders' &&

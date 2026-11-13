@@ -14,6 +14,7 @@ import '../profile/profile_repository.dart';
 import '../profile/account_status_page.dart';
 import '../profile/purchases_section.dart';
 import '../profile/returns_page.dart';
+import '../profile/shipment_finance_page.dart';
 import '../promotions/campaign_page.dart';
 import '../promotions/promotion_page.dart';
 import '../tracking/parcel_tracking_page.dart';
@@ -220,6 +221,7 @@ class BuyerDestinationRouter {
     if (segments.first == 'advertisement' ||
         segments.first == 'promotions' ||
         segments.first == 'campaign' ||
+        segments.first == 'shipment-finances' ||
         target.path == '/top-products') {
       final page = await repository.document(target.toString());
       repository.requireNoErrors(page);
@@ -500,6 +502,24 @@ class BuyerDestinationRouter {
           throw const BackendException('This return is unavailable.');
         }
         await _openReturn(context, repository, '$id');
+        return;
+      case 'Finance/ShipmentOutcome':
+        if (page.props['financialPlan'] is! Map && page.props['plan'] is! Map) {
+          throw const BackendException(
+            'This shipping balance outcome is unavailable.',
+          );
+        }
+        final account = BuyerAccountScope(repository.session);
+        account.check(page: page);
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ShipmentFinancePage(
+              repository: ProfileRepository(repository),
+              initial: page,
+              account: account,
+            ),
+          ),
+        );
         return;
       default:
         throw const BackendException(

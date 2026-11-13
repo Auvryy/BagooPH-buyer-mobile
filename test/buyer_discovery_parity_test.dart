@@ -12,6 +12,8 @@ import 'package:bagoo_buyer_mobile/features/products/product_page.dart';
 import 'package:bagoo_buyer_mobile/features/products/product_widgets.dart';
 import 'package:bagoo_buyer_mobile/features/products/sale_clock.dart';
 import 'package:bagoo_buyer_mobile/features/products/shop_page.dart';
+import 'package:bagoo_buyer_mobile/features/profile/profile_repository.dart';
+import 'package:bagoo_buyer_mobile/features/profile/shipment_finance_page.dart';
 import 'package:bagoo_buyer_mobile/features/promotions/campaign_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -462,6 +464,70 @@ void main() {
       expect(find.text('ALGORITHMIC PICKS'), findsOneWidget);
       expect(find.text('#1'), findsOneWidget);
       expect(find.text('#2'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'shipment finance outcome page renders shipping balance and parses link',
+    (tester) async {
+      final repo = FakeBuyerRepository();
+      addTearDown(repo.session.close);
+      final origin = repo.session.origin;
+      final link = BuyerLink.parse(
+        origin.resolve('/shipment-finances/42'),
+        origin,
+      );
+      expect(link.kind, BuyerLinkKind.destination);
+      expect(link.requiresLogin, isTrue);
+
+      final financePage = WebPage('Finance/ShipmentOutcome', {
+        'auth': {'user': buyer},
+        'financialPlan': {
+          'id': 42,
+          'version': 1,
+          'reference': 'SFP-2026-0042',
+          'status': 'open',
+          'mode': 'wallet',
+          'amounts': {
+            'buyer_merchandise_refund_cents': 120000,
+            'buyer_shipping_due_cents': 18500,
+          },
+          'state': {
+            'due_cents': 18500,
+            'received_cents': 0,
+            'remaining_cents': 18500,
+          },
+          'actions': ['pay-wallet-shipping'],
+          'order': {'id': 91, 'order_number': 'BGO-91'},
+          'wallet_balance_cents': 50000,
+          'history': [
+            {
+              'id': 1,
+              'event_type': 'shipping-assessed',
+              'amount_cents': 18500,
+              'created_at': '2026-11-10T10:00:00Z',
+              'reason': 'Outbound and return shipping assessed to buyer.',
+            },
+          ],
+        },
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: ShipmentFinancePage(
+            repository: ProfileRepository(repo),
+            initial: financePage,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Shipping and refund · BGO-91'), findsOneWidget);
+      expect(find.text('SFP-2026-0042 · Status: open'), findsOneWidget);
+      expect(find.text('Pay shipping from Bagoo Wallet'), findsOneWidget);
+      expect(find.text('Pay shipping from my Wallet'), findsOneWidget);
     },
   );
 }
