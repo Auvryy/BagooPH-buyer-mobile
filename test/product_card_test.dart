@@ -93,4 +93,70 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'product cards render web role-model badges and flash deal selling-fast meter',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final session = FakeSession();
+      addTearDown(session.close);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 190,
+                    child: ProductCard(
+                      product: {...product(1), 'sales_count': 1500},
+                      session: session,
+                      onTap: () {},
+                    ),
+                  ),
+                  SizedBox(
+                    width: 190,
+                    child: ProductCard(
+                      product: {...product(2), 'sales_count': 1500},
+                      rankBadge: 'TOP #1',
+                      session: session,
+                      onTap: () {},
+                    ),
+                  ),
+                  SizedBox(
+                    width: 170,
+                    child: FlashDealCard(
+                      product: {
+                        ...product(3),
+                        'compare_at_price': 1600,
+                        'stock': 6,
+                      },
+                      session: session,
+                      onTap: () {},
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('HOT'), findsOneWidget);
+      expect(find.text('TOP #1'), findsOneWidget);
+      expect(find.text('Express'), findsNWidgets(2));
+      expect(
+        find.bySemanticsLabel(RegExp('Cash on Delivery')),
+        findsNWidgets(2),
+      );
+      expect(find.text('ONLY 6 LEFT'), findsOneWidget);
+      expect(find.text('-25%'), findsOneWidget);
+    },
+  );
 }
