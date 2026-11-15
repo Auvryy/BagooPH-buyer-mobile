@@ -157,10 +157,48 @@ class ShippingCalculation extends StatelessWidget {
             ),
           Text(
             selfPickup
-                ? 'Hub collection: no doorstep shipping charge.'
+                ? (calculation['base_fee_cents'] != null
+                      ? 'Base ${_money(calculation['base_fee_cents'])} + ${additionalKilograms ?? 'Unavailable'} additional kg × ${_money(calculation['additional_kg_cents'])}. Included: ${_kg(calculation['included_weight_grams'])} (final-mile doorstep delivery waived for hub pickup).'
+                      : 'Hub collection: final-mile doorstep delivery waived.')
                 : 'Base ${_money(calculation['base_fee_cents'])} + ${additionalKilograms ?? 'Unavailable'} additional kg × ${_money(calculation['additional_kg_cents'])}. Included: ${_kg(calculation['included_weight_grams'])}.',
             style: const TextStyle(fontSize: 12, height: 1.7),
           ),
+          if (calculation['eta'] is Map) ...[
+            if (mapOf(calculation['eta'])['label'] is String &&
+                (mapOf(calculation['eta'])['label'] as String)
+                    .trim()
+                    .isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Estimated arrival: ${mapOf(calculation['eta'])['label']}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+            if (mapOf(calculation['eta'])['cutoff_applied'] == true)
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Text(
+                  'Same-day dispatch cutoff passed; calculated from next operating day.',
+                  style: TextStyle(fontSize: 11, height: 1.5),
+                ),
+              ),
+            if (mapOf(calculation['eta'])['pause_notice'] is String &&
+                (mapOf(calculation['eta'])['pause_notice'] as String)
+                    .trim()
+                    .isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  mapOf(calculation['eta'])['pause_notice'].toString(),
+                  style: const TextStyle(fontSize: 11, height: 1.5),
+                ),
+              ),
+          ],
           if (rawRoute != null && !routeIsValid)
             const Text(
               'Route details unavailable.',

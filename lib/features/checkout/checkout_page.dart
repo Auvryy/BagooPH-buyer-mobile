@@ -16,6 +16,8 @@ import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
 import '../products/product_widgets.dart';
+import '../profile/account_status_page.dart';
+import 'checkout_location.dart';
 import 'location_picker.dart';
 import 'order_result_page.dart';
 import '../home/product_card.dart';
@@ -164,6 +166,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     _quote = {};
     _offerCount = null;
     _companies = [];
+    _rawPickupHubs = null;
     _location = {};
     _fieldErrors = {};
     _submittedPayload = null;
@@ -268,6 +271,7 @@ class _CheckoutPageState extends State<CheckoutPage>
   int? _company;
   bool _hasCompanyContract = false;
   List<Map<String, dynamic>> _companies = [];
+  Object? _rawPickupHubs;
   bool _locating = false;
   String? _locationFeedback;
   int? _platformVoucher;
@@ -282,8 +286,11 @@ class _CheckoutPageState extends State<CheckoutPage>
   Timer? _debounce;
   List<Map<String, dynamic>> get _items => mapsOf(_page.props['items']);
   List<Map<String, dynamic>> get _addresses => mapsOf(_page.props['addresses']);
+  Map<String, dynamic> get _codRestriction =>
+      mapOf(_page.props['codRestriction']);
+  Object? get _pickupHubSource => _rawPickupHubs ?? _page.props['pickupHubs'];
   bool get _pickupHubsValid {
-    final raw = _page.props['pickupHubs'];
+    final raw = _pickupHubSource;
     if (raw == null) return true;
     if (raw is! List ||
         raw.any(
@@ -306,13 +313,28 @@ class _CheckoutPageState extends State<CheckoutPage>
   }
 
   List<Map<String, dynamic>> get _pickupHubs =>
-      _pickupHubsValid ? mapsOf(_page.props['pickupHubs']) : const [];
-  List<Map<String, dynamic>> get _availablePickupHubs => _pickupHubs
-      .where(
-        (hub) =>
-            !_hasCompanyContract || hub['logistics_company_id'] == _company,
-      )
-      .toList();
+      _pickupHubsValid ? mapsOf(_pickupHubSource) : const [];
+  List<Map<String, dynamic>> get _availablePickupHubs => matchingPickupHubs(
+    _pickupHubs,
+    hasCompanyContract: _hasCompanyContract,
+    companyId: _company,
+    province: _location['province'],
+    city: _location['city'],
+    postalCode: _fields['shipping_postal_code']!.text,
+    barangay: _location['barangay'],
+  );
+
+  void _syncDeliverySelections() {
+    final available = _availablePickupHubs;
+    if (_hub != null && !available.any((h) => h['id'].toString() == _hub)) {
+      _hub = null;
+    }
+    _hub = defaultPickupHubId(available, _hub);
+    if (_delivery == 'hub_self_pickup' && available.isEmpty) {
+      _delivery = 'doorstep';
+    }
+  }
+
   int? get _addressBookLimit {
     final value = _page.props['addressBookLimit'];
     return value == null ? 10 : strictNonNegativeInteger(value);
@@ -342,8 +364,12 @@ class _CheckoutPageState extends State<CheckoutPage>
       return;
     }
     _hasCompanyContract = _page.props.containsKey('logisticsCompanies');
+    _rawPickupHubs = _page.props['pickupHubs'];
     _quote = mapOf(_page.props['quote']);
     _offerCount = _availableVoucherCount(_page.props['availableVouchers']);
+    if (_codRestriction.isNotEmpty && _payment == 'cod') {
+      _payment = 'wallet';
+    }
     _fields['voucher_code']!.text = widget.voucherCode ?? '';
     final address =
         _addresses
@@ -423,9 +449,18 @@ class _CheckoutPageState extends State<CheckoutPage>
         k: address?[k]?.toString() ?? user[k]?.toString() ?? '',
     };
     _saveAddress = false;
+    _syncDeliverySelections();
     if (notify) {
       setState(() {});
       _edit();
+    }
+  }
+
+  void _focusPostalField() {
+    final key = _fieldKeys['shipping_postal_code'];
+    _fieldFocus['shipping_postal_code']?.requestFocus();
+    if (key?.currentContext != null) {
+      Scrollable.ensureVisible(key!.currentContext!, alignment: 0.2);
     }
   }
 
@@ -437,14 +472,21 @@ class _CheckoutPageState extends State<CheckoutPage>
     setState(() {
       _ready = false;
       _fieldErrors = {};
+      _syncDeliverySelections();
     });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), _updateQuote);
   }
 
   void _readCompanies(Map<String, dynamic> data) {
+    if (data.containsKey('pickupHubs')) {
+      _rawPickupHubs = data['pickupHubs'];
+    }
     final raw = data['logisticsCompanies'];
-    if (raw == null) return;
+    if (raw == null) {
+      _syncDeliverySelections();
+      return;
+    }
     if (raw is! List ||
         raw.any(
           (row) => row is! Map || row.keys.any((key) => key is! String),
@@ -476,6 +518,7 @@ class _CheckoutPageState extends State<CheckoutPage>
     if (_company == null && _companies.length == 1) {
       _company = _companies.single['id'] as int;
     }
+    _syncDeliverySelections();
   }
 
   String get _locationDraft => jsonEncode([
@@ -774,6 +817,10 @@ class _CheckoutPageState extends State<CheckoutPage>
         setState(() {
           _page = fresh;
           _hasCompanyContract = fresh.props.containsKey('logisticsCompanies');
+          _rawPickupHubs = fresh.props['pickupHubs'];
+          if (_codRestriction.isNotEmpty && _payment == 'cod') {
+            _payment = 'wallet';
+          }
           _readCompanies(fresh.props);
         });
         await _updateQuote();
@@ -1356,32 +1403,54 @@ class _CheckoutPageState extends State<CheckoutPage>
     ),
   );
 
-  Widget _paymentPanel() => ProductPanel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const ProductHeading('Payment method'),
-        CheckoutChoice(
-          title: 'Cash on Delivery',
-          description: 'Pay the assigned rider or pickup counter when receiving your parcel.',
-          icon: Icons.payments_outlined,
-          selected: _payment == 'cod',
-          onTap: () => setState(() => _payment = 'cod'),
-        ),
-        CheckoutChoice(
-          title: 'Bagoo Wallet',
-          description: _page.props['walletBalanceCents'] == null
-              ? 'Your wallet balance is unavailable.'
-              : 'Available virtual credits: ${pesos((amount(_page.props['walletBalanceCents']) ?? 0) / 100)}. Review and confirm wallet payment after placing the order. Unpaid wallet orders expire after one hour.',
-          icon: Icons.account_balance_wallet_outlined,
-          selected: _payment == 'wallet',
-          onTap: _page.props['walletBalanceCents'] == null
-              ? null
-              : () => setState(() => _payment = 'wallet'),
-        ),
-      ],
-    ),
-  );
+  Widget _paymentPanel() {
+    final codRestriction = _codRestriction;
+    final codDisabled = codRestriction.isNotEmpty;
+    return ProductPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProductHeading('Payment method'),
+          if (codDisabled) ...[
+            _CheckoutWarningBanner(
+              title:
+                  'Cash on Delivery restricted${codRestriction['reference'] != null ? ' (${codRestriction['reference']})' : ''}',
+              message:
+                  '${codRestriction['reason']?.toString().trim().isNotEmpty == true ? codRestriction['reason'] : 'Cash on Delivery is unavailable for this account.'} Use Bagoo Wallet instead.',
+              actionLabel: 'View restriction details and appeal',
+              onAction: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      AccountStatusPage(repository: widget.repository),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          CheckoutChoice(
+            title: 'Cash on Delivery',
+            description: codDisabled
+                ? 'Cash on Delivery is currently restricted on your account. Choose Bagoo Wallet.'
+                : 'Pay the assigned rider or pickup counter when receiving your parcel.',
+            icon: Icons.payments_outlined,
+            selected: _payment == 'cod',
+            onTap: codDisabled ? null : () => setState(() => _payment = 'cod'),
+          ),
+          CheckoutChoice(
+            title: 'Bagoo Wallet',
+            description: _page.props['walletBalanceCents'] == null
+                ? 'Your wallet balance is unavailable.'
+                : 'Available virtual credits: ${pesos((amount(_page.props['walletBalanceCents']) ?? 0) / 100)}. Review and confirm wallet payment after placing the order. Unpaid wallet orders expire after one hour.',
+            icon: Icons.account_balance_wallet_outlined,
+            selected: _payment == 'wallet',
+            onTap: _page.props['walletBalanceCents'] == null
+                ? null
+                : () => setState(() => _payment = 'wallet'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _money(
     String label,
@@ -1566,163 +1635,247 @@ class _CheckoutPageState extends State<CheckoutPage>
     return 'Published rate: Base ${pesos(baseCents / 100)} (includes ${(includedGrams / 1000).toStringAsFixed(1)} kg) + ${pesos(additionalCents / 100)}/kg';
   }
 
-  Widget _deliveryPanel() => ProductPanel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const ProductHeading('Delivery method'),
-        const SizedBox(height: 12),
-        if (_hasCompanyContract) ...[
-          DropdownButtonFormField<int>(
-            key: ValueKey(
-              'company-$_company-${_companies.map((row) => row['id']).join('-')}',
+  Widget _deliveryPanel() {
+    final province = _location['province']?.trim() ?? '';
+    final city = _location['city']?.trim() ?? '';
+    final postal = _fields['shipping_postal_code']!.text.trim();
+    final missingLocation = province.isEmpty || city.isEmpty;
+    final missingValidPostal = !hasValidCheckoutPostalCode(postal);
+    final availableHubs = _availablePickupHubs;
+    final selectedHub = availableHubs
+        .where((h) => h['id'].toString() == _hub)
+        .firstOrNull;
+    final doorstepFee =
+        amount(_quote['doorstep_shipping_fee']) ??
+        (_delivery == 'doorstep' ? amount(_quote['shipping']) : null);
+    final selfPickupFee =
+        amount(_quote['self_pickup_shipping_fee']) ??
+        (_delivery == 'hub_self_pickup'
+            ? amount(_quote['shipping'])
+            : (doorstepFee != null
+                  ? estimateSelfPickupFeeFromDoorstep(doorstepFee)
+                  : null));
+
+    return ProductPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProductHeading('Delivery method'),
+          const SizedBox(height: 12),
+          if (missingLocation) ...[
+            _CheckoutWarningBanner(
+              title: 'Delivery location incomplete',
+              message: 'Select a province and city/municipality in your delivery address to match logistics carriers and Bayan Hubs.',
+              actionLabel: 'Review delivery address',
+              onAction: _focusPostalField,
             ),
-            initialValue: _companies.any((row) => row['id'] == _company)
-                ? _company
-                : null,
-            isExpanded: true,
-            isDense: false,
-            itemHeight: null,
-            decoration: InputDecoration(
-              labelText: 'Logistics company',
-              errorText: _fieldErrors['logistics_company_id'],
+            const SizedBox(height: 12),
+          ] else if (missingValidPostal) ...[
+            _CheckoutWarningBanner(
+              title: 'Postal code required for delivery matching',
+              message: 'Enter a valid 4-digit postal code to see serving logistics carriers and Bayan Hub self-pickup counters.',
+              actionLabel: 'Add postal code',
+              onAction: _focusPostalField,
             ),
-            selectedItemBuilder: (_) => [
-              for (final company in _companies)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Tooltip(
-                    message: company['name'].toString(),
-                    child: Text(
-                      company['name'].toString(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-            ],
-            items: [
-              for (final company in _companies)
-                DropdownMenuItem(
-                  value: company['id'] as int,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(company['name'].toString()),
-                  ),
-                ),
-            ],
-            onChanged: _frozen || _submitting
-                ? null
-                : (value) {
-                    setState(() {
-                      _company = value;
-                      _hub = null;
-                    });
-                    _edit();
-                  },
-            validator: (_) =>
-                _company == null ? 'Choose a serving logistics company.' : null,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              _companies.isEmpty
-                  ? 'No company choices are currently available. Complete or review the address and refresh the quote.'
-                  : 'Companies must serve both seller and recipient. Shipping uses the greater of actual and volumetric weight.',
-              style: const TextStyle(fontSize: 12, height: 1.7),
-            ),
-          ),
-          if (_selectedCompanyRateSummary case final rateSummary?)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                rateSummary,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: BagooTheme.crimson,
-                  height: 1.5,
-                ),
+            const SizedBox(height: 12),
+          ],
+          if (_hasCompanyContract) ...[
+            DropdownButtonFormField<int>(
+              key: ValueKey(
+                'company-$_company-${_companies.map((row) => row['id']).join('-')}',
               ),
-            ),
-        ] else
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'Your delivery partner and fees are assigned by Bagoo and confirmed in the quote.',
-              style: TextStyle(fontSize: 12, height: 1.7),
-            ),
-          ),
-        CheckoutChoice(
-          title: 'Doorstep delivery',
-          description: 'Delivered to your recipient address. Shipping is calculated separately for each shop.',
-          icon: Icons.local_shipping_outlined,
-          selected: _delivery == 'doorstep',
-          onTap: () {
-            setState(() => _delivery = 'doorstep');
-            _edit();
-          },
-        ),
-        CheckoutChoice(
-          title: 'Bayan Hub self-pickup',
-          description: !_pickupHubsValid
-              ? 'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.'
-              : _availablePickupHubs.isEmpty
-              ? 'No pickup Bayan Hubs are available. Choose doorstep delivery.'
-              : 'Collect from an eligible municipal hub when your parcel is ready.',
-          icon: Icons.storefront_outlined,
-          selected: _delivery == 'hub_self_pickup',
-          onTap: _availablePickupHubs.isEmpty
-              ? null
-              : () {
-                  setState(() => _delivery = 'hub_self_pickup');
-                  _edit();
-                },
-        ),
-        if (!_pickupHubsValid)
-          const Notice(
-            'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.',
-            error: true,
-          ),
-        if (_delivery == 'hub_self_pickup') ...[
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            key: ValueKey('hub-$_company-$_hub'),
-            initialValue: _hub,
-            isExpanded: true,
-            itemHeight: null,
-            decoration: const InputDecoration(labelText: 'Pickup Bayan Hub'),
-            items: _availablePickupHubs
-                .map(
-                  (h) => DropdownMenuItem(
-                    value: h['id'].toString(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+              initialValue: _companies.any((row) => row['id'] == _company)
+                  ? _company
+                  : null,
+              isExpanded: true,
+              isDense: false,
+              itemHeight: null,
+              decoration: InputDecoration(
+                labelText: 'Logistics company',
+                helperText: _companies.length == 1 && _company != null
+                    ? 'Auto-selected for your delivery route'
+                    : null,
+                errorText: _fieldErrors['logistics_company_id'],
+              ),
+              selectedItemBuilder: (_) => [
+                for (final company in _companies)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Tooltip(
+                      message: company['name'].toString(),
                       child: Text(
-                        '${h['name']} · ${h['city_municipality']}',
-                        style: const TextStyle(fontSize: 13),
+                        company['name'].toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
-                )
-                .toList(),
-            onChanged: (v) {
-              setState(() => _hub = v);
+              ],
+              items: [
+                for (final company in _companies)
+                  DropdownMenuItem(
+                    value: company['id'] as int,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(company['name'].toString()),
+                    ),
+                  ),
+              ],
+              onChanged: _frozen || _submitting
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _company = value;
+                        _hub = null;
+                        _syncDeliverySelections();
+                      });
+                      _edit();
+                    },
+              validator: (_) => _company == null
+                  ? 'Choose a serving logistics company.'
+                  : null,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                _companies.isEmpty
+                    ? 'No company choices are currently available. Complete or review the address and refresh the quote.'
+                    : 'Companies must serve both seller and recipient. Shipping uses the greater of actual and volumetric weight.',
+                style: const TextStyle(fontSize: 12, height: 1.7),
+              ),
+            ),
+            if (_selectedCompanyRateSummary case final rateSummary?)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  rateSummary,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: BagooTheme.crimson,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+          ] else
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Your delivery partner and fees are assigned by Bagoo and confirmed in the quote.',
+                style: TextStyle(fontSize: 12, height: 1.7),
+              ),
+            ),
+          CheckoutChoice(
+            title: 'Doorstep delivery',
+            description:
+                '${doorstepFee != null ? 'Fee: ${pesos(doorstepFee)} · ' : ''}Delivered to your recipient address. Shipping is calculated separately for each shop.',
+            icon: Icons.local_shipping_outlined,
+            selected: _delivery == 'doorstep',
+            onTap: () {
+              setState(() => _delivery = 'doorstep');
               _edit();
             },
-            validator: (v) => _delivery == 'hub_self_pickup' && v == null
-                ? 'Choose a pickup Bayan Hub.'
-                : null,
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Your parcel follows the hub network. Order tracking will show when collection is ready.',
-            style: TextStyle(fontSize: 12, height: 1.6),
+          CheckoutChoice(
+            title: 'Bayan Hub self-pickup',
+            description: !_pickupHubsValid
+                ? 'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.'
+                : availableHubs.isEmpty
+                ? (missingLocation || missingValidPostal
+                      ? 'Complete your province, city, and 4-digit postal code to check nearby Bayan Hubs.'
+                      : 'No Bayan Hub self-pickup counter covers $city, $province ($postal). Choose doorstep delivery.')
+                : '${selfPickupFee != null ? 'Fee: ${pesos(selfPickupFee)} (Reduced fee) · ' : ''}Pick up at a local hub · Final-mile delivery waived.',
+            icon: Icons.storefront_outlined,
+            selected: _delivery == 'hub_self_pickup',
+            onTap: availableHubs.isEmpty
+                ? null
+                : () {
+                    setState(() {
+                      _delivery = 'hub_self_pickup';
+                      _syncDeliverySelections();
+                    });
+                    _edit();
+                  },
           ),
+          if (!missingLocation &&
+              !missingValidPostal &&
+              _pickupHubsValid &&
+              availableHubs.isEmpty &&
+              (!_hasCompanyContract || _company != null)) ...[
+            const SizedBox(height: 8),
+            _CheckoutWarningBanner(
+              title: 'No Bayan Hub covers this address',
+              message:
+                  'No Bayan Hub self-pickup counter covers $city, $province ($postal) under the selected carrier. Use doorstep delivery or edit your postal code.',
+              actionLabel: 'Edit postal code',
+              onAction: _focusPostalField,
+            ),
+          ],
+          if (!_pickupHubsValid)
+            const Notice(
+              'Pickup choices could not be confirmed. Choose doorstep delivery and refresh checkout.',
+              error: true,
+            ),
+          if (_delivery == 'hub_self_pickup') ...[
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: ValueKey('hub-$_company-$_hub-${availableHubs.length}'),
+              initialValue: _hub,
+              isExpanded: true,
+              itemHeight: null,
+              decoration: InputDecoration(
+                labelText: 'Pickup Bayan Hub',
+                helperText: availableHubs.length == 1 && _hub != null
+                    ? 'Auto-selected for your barangay & postal code'
+                    : null,
+              ),
+              items: availableHubs
+                  .map(
+                    (h) => DropdownMenuItem(
+                      value: h['id'].toString(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          '${h['name']} · ${h['city_municipality']}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) {
+                setState(() => _hub = v);
+                _edit();
+              },
+              validator: (v) => _delivery == 'hub_self_pickup' && v == null
+                  ? 'Choose a pickup Bayan Hub.'
+                  : null,
+            ),
+            if (selectedHub != null &&
+                selectedHub['operating_hours'] is String &&
+                (selectedHub['operating_hours'] as String).trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Counter hours: ${selectedHub['operating_hours']}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: BagooTheme.muted,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your parcel follows the hub network. Order tracking will show when collection is ready.',
+              style: TextStyle(fontSize: 12, height: 1.6),
+            ),
+          ],
         ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
+
   Widget _addressPanel() => ProductPanel(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2045,6 +2198,77 @@ class _CheckoutPageState extends State<CheckoutPage>
               ),
             )
           : null,
+    ),
+  );
+}
+
+class _CheckoutWarningBanner extends StatelessWidget {
+  const _CheckoutWarningBanner({
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFFBEB),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFFDE68A)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              size: 18,
+              color: Color(0xFFB45309),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF92400E),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          message,
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.5,
+            color: Color(0xFF78350F),
+          ),
+        ),
+        if (actionLabel != null && onAction != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.only(top: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: onAction,
+              child: Text(actionLabel!),
+            ),
+          ),
+      ],
     ),
   );
 }

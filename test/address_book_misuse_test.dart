@@ -172,6 +172,10 @@ void main() {
       find.widgetWithText(TextFormField, 'Street / house / unit number'),
       '456 New Test Street',
     );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Postal code'),
+      '4000',
+    );
   }
 
   check(
@@ -335,19 +339,26 @@ void main() {
   });
 
   check(
-    'canonical location correction removes obsolete coordinates and postal code',
+    'canonical location correction removes obsolete coordinates and requires a new postal code',
     (tester) async {
       final address = (page.value.props['addresses'] as List).last as Map;
       address['province'] = 'Old Laguna';
       address['city'] = 'Old City';
       await open(tester, edit: true);
       await returnPress(tester, save());
+      expect(repository.calls, isEmpty);
+      expect(find.text('Enter postal code.'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Postal code'),
+        '4001',
+      );
+      await returnPress(tester, save());
       final values = repository.calls.single.values;
       expect(values['province'], 'Laguna');
       expect(values['city'], 'San Pablo City');
       expect(values['latitude'], isNull);
       expect(values['longitude'], isNull);
-      expect(values['postal_code'], '');
+      expect(values['postal_code'], '4001');
     },
   );
 
@@ -497,7 +508,7 @@ void main() {
 
   for (final entry in {
     'Mobile number': 'phone123',
-    'Postal code (optional)': '12x4',
+    'Postal code': '12x4',
   }.entries) {
     check('address submission rejects raw invalid ${entry.key}', (
       tester,

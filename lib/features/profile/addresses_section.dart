@@ -598,15 +598,15 @@ class _AddressEditorState extends BuyerProfileFormState<_AddressEditor> {
               ),
               field(
                 'postal_code',
-                'Postal code (optional)',
+                'Postal code',
                 _fields['postal_code']!,
                 enabled: !_needsReview,
-                required: false,
+                required: true,
                 max: 4,
                 keyboard: TextInputType.number,
-                check: (v) => v.isEmpty || RegExp(r'^\d{4}$').hasMatch(v)
+                check: (v) => RegExp(r'^\d{4}$').hasMatch(v)
                     ? null
-                    : 'Use a four-digit postal code.',
+                    : 'Enter a four-digit postal code.',
               ),
               field(
                 'landmark',
