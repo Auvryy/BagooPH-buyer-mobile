@@ -95,7 +95,7 @@ void main() {
   }
 
   testWidgets(
-    'product cards render web role-model badges and flash deal selling-fast meter',
+    'product cards render web role-model badges without flash deal cards',
     (tester) async {
       tester.view.physicalSize = const Size(430, 1000);
       tester.view.devicePixelRatio = 1;
@@ -127,18 +127,6 @@ void main() {
                       onTap: () {},
                     ),
                   ),
-                  SizedBox(
-                    width: 170,
-                    child: FlashDealCard(
-                      product: {
-                        ...product(3),
-                        'compare_at_price': 1600,
-                        'stock': 6,
-                      },
-                      session: session,
-                      onTap: () {},
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -155,8 +143,6 @@ void main() {
         find.bySemanticsLabel(RegExp('Cash on Delivery')),
         findsNWidgets(2),
       );
-      expect(find.text('ONLY 6 LEFT'), findsOneWidget);
-      expect(find.text('-25%'), findsOneWidget);
     },
   );
 }

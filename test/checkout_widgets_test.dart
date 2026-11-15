@@ -489,4 +489,94 @@ void main() {
     expect(requests[0], requests[1]);
     expect(find.text('Order recorded.'), findsOneWidget);
   });
+
+  testWidgets(
+    'filters pickup Bayan Hubs by postal code and shows operating hours and auto-selected helper',
+    (tester) async {
+      final page = checkoutPage();
+      page.props['pickupHubs'] = [
+        {
+          'id': 5,
+          'name': 'San Pablo Central Hub',
+          'province': 'Laguna',
+          'city_municipality': 'San Pablo City',
+          'postal_codes': ['4000'],
+          'coverage_barangays': ['San Rafael'],
+          'operating_hours': 'Mon–Sat 8:00 AM – 6:00 PM',
+          'logistics_company_id': 41,
+        },
+        {
+          'id': 6,
+          'name': 'Calamba Hub',
+          'province': 'Laguna',
+          'city_municipality': 'Calamba City',
+          'postal_codes': ['4027'],
+          'logistics_company_id': 41,
+        },
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: CheckoutPage(repository: repo, initial: page),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final pickup = find.text('Bayan Hub self-pickup');
+      await tester.ensureVisible(pickup);
+      await tester.pumpAndSettle();
+      await tester.tap(pickup);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('San Pablo Central Hub'), findsWidgets);
+      expect(find.textContaining('Calamba Hub'), findsNothing);
+      expect(
+        find.text('Counter hours: Mon–Sat 8:00 AM – 6:00 PM'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Auto-selected for your barangay & postal code'),
+        findsOneWidget,
+      );
+
+      final postalField = find.widgetWithText(TextFormField, 'Postal code');
+      await tester.ensureVisible(postalField);
+      await tester.pumpAndSettle();
+      await tester.enterText(postalField, '4099');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      final noHubNotice = find.text('No Bayan Hub covers this address');
+      await tester.ensureVisible(noHubNotice);
+      await tester.pumpAndSettle();
+      expect(noHubNotice, findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'codRestriction disables Cash on Delivery and defaults to Bagoo Wallet',
+    (tester) async {
+      final page = checkoutPage();
+      page.props['codRestriction'] = {
+        'id': 9,
+        'reference': 'SAN-009',
+        'reason': 'Excessive failed COD deliveries.',
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BagooTheme.light,
+          home: CheckoutPage(repository: repo, initial: page),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Cash on Delivery restricted (SAN-009)'),
+        findsOneWidget,
+      );
+      expect(find.text('View restriction details and appeal'), findsOneWidget);
+      await press(tester, find.widgetWithText(FilledButton, 'Review order'));
+      await press(tester, find.byType(CheckboxListTile).last);
+      await press(tester, find.widgetWithText(FilledButton, 'Place order'));
+      expect(repo.submittedOrder?['payment_method'], 'wallet');
+    },
+  );
 }

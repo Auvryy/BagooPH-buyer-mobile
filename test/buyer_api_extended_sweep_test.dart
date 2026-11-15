@@ -432,63 +432,6 @@ void main() {
       }
     }
 
-    for (final subscribed in [true, false]) {
-      test(
-        'sale reminder ${subscribed ? 'POST' : 'DELETE'} follows product referer and state',
-        () async {
-          respond = (request) async {
-            expect(request.method, subscribed ? 'POST' : 'DELETE');
-            expect(request.uri.path, '/buyer/sale-reminders/13');
-            expect(
-              request.headers.value('referer'),
-              '${session.origin}/buyer/product/test-product',
-            );
-            expect(
-              jsonDecode(await utf8.decoder.bind(request).join()),
-              isEmpty,
-            );
-            request.response.write(
-              _markup('Buyer/ProductDetail', {
-                'saleReminder': {'subscribed': subscribed},
-              }),
-            );
-          };
-          expect(
-            (await buyer.reminder('test-product', 13, subscribed)).component,
-            'Buyer/ProductDetail',
-          );
-          expect(seen, [
-            'GET /login',
-            '${subscribed ? 'POST' : 'DELETE'} /buyer/sale-reminders/13',
-          ]);
-        },
-      );
-    }
-
-    test(
-      'sale reminder refuses opposite acknowledgement and invalid local ID',
-      () async {
-        respond = (request) async {
-          await request.drain<void>();
-          request.response.write(
-            _markup('Buyer/ProductDetail', {
-              'saleReminder': {'subscribed': false},
-            }),
-          );
-        };
-        await expectLater(
-          buyer.reminder('test-product', 0, true),
-          throwsA(isA<BackendException>()),
-        );
-        expect(seen, isEmpty);
-        await expectLater(
-          buyer.reminder('test-product', 13, true),
-          throwsA(isA<BackendException>()),
-        );
-        expect(seen, ['GET /login', 'POST /buyer/sale-reminders/13']);
-      },
-    );
-
     final chatValues = {
       'receiver_id': 3,
       'shop_id': 2,

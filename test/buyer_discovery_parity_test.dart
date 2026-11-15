@@ -318,7 +318,7 @@ void main() {
   );
 
   testWidgets(
-    'home page renders flash deals, top curated collections, and subcategories when provided',
+    'home page renders top curated collections and subcategories when provided without flash deals',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(430, 1200);
@@ -356,9 +356,9 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Smart Audio'), findsOneWidget);
-      expect(find.text('FLASH DEALS'), findsOneWidget);
-      expect(find.text('LIMITED TIME'), findsOneWidget);
-      expect(find.text('ONLY 5 LEFT'), findsOneWidget);
+      expect(find.text('FLASH DEALS'), findsNothing);
+      expect(find.text('LIMITED TIME'), findsNothing);
+      expect(find.text('ONLY 5 LEFT'), findsNothing);
       expect(find.text('TOP PRODUCTS'), findsOneWidget);
       expect(find.text('Wireless Audio Picks'), findsOneWidget);
       expect(find.text('TOP 1'), findsOneWidget);

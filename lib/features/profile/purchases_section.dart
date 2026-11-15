@@ -402,6 +402,31 @@ class _PurchasesSectionState extends BuyerProfileFormState<PurchasesSection> {
                       height: 1.7,
                     ),
                   ),
+                  if (mapOf(order['tracking'])['dispatch_delay_label'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        mapOf(
+                          order['tracking'],
+                        )['dispatch_delay_label'].toString(),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                  if (mapOf(mapOf(order['tracking'])['eta'])['label'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'ETA: ${mapOf(mapOf(order['tracking'])['eta'])['label']}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: BagooTheme.muted,
+                        ),
+                      ),
+                    ),
                   const Divider(height: 24),
                   if (orderItems == null)
                     const Padding(

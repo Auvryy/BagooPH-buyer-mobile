@@ -281,3 +281,107 @@ class _ShipmentFinancePageState extends State<ShipmentFinancePage> {
     );
   }
 }
+
+/// Renders original and historical shipment finance review links.
+class ShipmentFinanceLinksPanel extends StatelessWidget {
+  const ShipmentFinanceLinksPanel({
+    super.key,
+    required this.value,
+    this.fallbackUrl,
+    this.disabled = false,
+    required this.onOpenUrl,
+  });
+
+  final Map<String, dynamic> value;
+  final String? fallbackUrl;
+  final bool disabled;
+  final Future<void> Function(String url) onOpenUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final records = mapsOf(value['records']);
+    final histories = mapsOf(value['histories']);
+    final safeFallback =
+        fallbackUrl != null && fallbackUrl!.startsWith('/shipment-finances')
+        ? fallbackUrl!
+        : null;
+    if (records.isEmpty) {
+      if (safeFallback == null) return const SizedBox.shrink();
+      return ProfilePanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Shipping and refund review',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: disabled ? null : () => onOpenUrl(safeFallback),
+              child: const Text('Review finances'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ProfilePanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ProfileHeading(
+            'Shipping and refunds',
+            'Recorded shipment fee adjustments and loss reviews.',
+            Icons.receipt_long_outlined,
+          ),
+          for (final record in records)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${record['kind'] == 'transit_loss' ? 'Parcel loss review' : 'Shipping review'}${record['active'] == false ? ' · Earlier review' : ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  if (record['return_reference'] != null)
+                    Text('Return ${record['return_reference']}'),
+                  if (record['reference'] != null)
+                    Text(
+                      record['reference'].toString(),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  if (record['href'] is String &&
+                      (record['href'] as String).startsWith(
+                        '/shipment-finances',
+                      ))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: OutlinedButton(
+                        onPressed: disabled
+                            ? null
+                            : () => onOpenUrl(record['href'] as String),
+                        child: const Text('Review finances'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          for (final history in histories)
+            if ((amount(history['count']) ?? 0) >
+                    records.where((r) => r['kind'] == history['kind']).length &&
+                history['href'] is String &&
+                (history['href'] as String).startsWith('/shipment-finances'))
+              OutlinedButton(
+                onPressed: disabled
+                    ? null
+                    : () => onOpenUrl(history['href'] as String),
+                child: Text(
+                  'All ${history['kind'] == 'transit_loss' ? 'loss' : 'shipping'} reviews (${history['count']})',
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}

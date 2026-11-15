@@ -14,6 +14,9 @@ import '../../core/widgets.dart';
 import '../../core/uploads.dart';
 import '../home/product_card.dart';
 import '../products/product_widgets.dart';
+import 'account_enforcement_notices.dart';
+import 'account_status_page.dart';
+import 'courier_feedback_section.dart';
 import 'profile_widgets.dart';
 import 'profile_repository.dart';
 import 'purchases_section.dart';
@@ -221,6 +224,36 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
       if (prior != claim['reference'] || !readyForPickup) _code = null;
     });
     _scheduleClaimBoundary();
+  }
+
+  Future<void> _reloadAfterAction(WebPage page) async {
+    if (page.component == 'Buyer/OrderDetail') {
+      _accept(page);
+    } else {
+      _accept(await widget.repository.order(widget.orderId));
+    }
+  }
+
+  Future<void> _openShipmentFinanceHref(String href) async {
+    if (!href.startsWith('/shipment-finances')) return;
+    await perform(() async {
+      final financePage = await widget.repository.buyer.document(href);
+      widget.repository.buyer.requireNoErrors(financePage);
+      _account.check(page: financePage);
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ShipmentFinancePage(
+              repository: widget.repository,
+              initial: financePage,
+              account: _account,
+            ),
+          ),
+        );
+        _accept(await widget.repository.order(widget.orderId));
+      }
+      return null;
+    }, validate: false);
   }
 
   void _scheduleClaimBoundary() {
@@ -586,6 +619,78 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                               'Recorded holder: ${tracking['custodian'] ?? 'Not recorded'}\n${tracking['responsible'] ?? 'Next step'}: ${tracking['next_step'] ?? 'Refresh for the next recorded step.'}',
                               style: const TextStyle(height: 1.7),
                             ),
+                            if (tracking['dispatch_delay_label'] != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Notice(
+                                  tracking['dispatch_delay_label'].toString(),
+                                ),
+                              ),
+                            if (tracking['eta'] is Map) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: BagooTheme.line),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Estimated delivery (${mapOf(tracking['eta'])['status_label'] ?? 'Estimate'})',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: BagooTheme.muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      mapOf(
+                                            tracking['eta'],
+                                          )['label']?.toString() ??
+                                          '',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    if (mapOf(
+                                          tracking['eta'],
+                                        )['pause_notice'] !=
+                                        null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        mapOf(
+                                          tracking['eta'],
+                                        )['pause_notice'].toString(),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF92400E),
+                                        ),
+                                      ),
+                                    ],
+                                    if (mapOf(
+                                          tracking['eta'],
+                                        )['delay_notice'] !=
+                                        null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        mapOf(
+                                          tracking['eta'],
+                                        )['delay_notice'].toString(),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: BagooTheme.muted,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                             if (tracking['notice'] != null)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -824,6 +929,53 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                             ],
                           ),
                         ),
+                      if (mapOf(_page!.props['shipmentFinances']).isNotEmpty)
+                        ShipmentFinanceLinksPanel(
+                          value: mapOf(_page!.props['shipmentFinances']),
+                          disabled: !canAct,
+                          onOpenUrl: _openShipmentFinanceHref,
+                        ),
+                      if (mapsOf(_page!.props['activeSanctions']).isNotEmpty)
+                        AccountEnforcementNotices(
+                          session: widget.repository.buyer.session,
+                          sanctions: mapsOf(_page!.props['activeSanctions']),
+                          title: 'Account Restrictions Affecting Checkout or Reviews',
+                          referer: '/buyer/orders/${widget.orderId}',
+                          disabled: !canAct,
+                          onUpdated: _reloadAfterAction,
+                          onViewDetails: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => AccountStatusPage(
+                                  repository: widget.repository.buyer,
+                                ),
+                              ),
+                            );
+                            if (mounted) {
+                              await _load();
+                            }
+                          },
+                        ),
+                      if (_page!.props['deliveryFeedback'] != null ||
+                          _page!.props['deliveryFeedbackUrl'] != null ||
+                          mapsOf(_page!.props['safetyCheckinSignals'])
+                              .isNotEmpty)
+                        CourierDeliveryFeedbackPanel(
+                          session: widget.repository.buyer.session,
+                          referer: '/buyer/orders/${widget.orderId}',
+                          deliveryFeedback:
+                              _page!.props['deliveryFeedback'] is Map
+                              ? mapOf(_page!.props['deliveryFeedback'])
+                              : null,
+                          deliveryFeedbackUrl: _page!
+                              .props['deliveryFeedbackUrl']
+                              ?.toString(),
+                          safetyCheckinSignals: mapsOf(
+                            _page!.props['safetyCheckinSignals'],
+                          ),
+                          disabled: !canAct,
+                          onUpdated: _reloadAfterAction,
+                        ),
                       ProfilePanel(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -845,7 +997,7 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                   session: widget.repository.session,
                                   repository: widget.repository.buyer,
                                 ),
-                                if (item['review'] is Map)
+                                if (item['review'] is Map) ...[
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 12),
                                     child: Text(
@@ -856,6 +1008,14 @@ class _OrderDetailPageState extends ProfileFormState<OrderDetailPage> {
                                       ),
                                     ),
                                   ),
+                                  ReviewModerationPanel(
+                                    session: widget.repository.buyer.session,
+                                    review: mapOf(item['review']),
+                                    referer: '/buyer/orders/${widget.orderId}',
+                                    disabled: !canAct,
+                                    onUpdated: _reloadAfterAction,
+                                  ),
+                                ],
                                 if (userCan &&
                                     order['status'] == 'completed' &&
                                     (item['review'] == null ||

@@ -96,9 +96,6 @@ class HomeController extends ChangeNotifier {
   List<Map<String, dynamic>> get relatedProducts =>
       completeRelatedProducts(data?.props['relatedProducts']) ?? const [];
 
-  List<Map<String, dynamic>> get flashSaleProducts =>
-      completeRelatedProducts(data?.props['flashSaleProducts']) ?? const [];
-
   List<Map<String, dynamic>> get subcategories {
     final rows = _completeMapRows(data?.props['subcategories']);
     final ids = <int>{};
