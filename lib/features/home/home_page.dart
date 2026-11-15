@@ -1082,11 +1082,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           ),
                         ),
                       if (!_home.hasFilters &&
-                          _home.flashSaleProducts.isNotEmpty) ...[
-                        _flashDealsSection(scaled),
-                        const SizedBox(height: 20),
-                      ],
-                      if (!_home.hasFilters &&
                           _home.topCuratedCollections.isNotEmpty) ...[
                         _topCollectionsSection(),
                         const SizedBox(height: 20),
@@ -1522,88 +1517,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ],
     ),
   );
-
-  Widget _flashDealsSection(double scaled) {
-    final items = _home.flashSaleProducts;
-    final cardWidth = 152.0 * scaled.clamp(1.0, 1.4);
-    final cardHeight = cardWidth + 96.0 * scaled;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFFECDD3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.bolt_rounded,
-                size: 20,
-                color: BagooTheme.crimson,
-              ),
-              const SizedBox(width: 4),
-              const Expanded(
-                child: Text(
-                  'FLASH DEALS',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.3,
-                    color: BagooTheme.crimson,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: BagooTheme.ink,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text(
-                  'LIMITED TIME',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: cardHeight,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final product = items[index];
-                final id = product['id'] as int;
-                final saved = positiveResourceIds(
-                  _home.data?.props['savedProductIds'],
-                ).contains(id);
-                return SizedBox(
-                  width: cardWidth,
-                  child: FlashDealCard(
-                    product: product,
-                    session: widget.repository.session,
-                    onTap: () => _openProduct(product),
-                    saved: saved,
-                    saving: _saving.contains(id),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _topCollectionsSection() {
     final collections = _home.topCuratedCollections;

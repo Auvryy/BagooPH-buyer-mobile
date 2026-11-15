@@ -12,7 +12,6 @@ import '../../core/buyer_repository.dart';
 import '../../core/strict_datetime.dart';
 import '../../core/numeric_input.dart';
 import '../../core/resource_ids.dart';
-import '../../core/retry_cooldown.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../../core/device_actions.dart';
@@ -110,8 +109,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   bool _loading = true;
   bool _busy = false;
   bool _saving = false;
-  bool _reminding = false;
-  late final RetryCooldown _reminderCooldown;
   bool _approvalPromptOpen = false;
   int _image = 0;
   final _quantity = TextEditingController(text: '1');
@@ -147,15 +144,12 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     super.initState();
     _checkoutAccount = BuyerAccountScope(repo.session);
     _identityEpoch = repo.session.identityEpoch;
-    _reminderCooldown = RetryCooldown(() {
-      if (mounted) setState(() {});
-    });
     WidgetsBinding.instance.addObserver(this);
     _updates = ForegroundRead(
       interval: const Duration(seconds: 30),
       refreshInitially: false,
       read: (ticket) async {
-        if (_reads > 0 || _busy || _saving || _reminding) {
+        if (_reads > 0 || _busy || _saving) {
           return ReadOutcome.success;
         }
         await _load(quiet: true, ticket: ticket);
@@ -173,7 +167,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
       return;
     }
     _generation++;
-    _reminderCooldown.clear(notify: false);
     _checkoutAccount.invalidate();
     _checkoutAccount = BuyerAccountScope(repo.session);
     _identityEpoch = repo.session.identityEpoch;
@@ -184,7 +177,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     _loading = true;
     _busy = false;
     _saving = false;
-    _reminding = false;
     _image = 0;
     _verifiedAt = null;
     _quantity.text = '1';
@@ -210,13 +202,11 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
           _checkoutAccount.invalidate();
           _checkoutAccount = BuyerAccountScope(repo.session);
           _identityEpoch = repo.session.identityEpoch;
-          _reminderCooldown.clear(notify: false);
           _selection = null;
           _feedback = null;
           _feedbackError = false;
           _busy = false;
           _saving = false;
-          _reminding = false;
           _image = 0;
           _verifiedAt = null;
           _quantity.text = '1';
@@ -283,7 +273,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
             _selection = null;
             _busy = false;
             _saving = false;
-            _reminding = false;
           } else if (_selection != null) {
             s.page = WebPage(
               s.page.component,
@@ -570,65 +559,9 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _reminder() async {
-    if (_selection == null ||
-        !await _ensureCurrentAccount() ||
-        !mounted ||
-        _selection == null ||
-        !_accountCurrent) {
-      return;
-    }
-    if (_reminderCooldown.active) return;
-    final selection = s;
-    if (selection.page.isCached) return;
-    if (selection.page.user == null) {
-      _login();
-      return;
-    }
-    if (_reminding) {
-      return;
-    }
-    final upcoming = mapOf(mapOf(selection.product['sale_offer'])['upcoming']);
-    final state = mapOf(selection.page.props['saleReminder']);
-    final upcomingId = positiveResourceId(upcoming['id']);
-    if (upcomingId == null ||
-        state['delivered'] == true && state['subscribed'] != true) {
-      return;
-    }
-    final epoch = repo.session.identityEpoch;
-    setState(() => _reminding = true);
-    try {
-      final data = await repo.reminder(
-        widget.slug,
-        upcomingId,
-        state['subscribed'] != true,
-      );
-      if (!_mutationIsCurrent(selection, epoch)) {
-        await _recoverAfterSessionChange(epoch);
-        return;
-      }
-      _checkoutAccount.check(page: data);
-      setState(() => selection.page = data);
-    } on BackendException catch (e) {
-      if (_mutationIsCurrent(selection, epoch)) {
-        if (e.status == 429) {
-          _reminderCooldown.start(e.data, retryAt: e.retryAt, notify: false);
-        }
-        _message(e.message, error: true);
-      } else {
-        await _recoverAfterSessionChange(epoch);
-      }
-    } finally {
-      if (mounted && identical(_selection, selection)) {
-        setState(() => _reminding = false);
-      }
-    }
-  }
-
   @override
   void dispose() {
     _checkoutAccount.invalidate();
-    _reminderCooldown.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _updates.dispose();
     _quantity.dispose();
@@ -640,7 +573,7 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => ForegroundRefresh(
     controller: _updates,
-    enabled: _hasSale && !_busy && !_saving && !_reminding,
+    enabled: _hasSale && !_busy && !_saving,
     child: Scaffold(
       appBar: AppBar(
         backgroundColor: BagooTheme.strong,
@@ -1572,9 +1505,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
     final offer = mapOf(s.product['sale_offer']);
     final active = mapOf(offer['active']);
     final upcoming = mapOf(offer['upcoming']);
-    final reminder = _accountCurrent
-        ? mapOf(s.page.props['saleReminder'])
-        : <String, dynamic>{};
     if (active.isEmpty && upcoming.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1600,11 +1530,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               'Ends ${readableDateTime(active['ends_at'])}',
               style: const TextStyle(fontSize: 12),
             ),
-            if (active['kind'] == 'flash')
-              Text(
-                '${active['remaining_quantity']} promotional units remain. Additional units use the price shown at checkout.',
-                style: const TextStyle(fontSize: 12, height: 1.6),
-              ),
           ],
           if (upcoming.isNotEmpty) ...[
             Text(
@@ -1612,31 +1537,6 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             Text('Starts ${readableDateTime(upcoming['starts_at'])}'),
-            TextButton.icon(
-              onPressed:
-                  !_accountCurrent ||
-                      s.page.isCached ||
-                      _reminding ||
-                      _reminderCooldown.active ||
-                      reminder['delivered'] == true &&
-                          reminder['subscribed'] != true
-                  ? null
-                  : _reminder,
-              icon: const Icon(Icons.notifications_outlined),
-              label: Text(
-                _reminding
-                    ? 'Saving…'
-                    : !_accountCurrent
-                    ? 'Refresh to continue'
-                    : _reminderCooldown.active
-                    ? 'Try again in ${_reminderCooldown.remainingSeconds}s'
-                    : reminder['subscribed'] == true
-                    ? 'Remove reminder'
-                    : reminder['delivered'] == true
-                    ? 'Reminder sent'
-                    : 'Remind me',
-              ),
-            ),
           ],
           SaleClock(
             offer: offer,

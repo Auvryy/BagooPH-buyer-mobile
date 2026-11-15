@@ -76,11 +76,7 @@ class PriceSegments extends StatelessWidget {
     children: [
       for (final segment in segments)
         Text(
-          '${segment['quantity']} × ${pesos(segment['unit_price'])} = ${pesos(segment['subtotal'])}${segment['sale_kind'] == 'flash'
-              ? ' · Flash'
-              : segment['sale_kind'] == 'store'
-              ? ' · Sale'
-              : ''}',
+          '${segment['quantity']} × ${pesos(segment['unit_price'])} = ${pesos(segment['subtotal'])}${segment['sale_kind'] == 'store' ? ' · Sale' : ''}',
           style: const TextStyle(fontSize: 13, height: 1.7),
         ),
     ],

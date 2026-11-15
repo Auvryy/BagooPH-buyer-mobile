@@ -42,28 +42,6 @@ class DelayedSaveRepository extends FakeBuyerRepository {
   Future<bool> saveProduct(int id, bool saved) => pendingSave.future;
 }
 
-class DelayedReminderRepository extends FakeBuyerRepository {
-  final pendingReminder = Completer<WebPage>();
-
-  @override
-  Future<WebPage> reminder(String slug, int id, bool subscribed) =>
-      pendingReminder.future;
-}
-
-class RateLimitedReminderRepository extends FakeBuyerRepository {
-  int reminderCalls = 0;
-
-  @override
-  Future<WebPage> reminder(String slug, int id, bool subscribed) async {
-    reminderCalls++;
-    throw BackendException(
-      'Too many attempts. Please wait before trying again.',
-      status: 429,
-      retryAt: DateTime.now().add(const Duration(seconds: 30)),
-    );
-  }
-}
-
 WebPage salePage({String name = 'Sale product'}) => productPage(
   signedIn: true,
   override: {
@@ -74,24 +52,6 @@ WebPage salePage({String name = 'Sale product'}) => productPage(
     },
   },
 );
-
-WebPage reminderPage({required bool signedIn, bool subscribed = false}) {
-  final page = productPage(
-    signedIn: signedIn,
-    override: {
-      'sale_offer': {
-        'server_now': '2026-10-28T00:00:00Z',
-        'upcoming': {
-          'id': 12,
-          'name': 'Upcoming offer',
-          'starts_at': '2030-01-01T00:00:00Z',
-        },
-      },
-    },
-  );
-  page.props['saleReminder'] = {'subscribed': subscribed};
-  return page;
-}
 
 void main() {
   testWidgets('sale reads pause behind routes and while backgrounded', (
@@ -239,77 +199,6 @@ void main() {
     expect(find.byTooltip('Remove from saved'), findsNothing);
     expect(find.byTooltip('Sign in to save'), findsOneWidget);
     expect(repo.productCalls, 2);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets(
-    'a late reminder reply cannot restore prior buyer reminder state',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(800, 1000);
-      addTearDown(tester.view.reset);
-      final repo = DelayedReminderRepository()
-        ..signedIn = true
-        ..productResponse = reminderPage(signedIn: true);
-      addTearDown(repo.session.close);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: BagooTheme.light,
-          home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Remind me'));
-      await tester.tap(find.text('Remind me'));
-      await tester.pump();
-
-      repo
-        ..signedIn = false
-        ..productResponse = reminderPage(signedIn: false);
-      repo.session.clear();
-      repo.pendingReminder.complete(
-        reminderPage(signedIn: true, subscribed: true),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Remove reminder'), findsNothing);
-      expect(find.text('Remind me'), findsOneWidget);
-      expect(repo.productCalls, greaterThan(1));
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-
-  testWidgets('sale reminder honors the server rate-limit deadline', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(800, 1000);
-    addTearDown(tester.view.reset);
-    final repo = RateLimitedReminderRepository()
-      ..signedIn = true
-      ..productResponse = reminderPage(signedIn: true);
-    addTearDown(repo.session.close);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: BagooTheme.light,
-        home: ProductPage(repository: repo, slug: 'everyday-bag-1'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Remind me'));
-    await tester.tap(find.text('Remind me'));
-    await tester.pumpAndSettle();
-
-    final retryButtonFinder = find.ancestor(
-      of: find.textContaining('Try again in'),
-      matching: find.byType(TextButton),
-    );
-    expect(retryButtonFinder, findsOneWidget);
-    final retryButton = tester.widget<TextButton>(retryButtonFinder);
-    expect(retryButton.onPressed, isNull);
-    expect(repo.reminderCalls, 1);
-    expect(find.textContaining('Too many attempts'), findsWidgets);
-    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

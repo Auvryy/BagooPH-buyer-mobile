@@ -609,23 +609,6 @@ class BuyerRepository {
     );
   }
 
-  Future<WebPage> reminder(String slug, int id, bool subscribed) async {
-    if (id < 1) {
-      throw const BackendException('This sale reminder is unavailable.');
-    }
-    final data = await session.submit(
-      '/buyer/sale-reminders/$id',
-      {},
-      method: subscribed ? 'POST' : 'DELETE',
-      referer: '/buyer/product/${Uri.encodeComponent(slug)}',
-    );
-    requireNoErrors(data);
-    if (mapOf(data.props['saleReminder'])['subscribed'] != subscribed) {
-      throw const BackendException('The reminder change was not confirmed.');
-    }
-    return data;
-  }
-
   Future<List<Map<String, dynamic>>> messages(int receiver) async {
     final data = await session.jsonGet('/chat/messages/$receiver');
     final rows = requireRowsWithIds(
