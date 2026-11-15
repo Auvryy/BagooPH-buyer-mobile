@@ -8,6 +8,7 @@ import '../../core/strict_datetime.dart';
 import '../../core/web_session.dart';
 import '../../core/widgets.dart';
 import '../products/product_widgets.dart';
+import 'account_enforcement_notices.dart';
 import 'profile_widgets.dart';
 
 class AccountStatusPage extends StatefulWidget {
@@ -282,6 +283,15 @@ class _AccountStatusPageState extends ProfileFormState<AccountStatusPage>
               const Notice(
                 'Your status changed. Refresh and review the current details before sending another request.',
                 error: true,
+              ),
+            if (mapsOf(_status['active_sanctions']).isNotEmpty ||
+                mapsOf(_status['unpaid_penalties']).isNotEmpty)
+              AccountEnforcementNotices(
+                session: widget.repository.session,
+                sanctions: mapsOf(_status['active_sanctions']),
+                penalties: mapsOf(_status['unpaid_penalties']),
+                disabled: busy,
+                onUpdated: (_) => _load(),
               ),
             for (final source in mapsOf(_status['sources']))
               ProductPanel(

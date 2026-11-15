@@ -14,6 +14,7 @@ import '../products/product_model.dart';
 import '../products/product_widgets.dart';
 import '../profile/order_detail_page.dart';
 import '../profile/profile_repository.dart';
+import '../profile/shipment_finance_page.dart';
 
 int? _paymentCents(Object? value) => value is int && value >= 0 ? value : null;
 
@@ -233,6 +234,35 @@ class _OrderResultPageState extends State<OrderResultPage>
         ),
       ),
     );
+  }
+
+  Future<void> _openShipmentFinanceUrl(String href) async {
+    if (!_ensureAccount() || _busy || !href.startsWith('/shipment-finances')) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final page = await widget.repository.document(href);
+      widget.repository.requireNoErrors(page);
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ShipmentFinancePage(
+              repository: ProfileRepository(widget.repository),
+              initial: page,
+              account: widget.account,
+            ),
+          ),
+        );
+      }
+    } on BackendException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _refresh({int? number}) async {
@@ -650,6 +680,16 @@ class _OrderResultPageState extends State<OrderResultPage>
                             ),
                         ],
                       ),
+                    ),
+                  if (payment.isNotEmpty &&
+                      (mapOf(payment['shipment_finances']).isNotEmpty ||
+                          payment['shipment_financial_url'] != null))
+                    ShipmentFinanceLinksPanel(
+                      value: mapOf(payment['shipment_finances']),
+                      fallbackUrl: payment['shipment_financial_url']
+                          ?.toString(),
+                      disabled: _busy,
+                      onOpenUrl: _openShipmentFinanceUrl,
                     ),
                   if (orders.isNotEmpty) ...[
                     const ProductHeading('Your recent orders'),

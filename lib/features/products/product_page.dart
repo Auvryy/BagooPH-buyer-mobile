@@ -1900,6 +1900,29 @@ class _ProductPageState extends State<ProductPage> with WidgetsBindingObserver {
                           readableDate(r['created_at']),
                           style: const TextStyle(fontSize: 11),
                         ),
+                        if (r['score_excluded'] == true ||
+                            r['moderation_status'] == 'excluded_courier_issue')
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: const Color(0xFFFCD34D),
+                              ),
+                            ),
+                            child: const Text(
+                              'Excluded from product score (Delivery issue)',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
