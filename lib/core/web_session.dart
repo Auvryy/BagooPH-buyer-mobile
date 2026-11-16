@@ -286,6 +286,23 @@ class WebSession {
       referer: referer,
       files: files,
     );
+    // Some website actions answer a background request with
+    // {success, redirect} JSON instead of the next page. Follow that redirect
+    // (same site only) so the flashed result is read from the real page.
+    if (response.body.trimLeft().startsWith('{')) {
+      final data = _json(response.body);
+      final redirect = data['redirect'];
+      if (data['component'] == null &&
+          data['success'] == true &&
+          redirect is String) {
+        final target = Uri.tryParse(redirect);
+        if (target != null && target.path.startsWith('/')) {
+          return page(
+            target.hasQuery ? '${target.path}?${target.query}' : target.path,
+          );
+        }
+      }
+    }
     return _readPage(response);
   }
 
