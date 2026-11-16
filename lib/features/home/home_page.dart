@@ -16,6 +16,7 @@ import 'home_controller.dart';
 import 'browse_controls.dart';
 import 'catalogue_loading.dart';
 import 'product_card.dart';
+import 'bag_heart.dart';
 import 'search_page.dart';
 import 'search_controller.dart';
 import 'search_filters.dart';
@@ -1342,36 +1343,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _home.user?['role'] == 'buyer' &&
       _home.user?['status'] == 'active' &&
       ['approved', 'verified'].contains(_home.user?['kyc_status']);
+  // Like the website, the card heart adds one to the Bag; a filled heart opens the Bag.
+  bool get _canBag =>
+      _home.user?['role'] == 'buyer' &&
+      ['active', 'pending_approval'].contains(_home.user?['status']);
   Widget _card(Map<String, dynamic> product) {
     final id = product['id'] as int;
-    final saved = positiveResourceIds(_home.data?.props['savedProductIds'])
-        .contains(id);
+    final inBag = bagLineFor(_home.data?.props, id) != null;
+    final available = bagHeartChoice(product).available;
     return ProductCard(
       product: product,
       session: widget.repository.session,
       onTap: () => _openProduct(product),
-      saved: saved,
+      saved: inBag,
       saving: _saving.contains(id),
       error: _saveErrors[id],
       saveLabel: _home.loading
           ? 'Updating products'
-          : _home.error != null
-          ? 'Refresh to save'
           : _home.data?.isCached == true
-          ? 'Connect to save'
+          ? 'Connect to add to Bag'
           : _home.user == null
-          ? 'Sign in to save'
-          : !_canSave
-          ? 'Approval required'
-          : saved
-          ? 'Remove from saved'
-          : 'Save product',
-      onSave:
-          _home.loading || _home.error != null || _home.data?.isCached == true
+          ? 'Sign in to add to Bag'
+          : bagHeartLabel(inBag: inBag, available: available),
+      onSave: _home.loading || _home.data?.isCached == true
           ? null
           : _home.user == null
           ? widget.onLogin
-          : !_canSave
+          : inBag
+          ? () => _selectTab(1)
+          : !_canBag || !available
           ? null
           : () async {
               setState(() {
@@ -1379,21 +1379,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _saveErrors.remove(id);
               });
               try {
-                await widget.repository.saveProduct(id, !saved);
-                if (!mounted) {
-                  return;
-                }
-                final ids = positiveResourceIds(
-                  _home.data?.props['savedProductIds'],
+                await addHeartToBag(
+                  widget.repository,
+                  product,
+                  _home.data?.props,
                 );
-                if (saved) {
-                  ids.remove(id);
-                } else {
-                  ids.add(id);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Added to Bag: ${product['name']}')),
+                  );
                 }
-                setState(
-                  () => _home.data?.props['savedProductIds'] = ids.toList(),
-                );
               } on BackendException catch (e) {
                 if (mounted) {
                   setState(() => _saveErrors[id] = e.message);

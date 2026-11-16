@@ -88,6 +88,21 @@ class _ShopMisuseRepository extends BuyerRepository {
     saveCalls++;
     return pendingSave?.future ?? Future<bool>.value(saved);
   }
+
+  // The card heart adds to the Bag (like the website); it shares the save counters.
+  @override
+  Future<WebPage> addToBag(
+    Map<String, dynamic> product,
+    int quantity, {
+    String? color,
+    String? size,
+    bool buyNow = false,
+    int previousQuantity = 0,
+  }) async {
+    saveCalls++;
+    await (pendingSave?.future ?? Future<bool>.value(true));
+    return const WebPage('Buyer/ProductDetail', {});
+  }
 }
 
 void main() {
@@ -422,7 +437,7 @@ void main() {
     );
   }
 
-  testWidgets('rapid retained save taps submit only once', (tester) async {
+  testWidgets('rapid retained heart taps submit only once', (tester) async {
     final session = ControlledWebSession();
     final repository = _ShopMisuseRepository(session)
       ..pendingSave = Completer<bool>();
@@ -436,7 +451,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.byTooltip('Save product'),
+      find.byTooltip('Add one to Bag'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
@@ -452,7 +467,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a late save reply cannot retain the previous buyer state', (
+  testWidgets('a late heart reply cannot retain the previous buyer state', (
     tester,
   ) async {
     final session = ControlledWebSession();
@@ -468,7 +483,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.byTooltip('Save product'),
+      find.byTooltip('Add one to Bag'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
@@ -482,8 +497,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.shopCalls, 2);
-    expect(find.byTooltip('Sign in to save'), findsOneWidget);
-    expect(find.byTooltip('Remove from saved'), findsNothing);
+    expect(find.byTooltip('Sign in to add to Bag'), findsOneWidget);
+    expect(find.byTooltip('In your Bag · open Bag'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }
