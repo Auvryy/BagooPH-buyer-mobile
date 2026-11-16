@@ -15,6 +15,7 @@ import '../products/product_widgets.dart';
 import 'search_controller.dart';
 import 'search_filters.dart';
 import 'product_card.dart';
+import 'bag_heart.dart';
 import 'browse_controls.dart';
 import 'catalogue_loading.dart';
 
@@ -207,27 +208,30 @@ class _SearchPageState extends State<SearchPage> {
     if (mounted) await _catalogue.load();
   }
 
-  bool get _canSave =>
+  // Like the website, the card heart adds one to the Bag; a filled heart opens the Bag.
+  bool get _canBag =>
       _catalogue.user?['role'] == 'buyer' &&
-      _catalogue.user?['status'] == 'active' &&
-      ['approved', 'verified'].contains(_catalogue.user?['kyc_status']);
-  Future<void> _save(Map<String, dynamic> product, bool saved) async {
+      ['active', 'pending_approval'].contains(_catalogue.user?['status']);
+  Future<void> _heart(Map<String, dynamic> product, bool inBag) async {
     if (_catalogue.data?.isCached == true) return;
     if (_catalogue.user == null) {
       BuyerActions.login(context, productSlug: product['slug'].toString());
+      return;
+    }
+    if (inBag) {
+      openBag(context, widget.repository);
       return;
     }
     final id = product['id'] as int;
     if (_saving.contains(id)) return;
     setState(() => _saving.add(id));
     try {
-      await widget.repository.saveProduct(id, !saved);
-      if (!mounted) return;
-      final ids = positiveResourceIds(
-        _catalogue.data?.props['savedProductIds'],
-      );
-      saved ? ids.remove(id) : ids.add(id);
-      setState(() => _catalogue.data?.props['savedProductIds'] = ids.toList());
+      await addHeartToBag(widget.repository, product, _catalogue.data?.props);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Added to Bag: ${product['name']}')),
+        );
+      }
     } on BackendException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -240,34 +244,30 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _card(Map<String, dynamic> product) {
     final id = product['id'] as int;
-    final saved = positiveResourceIds(_catalogue.data?.props['savedProductIds'])
-        .contains(id);
+    final inBag = bagLineFor(_catalogue.data?.props, id) != null;
+    final available = bagHeartChoice(product).available;
     return ProductCard(
       product: product,
       session: widget.repository.session,
       onTap: () => _open(product),
-      saved: saved,
+      saved: inBag,
       saving: _saving.contains(id),
       saveLabel: _catalogue.loading
           ? 'Updating products'
           : _catalogue.error != null
-          ? 'Refresh to save'
+          ? 'Refresh to add to Bag'
           : _catalogue.data?.isCached == true
-          ? 'Connect to save'
+          ? 'Connect to add to Bag'
           : _catalogue.user == null
-          ? 'Sign in to save'
-          : !_canSave
-          ? 'Approval required'
-          : saved
-          ? 'Remove from saved'
-          : 'Save product',
+          ? 'Sign in to add to Bag'
+          : bagHeartLabel(inBag: inBag, available: available),
       onSave:
           _catalogue.loading ||
               _catalogue.error != null ||
               _catalogue.data?.isCached == true ||
-              _catalogue.user != null && !_canSave
+              (_catalogue.user != null && !inBag && (!_canBag || !available))
           ? null
-          : () => _save(product, saved),
+          : () => _heart(product, inBag),
     );
   }
 

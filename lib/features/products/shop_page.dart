@@ -12,6 +12,7 @@ import '../../core/catalogue_pages.dart';
 import '../home/search_controller.dart';
 import '../checkout/bag_page.dart';
 import '../home/product_card.dart';
+import '../home/bag_heart.dart';
 import 'product_model.dart';
 import 'product_page.dart';
 import 'product_widgets.dart';
@@ -616,13 +617,19 @@ class _ShopPageState extends State<ShopPage> {
                     itemBuilder: (context, i) {
                       final product = _products[i];
                       final id = product['id'] as int;
-                      final saved = positiveResourceIds(
-                        _page?.props['savedProductIds'],
-                      ).contains(id);
+                      // Like the website, the card heart adds one to the Bag.
+                      final inBag = bagLineFor(_page?.props, id) != null;
+                      final available = bagHeartChoice(product).available;
+                      final canBag =
+                          _page?.user?['role'] == 'buyer' &&
+                          [
+                            'active',
+                            'pending_approval',
+                          ].contains(_page?.user?['status']);
                       return ProductCard(
                         product: product,
                         session: widget.repository.session,
-                        saved: saved,
+                        saved: inBag,
                         saving: _saving.contains(id),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
@@ -633,13 +640,12 @@ class _ShopPageState extends State<ShopPage> {
                           ),
                         ),
                         saveLabel: _page?.user == null
-                            ? 'Sign in to save'
-                            : !_eligible
-                            ? 'Approval required'
-                            : saved
-                            ? 'Remove from saved'
-                            : 'Save product',
-                        onSave: _page?.user != null && !_eligible
+                            ? 'Sign in to add to Bag'
+                            : bagHeartLabel(inBag: inBag, available: available),
+                        onSave:
+                            _page?.user != null &&
+                                !inBag &&
+                                (!canBag || !available)
                             ? null
                             : () async {
                                 if (_saving.contains(id)) return;
@@ -658,13 +664,18 @@ class _ShopPageState extends State<ShopPage> {
                                   );
                                   return;
                                 }
+                                if (inBag) {
+                                  openBag(context, widget.repository);
+                                  return;
+                                }
                                 final session = widget.repository.session;
                                 final epoch = session.identityEpoch;
                                 setState(() => _saving.add(id));
                                 try {
-                                  await widget.repository.saveProduct(
-                                    id,
-                                    !saved,
+                                  await addHeartToBag(
+                                    widget.repository,
+                                    product,
+                                    _page?.props,
                                   );
                                   if (!mounted) return;
                                   if (epoch != session.identityEpoch) {
@@ -672,13 +683,13 @@ class _ShopPageState extends State<ShopPage> {
                                     return;
                                   }
                                   if (mounted) {
-                                    final ids = positiveResourceIds(
-                                      _page?.props['savedProductIds'],
-                                    );
-                                    saved ? ids.remove(id) : ids.add(id);
-                                    setState(
-                                      () => _page?.props['savedProductIds'] =
-                                          ids.toList(),
+                                    setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Added to Bag: ${product['name']}',
+                                        ),
+                                      ),
                                     );
                                   }
                                 } on BackendException catch (e) {
