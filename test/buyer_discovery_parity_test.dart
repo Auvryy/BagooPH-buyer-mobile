@@ -477,6 +477,8 @@ void main() {
       expect(find.text('Claimed'), findsOneWidget);
       expect(find.text('Claim'), findsOneWidget);
       expect(find.text('Ends in'), findsOneWidget);
+      // Only two vouchers here, so nothing is folded away.
+      expect(find.textContaining('Show all'), findsNothing);
       await tester.scrollUntilVisible(
         find.text('Wireless headphones'),
         200,

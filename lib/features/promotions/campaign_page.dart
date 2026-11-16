@@ -58,6 +58,10 @@ class _CampaignPageState extends State<CampaignPage> {
   bool _claimingAll = false;
   int? _category;
   bool _reloading = false;
+  bool _showAllVouchers = false;
+
+  /// The event shows its best three vouchers first; the rest open on request.
+  static const _topVouchers = 3;
 
   Map<String, dynamic> get _campaign => mapOf(_page.props['campaign']);
   List<Map<String, dynamic>> get _vouchers => mapsOf(_page.props['vouchers'])
@@ -299,7 +303,10 @@ class _CampaignPageState extends State<CampaignPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  for (final voucher in _vouchers)
+                  for (final voucher
+                      in _showAllVouchers
+                          ? _vouchers
+                          : _vouchers.take(_topVouchers))
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _VoucherCard(
@@ -309,6 +316,25 @@ class _CampaignPageState extends State<CampaignPage> {
                           positiveResourceId(voucher['id']),
                         ),
                         onClaim: () => _claim(voucher),
+                      ),
+                    ),
+                  if (_vouchers.length > _topVouchers)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => setState(
+                          () => _showAllVouchers = !_showAllVouchers,
+                        ),
+                        icon: Icon(
+                          _showAllVouchers
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                        ),
+                        label: Text(
+                          _showAllVouchers
+                              ? 'Show fewer vouchers'
+                              : 'Show all ${_vouchers.length} vouchers',
+                        ),
                       ),
                     ),
                   const Text(
