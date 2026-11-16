@@ -163,4 +163,52 @@ void main() {
       expect(reads, 1);
     },
   );
+
+  test('a {success, redirect} JSON reply to a submit opens the redirect page', () async {
+    final seen = <String>[];
+    String html(String component) =>
+        '<html><head><meta name="csrf-token" content="t"></head><body><div id="app" data-page="${const HtmlEscape().convert(jsonEncode({
+          'component': component,
+          'props': {
+            'flash': {'success': 'Order placed.'},
+          },
+          'url': '/',
+          'version': 'v1',
+        }))}"></div></body></html>';
+    server.listen((request) async {
+      seen.add('${request.method} ${request.uri.path}');
+      if (request.method == 'POST') {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'success': true,
+            'message': 'Order placed.',
+            'redirect': 'https://elsewhere.example/buyer/orders',
+          }),
+        );
+      } else if (request.headers.value('X-Inertia') == 'true') {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'component': request.uri.path == '/buyer/orders'
+                ? 'Buyer/Orders'
+                : 'Auth/Login',
+            'props': {
+              'flash': {'success': 'Order placed.'},
+            },
+            'url': request.uri.path,
+            'version': 'v1',
+          }),
+        );
+      } else {
+        request.response.headers.contentType = ContentType.html;
+        request.response.write(html('Auth/Login'));
+      }
+      await request.response.close();
+    });
+    final page = await session.submit('/checkout', {'a': '1'});
+    expect(page.component, 'Buyer/Orders');
+    // Only the path is followed: the request stays on this site.
+    expect(seen.last, 'GET /buyer/orders');
+  });
 }

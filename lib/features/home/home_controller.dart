@@ -20,8 +20,15 @@ class HomeController extends ChangeNotifier {
       _knownUser = initial?.user,
       _knownEpoch = repository.session.identityEpoch {
     if (initial != null) {
-      _accept(initial, requestedPage: 1);
-      _acceptedRequest = ('', '', 'relevance', currentPage);
+      try {
+        _accept(initial, requestedPage: 1);
+        _acceptedRequest = ('', '', 'relevance', currentPage);
+      } on BackendException {
+        // A page that fails its checks must not crash the screen: start empty
+        // so the normal load runs and shows its own message with a retry.
+        data = null;
+        products = [];
+      }
     }
   }
   final BuyerRepository repository;
@@ -285,7 +292,7 @@ class HomeController extends ChangeNotifier {
       feed,
       rowCount: rows.length,
       requestedPage: requestedPage,
-      pageSize: 18,
+      pageSize: homeFeedPageSize(feed),
     );
     if (pagination == null) {
       throw const BackendException(

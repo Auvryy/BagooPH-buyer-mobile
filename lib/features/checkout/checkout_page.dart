@@ -1950,14 +1950,18 @@ class _CheckoutPageState extends State<CheckoutPage>
         ),
         _field('landmark', 'Landmark (optional)', required: false),
         const Text(
-          'Delivery coordinates (optional)',
+          'Map pin (optional)',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
+          padding: EdgeInsets.only(top: 4, bottom: 8),
           child: Text(
-            'Pin the recipient’s location only. The address and available delivery route are checked separately.',
-            style: TextStyle(fontSize: 12, height: 1.7),
+            'Helps the rider find the door. Use it only at the delivery address.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.5,
+              color: BagooTheme.muted,
+            ),
           ),
         ),
         OutlinedButton.icon(
@@ -1975,23 +1979,35 @@ class _CheckoutPageState extends State<CheckoutPage>
               style: const TextStyle(fontSize: 12, height: 1.7),
             ),
           ),
-        _field(
-          'shipping_latitude',
-          'Latitude',
-          required: false,
-          keyboard: const TextInputType.numberWithOptions(
-            decimal: true,
-            signed: true,
-          ),
-        ),
-        _field(
-          'shipping_longitude',
-          'Longitude',
-          required: false,
-          keyboard: const TextInputType.numberWithOptions(
-            decimal: true,
-            signed: true,
-          ),
+        const SizedBox(height: 8),
+        // Latitude and longitude side by side: one row instead of two tall fields.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _field(
+                'shipping_latitude',
+                'Latitude',
+                required: false,
+                keyboard: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _field(
+                'shipping_longitude',
+                'Longitude',
+                required: false,
+                keyboard: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+              ),
+            ),
+          ],
         ),
         _field('notes', 'Delivery notes (optional)', required: false),
         if (_address == 'new')
@@ -2060,28 +2076,12 @@ class _CheckoutPageState extends State<CheckoutPage>
                 key: _contentKey,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const ProductPanel(
+                  // Step bar only: the app bar already says Checkout.
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Checkout details',
-                          style: TextStyle(
-                            fontSize: 25,
-                            fontWeight: FontWeight.w800,
-                            height: 1.3,
-                          ),
-                        ),
-                        SizedBox(height: 12),
-                        Text(
-                          'Choose delivery and payment. You’ll review everything before placing your order.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 1.7,
-                            color: BagooTheme.muted,
-                          ),
-                        ),
-                        SizedBox(height: 16),
                         Wrap(
                           spacing: 12,
                           runSpacing: 8,
