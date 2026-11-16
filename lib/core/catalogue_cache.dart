@@ -302,7 +302,10 @@ Map<String, dynamic>? _publicProps(WebPage page) {
   switch (page.component) {
     case 'Buyer/Home':
       if (p['feedProducts'] is! Map) return null;
-      final feed = _paginator(p['feedProducts'], pageSize: 18);
+      final feed = _paginator(
+        p['feedProducts'],
+        pageSize: homeFeedPageSize(p['feedProducts']),
+      );
       if (feed == null) return null;
       return {
         'feedProducts': feed,

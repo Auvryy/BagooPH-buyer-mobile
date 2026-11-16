@@ -127,3 +127,10 @@ PaginationMetadata? parsePaginationMetadata(
     to: to,
   );
 }
+
+/// The home feed served 18 products per page and now serves 24 (fills 2, 3,
+/// 4 and 6 columns). Accept either so the app works on both server versions.
+int homeFeedPageSize(dynamic feed) {
+  final size = mapOf(feed)['per_page'];
+  return size == 24 ? 24 : 18;
+}

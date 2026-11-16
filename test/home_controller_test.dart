@@ -204,7 +204,7 @@ void main() {
     ('last_page', 99),
     ('total', -1),
     ('total', 9223372036854775807),
-    ('per_page', 24),
+    ('per_page', 30),
     ('from', '1'),
     ('to', 2),
   ]) {

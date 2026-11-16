@@ -178,7 +178,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (widget.initial != null && widget.initial!.component != 'Buyer/Home') {
       _tab = 3;
       _visited.add(3);
-    } else if (widget.initial == null || widget.initial!.isCached) {
+    } else if (widget.initial == null ||
+        widget.initial!.isCached ||
+        _home.data == null) {
+      // _home.data is null when the initial page failed its checks.
       _home.load();
     }
   }
