@@ -794,63 +794,67 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buyerUtilities() => Wrap(
-    spacing: 8,
-    runSpacing: 0,
-    children: [
-      TextButton.icon(
-        onPressed: _openingFilters ? null : _advancedFilters,
-        icon: const Icon(Icons.tune_rounded, size: 18),
-        label: const Text('Filters'),
-      ),
-      TextButton.icon(
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          textStyle: const TextStyle(
-            fontFamily: 'Plus Jakarta Sans',
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-          ),
+  // One compact scrolling row instead of a wrapped block, so products show sooner.
+  Widget _buyerUtilities() => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        TextButton.icon(
+          onPressed: _openingFilters ? null : _advancedFilters,
+          icon: const Icon(Icons.tune_rounded, size: 18),
+          label: const Text('Filters'),
         ),
-        onPressed: _openingTracking ? null : _openTracking,
-        icon: const Icon(Icons.local_shipping_outlined, size: 18),
-        label: const Text('Track a parcel'),
-      ),
-      TextButton.icon(
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          textStyle: const TextStyle(
-            fontFamily: 'Plus Jakarta Sans',
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        onPressed: () {
-          final user = _home.user;
-          if (user == null) {
-            widget.onLogin();
-            return;
-          }
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => SupportAssistantPage(
-                repository: widget.repository,
-                user: user,
-                available: _canSave,
-              ),
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            textStyle: const TextStyle(
+              fontFamily: 'Plus Jakarta Sans',
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
             ),
-          );
-        },
-        icon: const Icon(Icons.help_outline, size: 18),
-        label: const Text('Help & Support'),
-      ),
-    ],
+          ),
+          onPressed: _openingTracking ? null : _openTracking,
+          icon: const Icon(Icons.local_shipping_outlined, size: 18),
+          label: const Text('Track a parcel'),
+        ),
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            textStyle: const TextStyle(
+              fontFamily: 'Plus Jakarta Sans',
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          onPressed: () {
+            final user = _home.user;
+            if (user == null) {
+              widget.onLogin();
+              return;
+            }
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SupportAssistantPage(
+                  repository: widget.repository,
+                  user: user,
+                  available: _canSave,
+                ),
+              ),
+            );
+          },
+          icon: const Icon(Icons.help_outline, size: 18),
+          label: const Text('Help & Support'),
+        ),
+      ],
+    ),
   );
 
   Widget _departments({required bool inline}) {
-    const heading = Text(
-      'Shop by department',
-      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+    // The chips explain themselves; the heading is kept for screen readers only.
+    final heading = Semantics(
+      header: true,
+      label: 'Shop by department',
+      child: SizedBox.shrink(),
     );
     final strip = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -884,7 +888,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           )
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [heading, const SizedBox(height: 10), strip],
+            children: [heading, strip],
           );
   }
 
@@ -902,23 +906,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(horizontal, 20, horizontal, 0),
+              padding: EdgeInsets.fromLTRB(horizontal, 8, horizontal, 0),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'Discover local finds',
-                      style: TextStyle(
-                        fontSize: 23,
-                        height: 1.3,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -.5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                     _buyerUtilities(),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 4),
                     SizedBox(
                       height: 4,
                       child: _home.loading
@@ -971,15 +965,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             'impression',
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                       ],
                       if (_home.categories.isNotEmpty) ...[
                         _departments(inline: roomy),
                         if (_home.subcategories.isNotEmpty) ...[
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 8),
                           _subcategoryStrip(),
                         ],
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 12),
                       ],
                       if (_buyerApplication case final application?) ...[
                         _buyerApplicationPanel(application),
