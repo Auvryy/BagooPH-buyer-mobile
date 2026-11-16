@@ -390,27 +390,70 @@ void main() {
 
       final campaignWebPage = WebPage('Buyer/Campaign', {
         'auth': {'user': buyer},
+        'serverNow': '2026-12-01T00:00:00Z',
         'campaign': {
+          'id': 3,
           'slug': 'christmas-gala',
           'title': 'Christmas Gala Deals',
           'badge': 'HOLIDAY SPECIAL',
-          'vouchers': [
-            {
-              'code': 'XMAS100',
-              'title': 'Holiday Voucher',
-              'discount': '₱100 OFF',
-              'min_spend': 'Min. spend ₱500',
-              'badge': 'EVENT VOUCHER',
-              'is_saved': false,
-            },
-          ],
+          'banner_url': null,
+          'starts_at': '2026-11-30T00:00:00Z',
+          'ends_at': '2026-12-02T01:02:03Z',
+          'status': 'live',
         },
+        'vouchers': [
+          {
+            'id': 7,
+            'code': 'XMAS100',
+            'discount_type': 'fixed',
+            'discount_value': 100,
+            'min_spend': 500,
+            'max_discount': 100,
+            'issuer': 'platform',
+            'claim_limit': 50,
+            'claimed_count': 10,
+            'sold_out': false,
+            'claimed': false,
+          },
+          {
+            'id': 8,
+            'code': 'XMASSHIP',
+            'discount_type': 'free_shipping',
+            'discount_value': 50,
+            'min_spend': 0,
+            'max_discount': 50,
+            'issuer': 'shop',
+            'shop_name': 'Bagoo Crafts',
+            'claim_limit': null,
+            'claimed_count': 3,
+            'sold_out': false,
+            'claimed': true,
+          },
+        ],
         'products': [
           {
-            ...product(1),
-            'price': '399.00',
+            'sale_id': 9,
+            'id': 1,
+            'name': 'Wireless headphones',
+            'slug': 'wireless-headphones',
+            'image': null,
+            'regular_price': 1000,
+            'price': 750,
             'discount_pct': 25,
-            'event_badge': 'MEGA DEAL',
+            'live': true,
+            'shop': {'id': 2, 'name': 'TechCore'},
+            'category': {'id': 5, 'name': 'Electronics'},
+          },
+        ],
+        'categories': [
+          {'id': 5, 'name': 'Electronics'},
+        ],
+        'allCampaigns': [
+          {
+            'slug': 'christmas-gala',
+            'title': 'Christmas Gala Deals',
+            'badge': 'HOLIDAY SPECIAL',
+            'status': 'live',
           },
         ],
       });
@@ -421,17 +464,36 @@ void main() {
           home: CampaignPage(repository: repo, initial: campaignWebPage),
         ),
       );
-      await tester.pumpAndSettle();
+      // The countdown ticks every second, so step time instead of waiting to settle.
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(tester.takeException(), isNull);
       expect(find.text('Christmas Gala Deals'), findsWidgets);
       expect(find.text('HOLIDAY SPECIAL'), findsOneWidget);
       expect(find.text('XMAS100'), findsOneWidget);
-      expect(find.text('MEGA DEAL'), findsOneWidget);
-
-      await tester.tap(find.text('Claim voucher'));
-      await tester.pumpAndSettle();
+      expect(find.text('₱100 off'), findsOneWidget);
+      expect(find.text('40 of 50 left'), findsOneWidget);
+      expect(find.text('₱50 off shipping'), findsOneWidget);
       expect(find.text('Claimed'), findsOneWidget);
+      expect(find.text('Claim'), findsOneWidget);
+      expect(find.text('Ends in'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Wireless headphones'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('-25%'), findsOneWidget);
+      expect(find.text('₱750.00'), findsOneWidget);
+      expect(find.text('₱1,000.00'), findsOneWidget);
+      expect(
+        remainingOnServerClock(
+          DateTime.parse('2026-12-02T01:02:03Z'),
+          DateTime.parse('2026-12-01T00:00:00Z'),
+          DateTime(2030),
+          DateTime(2030).add(const Duration(seconds: 3)),
+        ),
+        const Duration(days: 1, hours: 1, minutes: 2),
+      );
 
       final topProductsWebPage = WebPage('Buyer/TopProducts', {
         'auth': {'user': buyer},
